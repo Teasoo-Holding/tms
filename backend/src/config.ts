@@ -50,8 +50,8 @@ export const config = {
   localStorageSigningSecret: required('LOCAL_STORAGE_SIGNING_SECRET', 'dev-media-secret'),
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000',
   s3: {
-    // "assets" is the private bucket declared in neon.ts.
-    bucket: process.env.S3_BUCKET ?? (neonStorageEndpoint ? 'assets' : 'tms-media'),
+    // "tree-image" is the private bucket declared in neon.ts.
+    bucket: process.env.S3_BUCKET ?? (neonStorageEndpoint ? 'tree-image' : 'tms-media'),
     region: process.env.S3_REGION ?? process.env.AWS_REGION ?? 'us-east-1',
     endpoint: process.env.S3_ENDPOINT || neonStorageEndpoint || undefined,
     publicEndpoint: process.env.S3_PUBLIC_ENDPOINT || undefined,

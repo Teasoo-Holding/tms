@@ -63,7 +63,7 @@ which the backend loads automatically (variables already in the process environm
 | Service | Status | Used by |
 |---|---|---|
 | Postgres (PostGIS available) | Provisioned | Backend `pg` pool on the pooled `DATABASE_URL`; migrations and seed use `DATABASE_URL_UNPOOLED` |
-| Object Storage, bucket `assets` | Provisioned, verified end to end | Photo upload/verification/download (`AWS_*` vars select the S3 driver, path-style) |
+| Object Storage, bucket `tree-image` | Provisioned, verified end to end | Photo upload/verification/download (`AWS_*` vars select the S3 driver, path-style) |
 | Functions (`hello`) | Deployed, responds | Sample only |
 | Neon Auth | Provisioned | Not used yet — the app keeps its own sign-in |
 | AI Gateway | Disabled in `neon.ts` | Requires a paid Neon plan |

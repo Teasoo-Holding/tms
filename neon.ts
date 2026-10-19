@@ -9,7 +9,8 @@ export default defineConfig({
   },
   buckets: {
     // "private" is the default; use "public_read" for anonymous reads
-    assets: { access: "private" },
+    // Tree photos. Private: the API hands out short-lived presigned URLs.
+    "tree-image": { access: "private" },
   },
   // Branch policy: per-branch tuning
   branch: (branch) => {
