@@ -54,6 +54,29 @@ cd android
 ./gradlew :app:assembleRelease -PtmsApiBaseUrl=https://api.example.org/ -PtmsMapStyleUrl=https://…
 ```
 
+## Neon (cloud backend)
+
+The repo is linked to Neon project `icy-recipe-66236245`, branch `production` (`.neon`, git-ignored). `neon.ts`
+declares the services; `neon deploy` provisions them and writes their variables to the repo-root `.env.local`,
+which the backend loads automatically (variables already in the process environment win).
+
+| Service | Status | Used by |
+|---|---|---|
+| Postgres (PostGIS available) | Provisioned | Backend `pg` pool on the pooled `DATABASE_URL`; migrations and seed use `DATABASE_URL_UNPOOLED` |
+| Object Storage, bucket `assets` | Provisioned, verified end to end | Photo upload/verification/download (`AWS_*` vars select the S3 driver, path-style) |
+| Functions (`hello`) | Deployed, responds | Sample only |
+| Neon Auth | Provisioned | Not used yet — the app keeps its own sign-in |
+| AI Gateway | Disabled in `neon.ts` | Requires a paid Neon plan |
+
+```bash
+npm ci                       # repo root: @neon/config for neon.ts
+neon deploy                  # provision neon.ts and refresh .env.local
+cd backend && npm run migrate && npm run seed   # needs direct TCP access to Neon (port 5432)
+```
+
+If your shell already exports `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` for another account, unset them when
+running the backend locally, or the Neon credentials in `.env.local` are ignored.
+
 ## Tests
 
 ```bash

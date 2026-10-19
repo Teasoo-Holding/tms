@@ -4,7 +4,7 @@ import { Client } from 'pg';
 import { config } from '../config';
 
 /** Applies migrations/*.sql in order, each in its own transaction, recording them in schema_migrations. */
-export async function migrate(databaseUrl = config.databaseUrl, log = console.log) {
+export async function migrate(databaseUrl = config.migrationDatabaseUrl, log = console.log) {
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   try {

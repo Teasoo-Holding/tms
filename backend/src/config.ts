@@ -1,16 +1,25 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-/** Loads .env (if present) without overriding variables already set by the platform. */
+/**
+ * Loads dotenv files without overriding variables already set by the platform. Earlier files win:
+ * backend/.env, backend/.env.local, then the repo-root .env.local that `neon deploy` / `neon env pull` write.
+ */
 function loadDotEnv() {
-  const file = path.resolve(process.cwd(), '.env');
-  if (!fs.existsSync(file)) return;
-  for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
-    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (match && process.env[match[1]] === undefined) process.env[match[1]] = match[2];
+  const files = ['.env', '.env.local', '../.env.local'].map((f) => path.resolve(process.cwd(), f));
+  for (const file of files) {
+    if (!fs.existsSync(file)) continue;
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+      if (!match || process.env[match[1]] !== undefined) continue;
+      process.env[match[1]] = match[2].replace(/^(['"])(.*)\1$/, '$2');
+    }
   }
 }
 loadDotEnv();
+
+// Neon Object Storage injects AWS-standard variables; their presence selects it as the photo store.
+const neonStorageEndpoint = process.env.AWS_ENDPOINT_URL_S3;
 
 function required(name: string, devDefault?: string): string {
   const value = process.env[name];
@@ -28,21 +37,26 @@ function num(name: string, fallback: number): number {
 
 export const config = {
   port: num('PORT', 3000),
+  /** Pooled connection for application traffic. */
   databaseUrl: required('DATABASE_URL', 'postgres://tms:tms@localhost:5432/tms'),
+  /** Direct (unpooled) connection for migrations, which PgBouncer's transaction mode can break. */
+  migrationDatabaseUrl: process.env.DATABASE_URL_UNPOOLED || required('DATABASE_URL', 'postgres://tms:tms@localhost:5432/tms'),
   jwtAccessSecret: required('JWT_ACCESS_SECRET', 'dev-access-secret'),
   accessTokenTtlSeconds: num('ACCESS_TOKEN_TTL_SECONDS', 900),
   refreshTokenTtlDays: num('REFRESH_TOKEN_TTL_DAYS', 30),
   offlineSessionDays: num('OFFLINE_SESSION_DAYS', 7),
-  storageDriver: (process.env.STORAGE_DRIVER ?? 'local') as 'local' | 's3',
+  storageDriver: (process.env.STORAGE_DRIVER ?? (neonStorageEndpoint ? 's3' : 'local')) as 'local' | 's3',
   localStorageDir: process.env.LOCAL_STORAGE_DIR ?? './var/media',
   localStorageSigningSecret: required('LOCAL_STORAGE_SIGNING_SECRET', 'dev-media-secret'),
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://localhost:3000',
   s3: {
-    bucket: process.env.S3_BUCKET ?? 'tms-media',
-    region: process.env.S3_REGION ?? 'us-east-1',
-    endpoint: process.env.S3_ENDPOINT || undefined,
+    // "assets" is the private bucket declared in neon.ts.
+    bucket: process.env.S3_BUCKET ?? (neonStorageEndpoint ? 'assets' : 'tms-media'),
+    region: process.env.S3_REGION ?? process.env.AWS_REGION ?? 'us-east-1',
+    endpoint: process.env.S3_ENDPOINT || neonStorageEndpoint || undefined,
     publicEndpoint: process.env.S3_PUBLIC_ENDPOINT || undefined,
-    forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
+    // Neon requires path-style addressing.
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true' || !!neonStorageEndpoint,
   },
   mediaMaxBytes: num('MEDIA_MAX_BYTES', 15 * 1024 * 1024),
   uploadUrlTtlSeconds: num('UPLOAD_URL_TTL_SECONDS', 600),

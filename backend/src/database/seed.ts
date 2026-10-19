@@ -7,7 +7,7 @@ import { hashPassword } from '../auth/passwords';
  * demo administrator already exists. Status definitions are the PRD's suggested set and must
  * be confirmed by project stakeholders before go-live.
  */
-export async function seed(databaseUrl = config.databaseUrl, log = console.log) {
+export async function seed(databaseUrl = config.migrationDatabaseUrl, log = console.log) {
   if (process.env.NODE_ENV === 'production') throw new Error('Refusing to seed demo data in production.');
   const db = new Client({ connectionString: databaseUrl });
   await db.connect();
