@@ -10,6 +10,7 @@ administrators and executives, and a NestJS + PostGIS backend with a sync gatewa
 | [`android/`](android) | TMS Field app | Kotlin, Jetpack Compose, Room, WorkManager, CameraX, MapLibre |
 | [`spec/`](spec) | Tree-ID test vectors shared by backend and Android tests | JSON |
 | [`docs/`](docs) | PRD, architecture, OpenAPI contract, decisions, operations | |
+| [`app/`](app) (repo root Gradle project) | Earlier standalone Android prototype (`com.example.teasoo_tms`), kept as-is. Independent of `android/` | Kotlin, Room |
 
 ## Documents
 
