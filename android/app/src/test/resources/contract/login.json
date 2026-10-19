@@ -1,0 +1,13 @@
+{
+ "access_token": "redacted",
+ "access_token_expires_in": 900,
+ "refresh_token": "redacted",
+ "refresh_token_expires_at": "2026-11-18T12:59:05.067Z",
+ "offline_valid_until": "2026-10-26T12:59:05.068Z",
+ "user": {
+  "id": "c1214037-59d8-4484-9339-790407deaa52",
+  "email": "officer@tms.local",
+  "full_name": "Femi Field Officer",
+  "role": "FIELD_OFFICER"
+ }
+}

@@ -1,0 +1,88 @@
+package com.teasoo.tms.ui.screens
+
+import android.content.Context
+import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import com.teasoo.tms.data.local.TmsDatabase
+import com.teasoo.tms.data.repo.RegistrationException
+import com.teasoo.tms.data.repo.TreeRepository
+import com.teasoo.tms.sync.SyncScheduler
+import com.teasoo.tms.ui.AppViewModel
+import com.teasoo.tms.ui.components.*
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import java.time.LocalDate
+import javax.inject.Inject
+
+@HiltViewModel
+class EditTreeViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val db: TmsDatabase,
+    private val trees: TreeRepository,
+    saved: SavedStateHandle,
+) : ViewModel() {
+    private val treeId: String = checkNotNull(saved["treeId"])
+    val species = db.reference().species().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val speciesId = MutableStateFlow<String?>(null)
+    val plantedOn = MutableStateFlow<LocalDate?>(null)
+    val notes = MutableStateFlow("")
+    val physicalId = MutableStateFlow("")
+    val error = MutableStateFlow<String?>(null)
+
+    init {
+        viewModelScope.launch {
+            db.trees().get(treeId)?.let { t ->
+                speciesId.value = t.speciesId
+                plantedOn.value = t.plantedOn?.let(LocalDate::parse)
+                notes.value = t.notes.orEmpty()
+                physicalId.value = t.physicalTreeId
+            }
+        }
+    }
+
+    fun save(onDone: () -> Unit) = viewModelScope.launch {
+        try {
+            trees.updateTree(treeId, speciesId.value, plantedOn.value?.toString(), notes.value.ifBlank { null })
+            SyncScheduler.syncNow(context)
+            onDone()
+        } catch (e: RegistrationException) {
+            error.value = e.message
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditTreeScreen(app: AppViewModel, onDone: () -> Unit, vm: EditTreeViewModel = hiltViewModel()) {
+    val species by vm.species.collectAsStateWithLifecycle()
+    val speciesId by vm.speciesId.collectAsStateWithLifecycle()
+    val plantedOn by vm.plantedOn.collectAsStateWithLifecycle()
+    val notes by vm.notes.collectAsStateWithLifecycle()
+    val physicalId by vm.physicalId.collectAsStateWithLifecycle()
+    val error by vm.error.collectAsStateWithLifecycle()
+    Scaffold(topBar = {
+        TopAppBar(title = { Text("Edit tree") }, navigationIcon = { IconButton(onClick = onDone) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
+    }) { padding ->
+        Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TreeIdText(physicalId, "")
+            Text("The tree ID, planting year and area cannot be edited here. Ask an administrator for an ID correction.", style = MaterialTheme.typography.bodySmall)
+            Picker("Species", species, species.find { it.id == speciesId }, { it.commonName ?: it.scientificName }, { vm.speciesId.value = it.id })
+            DateField("Planted on", plantedOn, { vm.plantedOn.value = it })
+            OutlinedTextField(notes, { vm.notes.value = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Button(onClick = { vm.save(onDone) }, modifier = Modifier.fillMaxWidth()) { Text("Save on this device") }
+        }
+    }
+}

@@ -1,0 +1,283 @@
+package com.teasoo.tms.ui.screens
+
+import android.content.Context
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import com.teasoo.tms.data.local.*
+import com.teasoo.tms.data.repo.*
+import com.teasoo.tms.data.session.SessionStore
+import com.teasoo.tms.sync.SyncScheduler
+import com.teasoo.tms.ui.AppViewModel
+import com.teasoo.tms.ui.components.*
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import javax.inject.Inject
+
+data class RegisterForm(
+    val yearId: String? = null,
+    val sectorId: String? = null,
+    val subSectorId: String? = null,
+    val vendorId: String? = null,
+    val speciesId: String? = null,
+    val statusId: String? = null,
+    val serial: String = "",
+    val plantedOn: LocalDate? = LocalDate.now(),
+    val observedOn: LocalDate = LocalDate.now(),
+    val notes: String = "",
+    val remarks: String = "",
+    val confirmed: Boolean = false,
+    val photos: List<CapturedPhoto> = emptyList(),
+)
+
+@OptIn(ExperimentalCoroutinesApi::class)
+@HiltViewModel
+class RegisterViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val db: TmsDatabase,
+    private val trees: TreeRepository,
+    private val session: SessionStore,
+    val photoStore: PhotoStore,
+    saved: SavedStateHandle,
+) : ViewModel() {
+    val replacesTreeId: String? = saved["replaces"]
+    private val ref = db.reference()
+    val form = MutableStateFlow(RegisterForm())
+    private val projectId = MutableStateFlow<String?>(null)
+
+    val replacing = flow { emit(replacesTreeId?.let { db.trees().get(it) }) }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val years = projectId.filterNotNull().flatMapLatest { ref.years(it) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val sectors = projectId.filterNotNull().flatMapLatest { ref.sectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val subSectors = projectId.filterNotNull().flatMapLatest { ref.subSectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val species = ref.species().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val statuses = ref.statuses().map { l -> l.filter { it.active && !it.isTerminal } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val vendors = ref.vendors().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val assignments = ref.assignments().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val prefix = MutableStateFlow<Result<PrefixInfo>?>(null)
+    val serialCheck = MutableStateFlow<SerialCheck?>(null)
+    val saveError = MutableStateFlow<String?>(null)
+    val saving = MutableStateFlow(false)
+
+    fun setProject(id: String) {
+        if (projectId.value == id) return
+        projectId.value = id
+        viewModelScope.launch {
+            // A replacement is planted in the original's area by default.
+            replacing.first { replacesTreeId == null || it != null }?.let { t ->
+                form.update { it.copy(sectorId = t.sectorId, subSectorId = t.subSectorId) }
+            }
+            val default = ref.statuses().first().firstOrNull { it.code == "PLANTED" }
+            form.update { it.copy(statusId = it.statusId ?: default?.id) }
+            refresh()
+        }
+    }
+
+    fun update(change: (RegisterForm) -> RegisterForm) {
+        val before = form.value
+        form.update { change(it).let { n -> if (n.serial != before.serial || n.subSectorId != before.subSectorId || n.yearId != before.yearId || n.vendorId != before.vendorId) n.copy(confirmed = false) else n } }
+        viewModelScope.launch { refresh() }
+    }
+
+    private fun area(): AreaSelection? {
+        val f = form.value
+        return AreaSelection(projectId.value ?: return null, f.yearId ?: return null, f.sectorId ?: return null, f.subSectorId ?: return null, f.vendorId)
+    }
+
+    val vendorNeeded = MutableStateFlow(false)
+
+    private suspend fun refresh() {
+        val pid = projectId.value ?: return
+        val scheme = ref.activeScheme(pid)
+        vendorNeeded.value = scheme?.let { s -> s.componentsJson.contains("VENDOR_CODE") || s.serialScopeJson.contains("VENDOR") } ?: false
+        val a = area()
+        if (a == null) {
+            prefix.value = null; serialCheck.value = null; return
+        }
+        prefix.value = runCatching { trees.prefix(a) }
+        val info = prefix.value?.getOrNull()
+        serialCheck.value = if (info != null && form.value.serial.isNotBlank()) trees.checkSerial(a, info, form.value.serial, session.userId().orEmpty()) else null
+    }
+
+    fun addPhoto(p: CapturedPhoto) = form.update { it.copy(photos = it.photos + p) }
+    fun removePhoto(p: CapturedPhoto) {
+        photoStore.discard(p)
+        form.update { it.copy(photos = it.photos - p) }
+    }
+
+    fun save(onSaved: (String) -> Unit) = viewModelScope.launch {
+        val a = area() ?: return@launch
+        val f = form.value
+        val ok = serialCheck.value as? SerialCheck.Ok ?: return@launch
+        saving.value = true
+        saveError.value = null
+        try {
+            val id = trees.register(
+                NewTree(
+                    area = a, speciesId = f.speciesId ?: throw RegistrationException("Choose a species."),
+                    serialInput = f.serial, confirmedPhysicalId = ok.assembled.physicalId,
+                    statusId = f.statusId ?: throw RegistrationException("Choose a status."),
+                    observedAt = observedInstant(f.observedOn), plantedOn = f.plantedOn?.toString(),
+                    notes = f.notes.ifBlank { null }, remarks = f.remarks.ifBlank { null }, photos = f.photos,
+                    replacesTreeId = replacesTreeId,
+                ),
+                session.userId() ?: throw RegistrationException("Sign in again to save."),
+            )
+            saved = true
+            SyncScheduler.syncNow(context)
+            onSaved(id)
+        } catch (e: RegistrationException) {
+            saveError.value = e.message
+        } finally {
+            saving.value = false
+        }
+    }
+
+    private var saved = false
+
+    /** Leaving without saving must not orphan photo files; saved photos belong to the record. */
+    override fun onCleared() {
+        if (!saved) form.value.photos.forEach(photoStore::discard)
+    }
+}
+
+/** Today means "now"; a past date records midday local time on that date. */
+fun observedInstant(date: LocalDate): Instant =
+    if (date == LocalDate.now()) Instant.now() else date.atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant()
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Unit, vm: RegisterViewModel = hiltViewModel()) {
+    val projectId by app.selectedProjectId.collectAsStateWithLifecycle()
+    LaunchedEffect(projectId) { projectId?.let(vm::setProject) }
+    val f by vm.form.collectAsStateWithLifecycle()
+    val years by vm.years.collectAsStateWithLifecycle()
+    val sectors by vm.sectors.collectAsStateWithLifecycle()
+    val subSectors by vm.subSectors.collectAsStateWithLifecycle()
+    val species by vm.species.collectAsStateWithLifecycle()
+    val statuses by vm.statuses.collectAsStateWithLifecycle()
+    val vendors by vm.vendors.collectAsStateWithLifecycle()
+    val assignments by vm.assignments.collectAsStateWithLifecycle()
+    val prefix by vm.prefix.collectAsStateWithLifecycle()
+    val check by vm.serialCheck.collectAsStateWithLifecycle()
+    val error by vm.saveError.collectAsStateWithLifecycle()
+    val saving by vm.saving.collectAsStateWithLifecycle()
+    val vendorNeeded by vm.vendorNeeded.collectAsStateWithLifecycle()
+    val replacing by vm.replacing.collectAsStateWithLifecycle()
+    var camera by remember { mutableStateOf(false) }
+
+    // Only areas the officer is assigned to (the server enforces this too).
+    val grants = assignments.filter { it.projectId == projectId }
+    val mySectors = sectors.filter { s -> grants.any { it.sectorId == null || it.sectorId == s.id } }
+    val mySubs = subSectors.filter { ss -> ss.sectorId == f.sectorId && grants.any { (it.sectorId == null || it.sectorId == ss.sectorId) && (it.subSectorId == null || it.subSectorId == ss.id) } }
+    val status = statuses.find { it.id == f.statusId }
+    val photoMissing = status?.requiresPhoto == true && f.photos.isEmpty()
+
+    Scaffold(topBar = {
+        TopAppBar(
+            title = { Text(if (vm.replacesTreeId != null) "Plant a replacement" else "Register a tree") },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+        )
+    }) { padding ->
+        Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            replacing?.let { Notice("Replacing ${it.physicalTreeId}. The replacement gets its own new ID and planting year; the original keeps its history.") }
+
+            Picker("Planting year", years, years.find { it.id == f.yearId }, { it.yearLabel + if (it.active) "" else " (closed)" }, { y -> vm.update { it.copy(yearId = y.id) } },
+                supportingText = "Choose the cohort on the label, not today’s year")
+            Picker("Sector", mySectors, mySectors.find { it.id == f.sectorId }, { "${it.shortCode} · ${it.name}" }, { s -> vm.update { it.copy(sectorId = s.id, subSectorId = null) } })
+            Picker("Sub-sector", mySubs, mySubs.find { it.id == f.subSectorId }, { "${it.shortCode} · ${it.name}" }, { s -> vm.update { it.copy(subSectorId = s.id) } }, enabled = f.sectorId != null)
+            if (vendorNeeded) {
+                Picker("Vendor", vendors, vendors.find { it.id == f.vendorId }, { listOfNotNull(it.shortCode, it.name).joinToString(" · ") }, { v -> vm.update { it.copy(vendorId = v.id) } })
+            }
+
+            HorizontalDivider()
+            Text("Tree ID", style = MaterialTheme.typography.titleMedium)
+            when (val p = prefix) {
+                null -> Text("Choose the planting year and area to see the ID prefix.", style = MaterialTheme.typography.bodyMedium)
+                else -> p.fold(
+                    onSuccess = { info ->
+                        val ok = check as? SerialCheck.Ok
+                        TreeIdText(info.prefix, ok?.assembled?.serial ?: "_".repeat(info.serialWidth))
+                        OutlinedTextField(
+                            value = f.serial,
+                            onValueChange = { v -> vm.update { it.copy(serial = v.filter(Char::isDigit).take(info.serialWidth)) } },
+                            label = { Text("Serial number on the label") },
+                            supportingText = { Text("Digits only, up to ${info.serialWidth}. Leading zeros are added for you.") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            singleLine = true,
+                            isError = check != null && check !is SerialCheck.Ok,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        when (val c = check) {
+                            is SerialCheck.Invalid -> Text(c.message, color = MaterialTheme.colorScheme.error)
+                            is SerialCheck.NotAllocated -> Text(c.message, color = MaterialTheme.colorScheme.error)
+                            is SerialCheck.LocalDuplicate -> Text("${c.physicalId} is already registered on this device. Check the label.", color = MaterialTheme.colorScheme.error)
+                            is SerialCheck.Ok -> Row {
+                                Checkbox(f.confirmed, { v -> vm.update { it.copy(confirmed = v) } })
+                                Text("I compared ${c.assembled.physicalId} with the physical label and it matches.", Modifier.padding(top = 12.dp))
+                            }
+                            null -> {}
+                        }
+                        if (check is SerialCheck.Ok) {
+                            Text("Other devices that are offline cannot be checked; the server confirms uniqueness when you sync.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    },
+                    onFailure = { Text(it.message ?: "The ID format is unavailable.", color = MaterialTheme.colorScheme.error) },
+                )
+            }
+
+            HorizontalDivider()
+            Picker("Species", species, species.find { it.id == f.speciesId }, { it.commonName?.let { c -> "$c (${it.scientificName})" } ?: it.scientificName }, { s -> vm.update { it.copy(speciesId = s.id) } })
+            Picker("Status", statuses, status, { it.name }, { s -> vm.update { it.copy(statusId = s.id) } })
+            DateField("Planted on", f.plantedOn, { d -> vm.update { it.copy(plantedOn = d) } })
+            DateField("Observed on", f.observedOn, { d -> vm.update { it.copy(observedOn = d ?: LocalDate.now()) } }, allowClear = false)
+            OutlinedTextField(f.remarks, { v -> vm.update { it.copy(remarks = v) } }, label = { Text("Observation remarks") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(f.notes, { v -> vm.update { it.copy(notes = v) } }, label = { Text("Tree notes") }, modifier = Modifier.fillMaxWidth())
+            Text("No GPS is recorded for the tree; its location is the sub-sector.", style = MaterialTheme.typography.bodySmall)
+
+            PhotoRow(f.photos, onAdd = { camera = true }, onRemove = vm::removePhoto, required = photoMissing)
+
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Button(
+                onClick = { vm.save(onDone) },
+                enabled = !saving && check is SerialCheck.Ok && f.confirmed && f.speciesId != null && f.statusId != null && !photoMissing,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (saving) "Saving…" else "Save on this device") }
+        }
+    }
+    if (camera) CameraCaptureDialog(vm.photoStore, onCaptured = { vm.addPhoto(it); camera = false }, onDismiss = { camera = false })
+}
+
+@Composable
+fun PhotoRow(photos: List<CapturedPhoto>, onAdd: () -> Unit, onRemove: (CapturedPhoto) -> Unit, required: Boolean) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Photos (${photos.size})", style = MaterialTheme.typography.titleSmall)
+        photos.forEachIndexed { i, p ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Photo ${i + 1} · ${p.byteSize / 1024} KB", Modifier.padding(top = 12.dp))
+                TextButton(onClick = { onRemove(p) }) { Text("Remove") }
+            }
+        }
+        if (required) Text("This status requires a photo.", color = MaterialTheme.colorScheme.error)
+        OutlinedButton(onClick = onAdd) { Text("Take photo") }
+    }
+}

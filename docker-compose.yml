@@ -1,0 +1,63 @@
+# Local full stack for development and demos. Production uses managed PostgreSQL/PostGIS,
+# managed S3-compatible object storage and a managed secrets service (see docs/operations.md).
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: tms
+      POSTGRES_PASSWORD: tms
+      POSTGRES_DB: tms
+    ports: ["5432:5432"]
+    volumes: [db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tms"]
+      interval: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: tms-minio
+      MINIO_ROOT_PASSWORD: tms-minio-secret
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [media:/data]
+
+  minio-init:
+    image: minio/mc:RELEASE.2024-11-21T17-21-54Z
+    depends_on: [minio]
+    entrypoint: >
+      sh -c "until mc alias set local http://minio:9000 tms-minio tms-minio-secret; do sleep 1; done;
+             mc mb --ignore-existing local/tms-media && mc version enable local/tms-media"
+
+  api:
+    build: ./backend
+    depends_on:
+      db: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://tms:tms@db:5432/tms
+      JWT_ACCESS_SECRET: dev-only-access-secret
+      LOCAL_STORAGE_SIGNING_SECRET: dev-only-media-secret
+      STORAGE_DRIVER: s3
+      S3_BUCKET: tms-media
+      S3_REGION: us-east-1
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_FORCE_PATH_STYLE: "true"
+      AWS_ACCESS_KEY_ID: tms-minio
+      AWS_SECRET_ACCESS_KEY: tms-minio-secret
+      CORS_ORIGINS: http://localhost:8080
+      PUBLIC_BASE_URL: http://localhost:8080
+    command: sh -c "node dist/database/migrate.js && node dist/main.js"
+    ports: ["3000:3000"]
+
+  web:
+    build: ./web
+    depends_on: [api]
+    ports: ["8080:80"]
+
+volumes:
+  db:
+  media:

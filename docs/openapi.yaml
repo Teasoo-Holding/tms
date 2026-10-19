@@ -1,0 +1,432 @@
+openapi: 3.1.0
+info:
+  title: Tree Management System API
+  version: 1.0.0
+  description: |
+    HTTPS API and sync gateway for TMS Phase 1. All paths are under `/api/v1`. Every endpoint except
+    login, refresh, logout and health requires `Authorization: Bearer <access token>`; role, project
+    and area authorisation is enforced server-side.
+
+    Errors use `{ code, message, details? }`. `message` is written for the end user and says what to do next.
+servers:
+  - url: /api/v1
+security:
+  - bearer: []
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, examples: [VALIDATION_FAILED, FORBIDDEN, TOKEN_EXPIRED] }
+        message: { type: string }
+        details: {}
+    Tokens:
+      type: object
+      required: [access_token, refresh_token, offline_valid_until, user]
+      properties:
+        access_token: { type: string }
+        access_token_expires_in: { type: integer, description: seconds }
+        refresh_token: { type: string, description: Rotating; reuse of a spent token revokes the whole family. }
+        refresh_token_expires_at: { type: string, format: date-time }
+        offline_valid_until: { type: string, format: date-time, description: End of the offline access window; the device must revalidate online after this. }
+        user: { $ref: '#/components/schemas/User' }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string }
+        full_name: { type: string }
+        role: { enum: [ADMIN, FIELD_OFFICER, EXECUTIVE] }
+    GeoJsonPolygon:
+      type: object
+      description: WGS 84 (EPSG:4326) longitude/latitude; validated with PostGIS ST_IsValid.
+      required: [type, coordinates]
+      properties:
+        type: { const: Polygon }
+        coordinates: { type: array, items: { type: array, items: { type: array, items: { type: number } } } }
+    Area:
+      type: object
+      required: [name, short_code, reference_latitude, reference_longitude]
+      properties:
+        name: { type: string }
+        short_code: { type: string, pattern: '^[A-Za-z0-9]{1,16}$' }
+        description: { type: [string, 'null'] }
+        reference_latitude: { type: number, minimum: -90, maximum: 90 }
+        reference_longitude: { type: number, minimum: -180, maximum: 180 }
+        boundary: { oneOf: [{ $ref: '#/components/schemas/GeoJsonPolygon' }, { type: 'null' }] }
+        active: { type: boolean }
+    IdScheme:
+      type: object
+      required: [components, separator, serial_width, serial_uniqueness_scope]
+      properties:
+        components:
+          type: array
+          description: Ordered; SERIAL must be last and required.
+          items:
+            type: object
+            properties:
+              type: { enum: [PROJECT_CODE, PLANTING_YEAR, VENDOR_CODE, SECTOR_CODE, SUB_SECTOR_CODE, SERIAL] }
+              required: { type: boolean }
+        separator: { enum: ['-', '_', '/', '.', ''] }
+        serial_width: { type: integer, minimum: 1, maximum: 12 }
+        serial_uniqueness_scope:
+          type: array
+          description: Empty array means serials are unique globally.
+          items: { enum: [PROJECT, PLANTING_YEAR, VENDOR, SECTOR, SUB_SECTOR] }
+    CreateTree:
+      type: object
+      required: [id, project_id, planting_year_id, sector_id, sub_sector_id, species_id, id_scheme_id, serial_input, initial_observation]
+      description: No tree-level GPS is accepted or required.
+      properties:
+        id: { type: string, format: uuid, description: Generated on the device; idempotency key. }
+        project_id: { type: string, format: uuid }
+        planting_year_id: { type: string, format: uuid }
+        sector_id: { type: string, format: uuid }
+        sub_sector_id: { type: string, format: uuid }
+        species_id: { type: string, format: uuid }
+        vendor_id: { type: [string, 'null'], format: uuid }
+        id_scheme_id: { type: string, format: uuid, description: The scheme version the device used (may since be superseded). }
+        serial_input: { type: string, description: Digits from the label; zero-padded by the server. }
+        physical_tree_id: { type: string, description: Full ID the officer confirmed; must equal the assembled ID. }
+        id_component_values: { type: object, additionalProperties: { type: [string, 'null'] }, description: Codes the device assembled the prefix from. }
+        replaces_tree_id: { type: [string, 'null'], format: uuid }
+        planted_on: { type: [string, 'null'], format: date }
+        notes: { type: [string, 'null'] }
+        client_recorded_at: { type: string, format: date-time }
+        initial_observation:
+          type: object
+          required: [id, status_id, observed_at]
+          properties:
+            id: { type: string, format: uuid }
+            status_id: { type: string, format: uuid }
+            observed_at: { type: string, format: date-time }
+            remarks: { type: [string, 'null'] }
+    Observation:
+      type: object
+      required: [id, observed_status_id, observed_at]
+      properties:
+        id: { type: string, format: uuid }
+        tree_id: { type: string, format: uuid }
+        observed_status_id: { type: string, format: uuid }
+        observed_at: { type: string, format: date-time }
+        recorded_at: { type: string, format: date-time }
+        remarks: { type: [string, 'null'] }
+        amends_observation_id: { type: [string, 'null'], format: uuid, description: Set for audited corrections; the original is kept and marked superseded. }
+        amendment_reason: { type: [string, 'null'] }
+    OperationResult:
+      type: object
+      required: [status]
+      properties:
+        operation_id: { type: string, format: uuid }
+        status: { enum: [ACCEPTED, ALREADY_PROCESSED, CONFLICT, REJECTED] }
+        original_status: { enum: [ACCEPTED, CONFLICT, REJECTED], description: For ALREADY_PROCESSED, the outcome of the first submission. }
+        code:
+          type: string
+          examples: [DUPLICATE_PHYSICAL_ID, DUPLICATE_SERIAL, DUPLICATE_REPLACEMENT, REVISION_MISMATCH, ID_MISMATCH, AREA_NOT_ASSIGNED, SERIAL_NOT_ALLOCATED, ORIGINAL_NOT_REPLACEABLE, TREE_NOT_FOUND]
+        message: { type: string }
+        entity_id: { type: string, format: uuid }
+        entity: { type: object, description: Current server state of the entity. }
+        conflict_id: { type: string, format: uuid }
+        existing_entity_id: { type: string, format: uuid }
+    Operation:
+      type: object
+      required: [operation_id, entity_type, entity_id, operation_type, client_recorded_at, payload]
+      properties:
+        operation_id: { type: string, format: uuid, description: Idempotency key; retries return the stored result. }
+        entity_type: { enum: [tree, observation] }
+        entity_id: { type: string, format: uuid }
+        operation_type: { enum: [create, update, observation, amendment] }
+        base_revision: { type: [integer, 'null'], description: Required for tree updates (optimistic concurrency). }
+        client_recorded_at: { type: string, format: date-time }
+        payload: { type: object, description: 'CreateTree; {id, changes{species_id, vendor_id, planted_on, notes}}; or Observation.' }
+    MediaVerification:
+      type: object
+      properties:
+        media_id: { type: string, format: uuid }
+        upload_state: { enum: [PENDING, VERIFIED, FAILED] }
+        failure_reason: { enum: [OBJECT_MISSING, SIZE_MISMATCH, CHECKSUM_MISMATCH, null] }
+        checksum_sha256: { type: string }
+        byte_size: { type: integer }
+        remote_verified_at: { type: [string, 'null'], format: date-time }
+        association_verified_at: { type: [string, 'null'], format: date-time }
+        safe_to_delete_local_copy: { type: boolean }
+  responses:
+    Error:
+      description: Error
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+paths:
+  /auth/login:
+    post:
+      summary: Authenticate (rate limited). Registers or updates the device when device_id is sent.
+      security: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+                device_id: { type: string, format: uuid }
+                device_name: { type: string }
+                app_version: { type: string }
+      responses:
+        '200': { description: Tokens, content: { application/json: { schema: { $ref: '#/components/schemas/Tokens' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/refresh:
+    post:
+      summary: Rotate the refresh token.
+      security: []
+      requestBody: { content: { application/json: { schema: { type: object, properties: { refresh_token: { type: string } } } } } }
+      responses:
+        '200': { description: New tokens, content: { application/json: { schema: { $ref: '#/components/schemas/Tokens' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post: { summary: Revoke the session family, security: [], responses: { '204': { description: Signed out } } }
+  /auth/me:
+    get: { summary: Current user, responses: { '200': { description: User, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } } } }
+
+  /mobile/bootstrap:
+    get:
+      summary: Assigned projects, ID schemes, planting years, areas (with boundaries), reference data and a change cursor.
+      description: Read in one REPEATABLE READ snapshot, so the cursor is consistent with the data.
+      responses: { '200': { description: Bootstrap payload } }
+  /mobile/trees:
+    get:
+      summary: Trees (and observations) in the caller's area scope, keyset-paginated.
+      parameters:
+        - { name: project_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: after_id, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 1000, default: 500 } }
+      responses: { '200': { description: '{ trees, observations, next_after_id }' } }
+  /sync/batches:
+    post:
+      summary: Submit outbox operations. Applied in order, each in its own transaction, with item-level results.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, operations]
+              properties:
+                device_id: { type: string, format: uuid }
+                operations: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Operation' } }
+      responses:
+        '200':
+          description: Results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batch_id: { type: string, format: uuid }
+                  server_time: { type: string, format: date-time }
+                  results: { type: array, items: { $ref: '#/components/schemas/OperationResult' } }
+  /sync/changes:
+    get:
+      summary: Authorised changes after a server-issued cursor (gap-free, in commit order).
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 2000 } }
+      responses:
+        '200':
+          description: '{ changes: [{ seq, entity_type, data }], next_cursor, has_more, assignment_fingerprint }. A changed fingerprint means the device should re-bootstrap.'
+
+  /projects:
+    get: { summary: Projects visible to the caller, responses: { '200': { description: Projects } } }
+    post:
+      summary: Create project (admin). physical_id_uniqueness (GLOBAL or PROJECT) must be chosen explicitly and is fixed.
+      responses: { '201': { description: Project }, '400': { $ref: '#/components/responses/Error' } }
+  /projects/{id}:
+    get: { summary: Project with planting years and ID scheme versions, responses: { '200': { description: Project } } }
+    patch: { summary: Update project (admin). Short-code changes affect future IDs only., responses: { '200': { description: Project } } }
+  /projects/{id}/planting-years:
+    post: { summary: Create planting year or cohort (admin), responses: { '201': { description: Planting year } } }
+  /planting-years/{id}:
+    patch: { summary: Open/close or re-date a planting year (admin; the label is fixed), responses: { '200': { description: Planting year } } }
+  /projects/{id}/tree-id-schemes:
+    post:
+      summary: Publish a new ID format version (admin); it becomes current for new registrations.
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/IdScheme' } } } }
+      responses: { '201': { description: Scheme version }, '400': { $ref: '#/components/responses/Error' } }
+  /projects/{id}/areas:
+    get: { summary: Sectors with sub-sectors (GeoJSON boundaries), responses: { '200': { description: Areas } } }
+  /projects/{id}/areas.geojson:
+    get: { summary: GeoJSON export of area boundaries and reference points, responses: { '200': { description: FeatureCollection } } }
+  /projects/{id}/areas/import:
+    post: { summary: All-or-nothing GeoJSON import of sectors and sub-sectors (admin), responses: { '201': { description: '{ created }' } } }
+  /projects/{id}/sectors:
+    post:
+      summary: Create sector (admin)
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Area' } } } }
+      responses: { '201': { description: Sector } }
+  /sectors/{id}:
+    patch: { summary: Update sector (admin), responses: { '200': { description: Sector } } }
+  /sectors/{id}/sub-sectors:
+    post:
+      summary: Create sub-sector (admin). The boundary must lie within the sector boundary.
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Area' } } } }
+      responses: { '201': { description: Sub-sector } }
+  /sub-sectors/{id}:
+    patch: { summary: Update sub-sector (admin), responses: { '200': { description: Sub-sector } } }
+  /tree-species:
+    get: { summary: Species, responses: { '200': { description: Species } } }
+    post: { summary: Create species (admin), responses: { '201': { description: Species } } }
+  /tree-species/{id}:
+    patch: { summary: Update or deactivate species (admin), responses: { '200': { description: Species } } }
+  /tree-statuses:
+    get: { summary: Statuses, responses: { '200': { description: Statuses } } }
+    post: { summary: Create status (admin), responses: { '201': { description: Status } } }
+  /tree-statuses/{id}:
+    patch: { summary: Update or deactivate status (admin; the code is fixed), responses: { '200': { description: Status } } }
+  /vendors:
+    get: { summary: Vendors, responses: { '200': { description: Vendors } } }
+    post: { summary: Create vendor (admin), responses: { '201': { description: Vendor } } }
+  /vendors/{id}:
+    patch: { summary: Update or deactivate vendor (admin), responses: { '200': { description: Vendor } } }
+
+  /trees:
+    get:
+      summary: Search trees in the caller's scope
+      parameters:
+        - { name: project_id, in: query, schema: { type: string } }
+        - { name: planting_year_id, in: query, schema: { type: string } }
+        - { name: sector_id, in: query, schema: { type: string } }
+        - { name: sub_sector_id, in: query, schema: { type: string } }
+        - { name: species_id, in: query, schema: { type: string } }
+        - { name: status_id, in: query, schema: { type: string } }
+        - { name: vendor_id, in: query, schema: { type: string } }
+        - { name: record_state, in: query, schema: { enum: [ACTIVE, CONFLICT, REJECTED] } }
+        - { name: q, in: query, description: Physical ID substring (normalised), schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer } }
+        - { name: offset, in: query, schema: { type: integer } }
+      responses: { '200': { description: '{ items, total, limit, offset }' } }
+    post:
+      summary: Register tree (same rules as a sync create)
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/CreateTree' } } } }
+      responses:
+        '201': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/OperationResult' } } } }
+        '200': { description: Already processed }
+        '409': { description: Conflict (the record is preserved for review) }
+        '422': { description: Rejected }
+  /trees/{id}:
+    get: { summary: Tree with observations, media, replacement lineage and ID history, responses: { '200': { description: Tree } } }
+    patch:
+      summary: Update permitted metadata with base_revision
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [base_revision, changes]
+              properties:
+                base_revision: { type: integer }
+                changes: { type: object, properties: { species_id: { type: string }, vendor_id: { type: [string, 'null'] }, planted_on: { type: [string, 'null'] }, notes: { type: [string, 'null'] } } }
+      responses: { '200': { description: Accepted }, '409': { description: REVISION_MISMATCH } }
+  /trees/{id}/observations:
+    post:
+      summary: Append an observation or an audited amendment
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Observation' } } } }
+      responses: { '201': { description: Accepted }, '422': { description: Rejected } }
+  /trees/{id}/replacements:
+    post:
+      summary: Create a linked replacement tree with a new ID. The original's status must allow replacement.
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/CreateTree' } } } }
+      responses: { '201': { description: Accepted }, '409': { description: DUPLICATE_REPLACEMENT }, '422': { description: Rejected } }
+  /trees/{id}/physical-id-corrections:
+    post:
+      summary: Audited serial correction (admin); the previous ID is kept in history
+      requestBody: { content: { application/json: { schema: { type: object, required: [serial_input, reason], properties: { serial_input: { type: string }, reason: { type: string } } } } } }
+      responses: { '200': { description: Corrected }, '422': { description: Duplicate or invalid } }
+
+  /media/upload-sessions:
+    post:
+      summary: Register photo metadata (idempotent by media_id) and get a short-lived upload URL
+      description: The tree (and observation, if given) must already be synced so the association can be verified.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [media_id, tree_id, checksum_sha256, byte_size, mime_type, captured_at]
+              properties:
+                media_id: { type: string, format: uuid }
+                tree_id: { type: string, format: uuid }
+                observation_id: { type: [string, 'null'], format: uuid }
+                checksum_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+                byte_size: { type: integer }
+                mime_type: { enum: [image/jpeg, image/png, image/webp, image/heic] }
+                captured_at: { type: string, format: date-time }
+      responses:
+        '201': { description: '{ media, already_verified, upload_url, upload_headers, expires_in }' }
+        '409': { description: TREE_NOT_SYNCED or OBSERVATION_NOT_SYNCED }
+  /media/{id}/complete:
+    post:
+      summary: Verify the stored object (exists, size, SHA-256 computed server-side) and its association
+      responses: { '200': { description: Verification, content: { application/json: { schema: { $ref: '#/components/schemas/MediaVerification' } } } } }
+  /media/{id}/view-url:
+    get: { summary: Short-lived signed download URL, responses: { '200': { description: '{ url, expires_in }' } } }
+
+  /conflicts:
+    get: { summary: Conflicts (admin), responses: { '200': { description: Conflicts } } }
+  /conflicts/{id}:
+    get: { summary: Conflict with incoming and existing records (admin), responses: { '200': { description: Conflict } } }
+  /conflicts/{id}/resolve:
+    post:
+      summary: Resolve with an audited decision (admin)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution, notes]
+              properties:
+                resolution: { enum: [REJECT_INCOMING, CORRECT_INCOMING_SERIAL, CORRECT_EXISTING_SERIAL, KEEP_UNLINKED, APPLY_INCOMING_CHANGES, KEEP_EXISTING] }
+                serial_input: { type: string }
+                notes: { type: string }
+      responses: { '201': { description: Resolved } }
+
+  /users:
+    get: { summary: Users (admin), responses: { '200': { description: Users } } }
+    post: { summary: Create user (admin; Argon2id password hashing), responses: { '201': { description: User } } }
+  /users/{id}:
+    patch: { summary: Update user; deactivation, role or password change revokes sessions (admin), responses: { '200': { description: User } } }
+  /assignments:
+    get: { summary: Project/area assignments (admin), responses: { '200': { description: Assignments } } }
+    post: { summary: Assign a user to a project, sector or sub-sector (admin), responses: { '201': { description: Assignment } } }
+  /assignments/{id}/revoke:
+    post: { summary: Revoke assignment (admin), responses: { '201': { description: Assignment } } }
+  /serial-allocations:
+    get: { summary: Pre-allocated serial ranges (admin), responses: { '200': { description: Ranges } } }
+    post: { summary: Allocate a non-overlapping serial range for a scope key (admin), responses: { '201': { description: Range } } }
+  /serial-allocations/{id}/revoke:
+    post: { summary: Revoke range (admin), responses: { '201': { description: Range } } }
+  /devices:
+    get: { summary: Devices with last sync and unverified photo counts (admin), responses: { '200': { description: Devices } } }
+  /devices/{id}/revoke:
+    post: { summary: Revoke a device and its sessions (admin), responses: { '201': { description: Device } } }
+  /audit-logs:
+    get: { summary: Audit log, newest first, keyset-paginated by before_id (admin), responses: { '200': { description: Entries } } }
+
+  /reports/summary:
+    get:
+      summary: Dashboard metrics scoped to the caller (registered trees, not survival rates)
+      parameters:
+        - { name: project_id, in: query, schema: { type: string } }
+        - { name: planting_year_id, in: query, schema: { type: string } }
+        - { name: overdue_days, in: query, schema: { type: integer, default: 90 } }
+      responses: { '200': { description: Summary including last_server_sync_at and data completeness } }
+  /reports/trees.csv:
+    get: { summary: CSV export (formula-injection safe; audited), responses: { '200': { description: CSV } } }
+  /reports/trees.xlsx:
+    get: { summary: Excel export (audited), responses: { '200': { description: XLSX } } }
+  /health:
+    get: { summary: Liveness and database check, security: [], responses: { '200': { description: OK } } }
+  /health/metrics:
+    get: { summary: Operational metrics for monitoring (sync, media, conflicts, devices), responses: { '200': { description: Metrics } } }
