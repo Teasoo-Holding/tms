@@ -8,6 +8,10 @@ plugins {
     alias(libs.plugins.room)
 }
 
+// Release signing comes from environment variables so the keystore and passwords never live in the repo.
+// CI decodes the keystore from a secret; locally, export the same variables before `assembleRelease`.
+val releaseKeystore = System.getenv("TMS_KEYSTORE_FILE")?.let(::file)?.takeIf { it.exists() }
+
 android {
     namespace = "com.teasoo.tms"
     compileSdk = 35
@@ -16,16 +20,30 @@ android {
         applicationId = "com.teasoo.tms.field"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI passes -PtmsVersionCode (must increase with every release) and -PtmsVersionName.
+        versionCode = (project.findProperty("tmsVersionCode") as String?)?.toInt() ?: 1
+        versionName = project.findProperty("tmsVersionName") as String? ?: "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Overridable per build: -PtmsApiBaseUrl=https://api.example.org/ -PtmsMapStyleUrl=https://...
         buildConfigField("String", "API_BASE_URL", "\"${project.findProperty("tmsApiBaseUrl") ?: "http://10.0.2.2:3000/"}\"")
         buildConfigField("String", "MAP_STYLE_URL", "\"${project.findProperty("tmsMapStyleUrl") ?: ""}\"")
     }
 
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("TMS_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("TMS_KEY_ALIAS")
+                keyPassword = System.getenv("TMS_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            // Without a keystore the release build is produced unsigned (it cannot be installed).
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
