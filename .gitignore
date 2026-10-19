@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+.neon
+node_modules/
+.env.local

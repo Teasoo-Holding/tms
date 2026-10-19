@@ -5,6 +5,9 @@ import { randomUUID } from 'crypto';
 
 export const TEST_DB = process.env.TEST_DATABASE_URL ?? 'postgres://tms:tms@localhost:5432/tms_test';
 process.env.DATABASE_URL = TEST_DB;
+// Tests always use the local database and local photo store, even when a Neon .env.local is present.
+process.env.DATABASE_URL_UNPOOLED = TEST_DB;
+process.env.STORAGE_DRIVER = 'local';
 process.env.LOCAL_STORAGE_DIR = `${require('os').tmpdir()}/tms-test-media-${process.pid}`;
 process.env.PUBLIC_BASE_URL = 'http://test.local';
 
