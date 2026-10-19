@@ -35,11 +35,20 @@ async function hashStream(stream: Readable): Promise<{ sha256: string; byteSize:
 }
 
 export class S3Storage implements ObjectStorage {
-  private readonly client = new S3Client({
-    region: config.s3.region,
-    endpoint: config.s3.endpoint,
-    forcePathStyle: config.s3.forcePathStyle,
-  });
+  private readonly client = S3Storage.client(config.s3.endpoint);
+  /** Presigned URLs must name an endpoint devices can reach, which may differ from the internal one. */
+  private readonly presigner = config.s3.publicEndpoint ? S3Storage.client(config.s3.publicEndpoint) : this.client;
+
+  private static client(endpoint?: string) {
+    return new S3Client({
+      region: config.s3.region,
+      endpoint,
+      forcePathStyle: config.s3.forcePathStyle,
+      // Only send checksums we set explicitly; SDK-added CRC headers would break presigned uploads.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
+    });
+  }
 
   async createUploadUrl(key: string, mimeType: string, byteSize: number, sha256: string) {
     const checksum = Buffer.from(sha256, 'hex').toString('base64');
@@ -51,12 +60,12 @@ export class S3Storage implements ObjectStorage {
       // The store itself rejects bytes that do not match the declared checksum.
       ChecksumSHA256: checksum,
     });
-    const url = await getSignedUrl(this.client, command, { expiresIn: config.uploadUrlTtlSeconds });
+    const url = await getSignedUrl(this.presigner, command, { expiresIn: config.uploadUrlTtlSeconds });
     return { url, headers: { 'Content-Type': mimeType, 'x-amz-checksum-sha256': checksum } };
   }
 
   createDownloadUrl(key: string) {
-    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: config.s3.bucket, Key: key }), { expiresIn: 300 });
+    return getSignedUrl(this.presigner, new GetObjectCommand({ Bucket: config.s3.bucket, Key: key }), { expiresIn: 300 });
   }
 
   async inspect(key: string): Promise<StoredObjectInfo> {

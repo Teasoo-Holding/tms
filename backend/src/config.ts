@@ -41,6 +41,7 @@ export const config = {
     bucket: process.env.S3_BUCKET ?? 'tms-media',
     region: process.env.S3_REGION ?? 'us-east-1',
     endpoint: process.env.S3_ENDPOINT || undefined,
+    publicEndpoint: process.env.S3_PUBLIC_ENDPOINT || undefined,
     forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
   },
   mediaMaxBytes: num('MEDIA_MAX_BYTES', 15 * 1024 * 1024),
