@@ -44,6 +44,8 @@ jobs:
       DATABASE_URL_UNPOOLED: ${{ secrets.NEON_DATABASE_URL_UNPOOLED }}
       DATABASE_URL: ${{ secrets.NEON_DATABASE_URL_UNPOOLED }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Check the database secret is set
         run: |
           if [ -z "$DATABASE_URL_UNPOOLED" ]; then
@@ -54,8 +56,6 @@ jobs:
             echo "::error::NEON_DATABASE_URL_UNPOOLED is a pooled URL. Use the direct connection string (no -pooler in the host)."
             exit 1
           fi
-
-      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
