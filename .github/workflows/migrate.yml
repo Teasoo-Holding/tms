@@ -1,0 +1,75 @@
+name: Database migrations
+
+# Applies backend/migrations/*.sql to the Neon production database.
+# Runs on every merge to master that changes migrations or the migration runner, and on demand
+# from the Actions tab. Already-applied migrations are skipped (tracked in schema_migrations).
+#
+# Required repository secret:
+#   NEON_DATABASE_URL_UNPOOLED  direct (non-pooled) connection string of the Neon "production" branch.
+#                               Migrations must not use the pooled (-pooler) URL.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - backend/migrations/**
+      - backend/src/database/**
+      - .github/workflows/migrate.yml
+  workflow_dispatch:
+    inputs:
+      seed_demo_data:
+        description: >-
+          Also load demo data, including demo accounts that share the password ChangeMe!2026.
+          Change or deactivate them immediately after.
+        type: boolean
+        default: false
+
+# Never run two migrations against the same database at once, and never cancel one midway.
+concurrency:
+  group: neon-production-migrations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    # Add required reviewers to this environment (Settings → Environments) to gate production changes.
+    environment: production
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL_UNPOOLED: ${{ secrets.NEON_DATABASE_URL_UNPOOLED }}
+      DATABASE_URL: ${{ secrets.NEON_DATABASE_URL_UNPOOLED }}
+    steps:
+      - name: Check the database secret is set
+        run: |
+          if [ -z "$DATABASE_URL_UNPOOLED" ]; then
+            echo "::error::Repository secret NEON_DATABASE_URL_UNPOOLED is not set. See .github/workflows/migrate.yml."
+            exit 1
+          fi
+          if echo "$DATABASE_URL_UNPOOLED" | grep -q -- '-pooler'; then
+            echo "::error::NEON_DATABASE_URL_UNPOOLED is a pooled URL. Use the direct connection string (no -pooler in the host)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Apply migrations
+        run: node dist/database/migrate.js
+
+      - name: Load demo data
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.seed_demo_data }}
+        run: node dist/database/seed.js
