@@ -74,6 +74,12 @@ neon deploy                  # provision neon.ts and refresh .env.local
 cd backend && npm run migrate && npm run seed   # needs direct TCP access to Neon (port 5432)
 ```
 
+Migrations run automatically from GitHub Actions ([`migrate.yml`](.github/workflows/migrate.yml)) on every merge
+to `master` that touches `backend/migrations/` or the migration runner, and on demand from the Actions tab
+(with an optional demo-data seed). It needs the repository secret `NEON_DATABASE_URL_UNPOOLED`: the **direct**
+connection string of the `production` branch (`neon connection-string production`, or the Neon console's
+Connect dialog with connection pooling turned off).
+
 If your shell already exports `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` for another account, unset them when
 running the backend locally, or the Neon credentials in `.env.local` are ignored.
 
