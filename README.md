@@ -83,6 +83,21 @@ Connect dialog with connection pooling turned off).
 If your shell already exports `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` for another account, unset them when
 running the backend locally, or the Neon credentials in `.env.local` are ignored.
 
+## Android release builds
+
+[`android-release.yml`](.github/workflows/android-release.yml) builds the signed app: an APK to install on
+phones and an AAB for Google Play. Run it from **Actions → Android release → Run workflow**, or push a tag
+like `android-v0.2.0` to also publish a GitHub Release with the APK attached. The version code is derived
+from the run number, so it always increases.
+
+One-time setup: create the release keystore, then add four repository **secrets**
+(`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`) and the
+repository **variable** `TMS_API_BASE_URL` (backend address ending in `/`). Keep a backup of the keystore and its
+passwords somewhere safe: every future update must be signed with the same key.
+
+To build locally instead, export `TMS_KEYSTORE_FILE`, `TMS_KEYSTORE_PASSWORD`, `TMS_KEY_ALIAS`, `TMS_KEY_PASSWORD`
+and run `./gradlew :app:assembleRelease -PtmsApiBaseUrl=https://…/`.
+
 ## Tests
 
 ```bash

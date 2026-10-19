@@ -1,0 +1,126 @@
+name: Android release
+
+# Builds the signed TMS Field app: an APK to install directly on phones and an AAB for Google Play.
+#
+# Run it from the Actions tab ("Run workflow"), or push a tag such as android-v0.2.0 to also publish
+# a GitHub Release with the APK attached.
+#
+# Repository secrets (Settings → Secrets and variables → Actions → Secrets):
+#   ANDROID_KEYSTORE_BASE64    the release keystore (.jks), base64-encoded
+#   ANDROID_KEYSTORE_PASSWORD  keystore password
+#   ANDROID_KEY_ALIAS          key alias inside the keystore
+#   ANDROID_KEY_PASSWORD       key password
+# Repository variables (same page → Variables):
+#   TMS_API_BASE_URL           backend address with a trailing slash, e.g. https://api.example.org/
+#   TMS_MAP_STYLE_URL          optional licensed basemap style URL
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: Version shown to users, e.g. 0.2.0
+        required: true
+        default: 0.1.0
+      api_base_url:
+        description: Override the backend address for this build (leave empty to use TMS_API_BASE_URL)
+        required: false
+  push:
+    tags: ['android-v*']
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write # only used to publish a GitHub Release for android-v* tags
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    env:
+      API_BASE_URL: ${{ inputs.api_base_url || vars.TMS_API_BASE_URL }}
+      MAP_STYLE_URL: ${{ vars.TMS_MAP_STYLE_URL }}
+      VERSION_NAME: ${{ inputs.version_name || github.ref_name }}
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      TMS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      TMS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      TMS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check configuration
+        run: |
+          missing=""
+          # env var:secret name, so the error names the secret to add
+          for pair in KEYSTORE_BASE64:ANDROID_KEYSTORE_BASE64 TMS_KEYSTORE_PASSWORD:ANDROID_KEYSTORE_PASSWORD \
+                      TMS_KEY_ALIAS:ANDROID_KEY_ALIAS TMS_KEY_PASSWORD:ANDROID_KEY_PASSWORD; do
+            v="${pair%%:*}"
+            [ -z "${!v}" ] && missing="$missing ${pair#*:}"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing signing secrets:$missing (see the top of .github/workflows/android-release.yml)."
+            exit 1
+          fi
+          case "$API_BASE_URL" in
+            https://*/) ;;
+            *) echo "::error::Backend address must start with https:// and end with / (got '$API_BASE_URL'). Set the TMS_API_BASE_URL variable."; exit 1 ;;
+          esac
+          # Tags look like android-v0.2.0; users should see 0.2.0.
+          VERSION_NAME="${VERSION_NAME#android-v}"
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          # Android requires versionCode to increase with every release; the run number always does.
+          echo "VERSION_CODE=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Decode keystore
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "TMS_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build signed APK and AAB
+        run: >-
+          ./gradlew :app:assembleRelease :app:bundleRelease
+          -PtmsApiBaseUrl="$API_BASE_URL"
+          -PtmsMapStyleUrl="$MAP_STYLE_URL"
+          -PtmsVersionCode="$VERSION_CODE"
+          -PtmsVersionName="$VERSION_NAME"
+
+      - name: Verify signature and collect outputs
+        run: |
+          APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          "$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk | head -3
+          mkdir -p "$RUNNER_TEMP/out"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/out/tms-field-$VERSION_NAME.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "$RUNNER_TEMP/out/tms-field-$VERSION_NAME.aab"
+          {
+            echo "### TMS Field $VERSION_NAME (versionCode $VERSION_CODE)"
+            echo "Backend: \`$API_BASE_URL\`"
+            echo "Download the APK/AAB from this run's **Artifacts** section."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tms-field-${{ env.VERSION_NAME }}
+          path: ${{ runner.temp }}/out/
+          retention-days: 90
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/out/tms-field-$VERSION_NAME.apk"
+          --title "TMS Field $VERSION_NAME" --notes "Backend: $API_BASE_URL"
+
+      - name: Remove keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
