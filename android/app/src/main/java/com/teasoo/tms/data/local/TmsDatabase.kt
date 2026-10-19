@@ -1,0 +1,36 @@
+package com.teasoo.tms.data.local
+
+import androidx.room.Database
+import androidx.room.RoomDatabase
+
+@Database(
+    version = 1,
+    exportSchema = true,
+    entities = [
+        ProjectEntity::class, PlantingYearEntity::class, IdSchemeEntity::class, SectorEntity::class, SubSectorEntity::class,
+        SpeciesEntity::class, StatusEntity::class, VendorEntity::class, AssignmentEntity::class, SerialAllocationEntity::class,
+        TreeEntity::class, ObservationEntity::class, MediaEntity::class, OutboxEntity::class, KeyValueEntity::class,
+    ],
+)
+abstract class TmsDatabase : RoomDatabase() {
+    abstract fun reference(): ReferenceDao
+    abstract fun trees(): TreeDao
+    abstract fun observations(): ObservationDao
+    abstract fun media(): MediaDao
+    abstract fun outbox(): OutboxDao
+    abstract fun kv(): KeyValueDao
+
+    companion object {
+        const val NAME = "tms.db"
+    }
+}
+
+object Keys {
+    const val CURSOR = "sync.cursor"
+    const val ASSIGNMENT_FINGERPRINT = "sync.assignment_fingerprint"
+    const val LAST_SUCCESSFUL_SYNC = "sync.last_success"
+    const val LAST_SYNC_ERROR = "sync.last_error"
+    const val SELECTED_PROJECT = "ui.project"
+    /** Owner of any unsynced records; another officer cannot sign in until they are synced. */
+    const val LAST_USER = "session.last_user"
+}
