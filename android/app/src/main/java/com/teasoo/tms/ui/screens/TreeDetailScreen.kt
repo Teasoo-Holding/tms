@@ -18,6 +18,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavController
 import com.teasoo.tms.data.local.*
+import com.teasoo.tms.data.session.SessionState
 import com.teasoo.tms.data.session.SessionStore
 import com.teasoo.tms.ui.Routes
 import com.teasoo.tms.ui.components.*
@@ -43,6 +44,7 @@ class TreeDetailViewModel @Inject constructor(db: TmsDatabase, session: SessionS
     private val id: String = checkNotNull(saved["id"])
     private val ref = db.reference()
     val userId = flow { emit(session.userId()) }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val isAdmin = session.state.map { (it as? SessionState.Active)?.user?.role == "ADMIN" }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val detail = db.trees().observe(id).filterNotNull().mapLatest { t ->
         TreeDetail(
             tree = t, year = ref.year(t.plantingYearId), sector = ref.sector(t.sectorId), subSector = ref.subSector(t.subSectorId),
@@ -63,6 +65,8 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
     val statuses by vm.statuses.collectAsStateWithLifecycle()
     val media by vm.media.collectAsStateWithLifecycle()
     val userId by vm.userId.collectAsStateWithLifecycle()
+    val isAdmin by vm.isAdmin.collectAsStateWithLifecycle()
+    var correcting by remember { mutableStateOf(false) }
     Scaffold(topBar = {
         TopAppBar(
             title = { Text(d?.tree?.physicalTreeId ?: "", fontFamily = FontFamily.Monospace) },
@@ -94,6 +98,11 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
             if (d.status?.allowsReplacement == true && d.replacement == null && t.recordState == "ACTIVE") {
                 OutlinedButton(onClick = { nav.navigate(Routes.register(replaces = t.id)) }, modifier = Modifier.fillMaxWidth()) { Text("Plant a replacement tree") }
             }
+            // Serial corrections are an administrator action on the server record (PRD: serials are immutable for officers).
+            if (isAdmin && t.serverRevision != null && t.recordState != "REJECTED") {
+                OutlinedButton(onClick = { correcting = true }, modifier = Modifier.fillMaxWidth()) { Text("Correct serial number") }
+            }
+            if (correcting) CorrectSerialDialog(t.id, t.physicalTreeId, t.serialNumber, onClose = { correcting = false })
 
             Text("Observation history", style = MaterialTheme.typography.titleMedium)
             observations.forEach { o ->

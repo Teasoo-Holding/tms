@@ -29,6 +29,11 @@ object Routes {
     const val EDIT = "edit/{treeId}"
     const val SYNC = "sync"
     const val MAP = "map"
+    const val SESSION_SETUP = "session/setup"
+    const val SESSION_REGISTER = "session/register"
+    const val SESSION_VISIT = "session/visit"
+    const val ADMIN_DASHBOARD = "admin/dashboard"
+    const val ADMIN_CONFLICTS = "admin/conflicts"
     fun register(replaces: String? = null) = if (replaces == null) "register" else "register?replaces=$replaces"
     fun tree(id: String) = "tree/$id"
     fun observe(treeId: String, amends: String? = null) = if (amends == null) "observe/$treeId" else "observe/$treeId?amends=$amends"
@@ -61,6 +66,18 @@ private fun MainNav(vm: AppViewModel) {
         composable(Routes.EDIT) { EditTreeScreen(app = vm, onDone = { nav.popBackStack() }) }
         composable(Routes.SYNC) { SyncScreen(vm, onOpenTree = { nav.navigate(Routes.tree(it)) }, onBack = { nav.popBackStack() }) }
         composable(Routes.MAP) { AreaMapScreen(vm, onBack = { nav.popBackStack() }) }
+        composable(Routes.SESSION_SETUP) { SessionSetupScreen(onStarted = { nav.popBackStack(Routes.HOME, inclusive = false) }, onBack = { nav.popBackStack() }) }
+        composable(Routes.SESSION_REGISTER) { RapidRegisterScreen(onBack = { nav.popBackStack() }) }
+        composable(Routes.SESSION_VISIT) {
+            VisitScreen(
+                onObserve = { nav.navigate(Routes.observe(it)) },
+                onOpenTree = { nav.navigate(Routes.tree(it)) },
+                onRegister = { nav.navigate(Routes.SESSION_REGISTER) { popUpTo(Routes.HOME) } },
+                onBack = { nav.popBackStack() },
+            )
+        }
+        composable(Routes.ADMIN_DASHBOARD) { DashboardScreen(vm, onBack = { nav.popBackStack() }) }
+        composable(Routes.ADMIN_CONFLICTS) { ConflictsScreen(onOpenTree = { nav.navigate(Routes.tree(it)) }, onBack = { nav.popBackStack() }) }
     }
 }
 

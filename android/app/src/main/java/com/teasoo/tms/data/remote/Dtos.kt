@@ -236,3 +236,79 @@ data class MediaVerificationDto(
     @SerialName("association_verified_at") val associationVerifiedAt: String? = null,
     @SerialName("safe_to_delete_local_copy") val safeToDelete: Boolean,
 )
+
+// ---------------------------------------------------------------- oversight (administrators, executives)
+
+@Serializable
+data class SummaryTotals(
+    @SerialName("planting_events") val plantingEvents: Int = 0,
+    @SerialName("original_trees") val originalTrees: Int = 0,
+    @SerialName("replacement_trees") val replacementTrees: Int = 0,
+    @SerialName("terminal_status_trees") val terminalStatusTrees: Int = 0,
+    @SerialName("overdue_unknown_trees") val overdueUnknownTrees: Int = 0,
+)
+
+@Serializable data class SummaryCount(val name: String, val count: Int, val code: String? = null)
+
+@Serializable
+data class SummaryYear(
+    val name: String,
+    @SerialName("original_trees") val originalTrees: Int = 0,
+    @SerialName("replacement_trees") val replacementTrees: Int = 0,
+)
+
+@Serializable
+data class SummaryCompleteness(
+    @SerialName("never_observed") val neverObserved: Int = 0,
+    @SerialName("missing_planted_on") val missingPlantedOn: Int = 0,
+    @SerialName("trees_with_unverified_photos") val unverifiedPhotos: Int = 0,
+    @SerialName("open_conflicts") val openConflicts: Int = 0,
+    @SerialName("devices_not_synced_7_days") val devicesNotSynced: Int = 0,
+)
+
+@Serializable
+data class SummaryOfficer(
+    @SerialName("full_name") val fullName: String,
+    @SerialName("trees_registered_30d") val trees: Int = 0,
+    @SerialName("observations_30d") val observations: Int = 0,
+    @SerialName("last_sync_at") val lastSyncAt: String? = null,
+)
+
+@Serializable
+data class ReportSummary(
+    @SerialName("generated_at") val generatedAt: String,
+    @SerialName("last_server_sync_at") val lastServerSyncAt: String? = null,
+    @SerialName("overdue_days") val overdueDays: Int = 90,
+    val totals: SummaryTotals,
+    @SerialName("by_status") val byStatus: List<SummaryCount> = emptyList(),
+    @SerialName("by_planting_year") val byPlantingYear: List<SummaryYear> = emptyList(),
+    @SerialName("data_completeness") val completeness: SummaryCompleteness = SummaryCompleteness(),
+    @SerialName("officer_activity") val officers: List<SummaryOfficer> = emptyList(),
+    val notes: List<String> = emptyList(),
+)
+
+@Serializable
+data class ConflictDto(
+    val id: String,
+    @SerialName("conflict_type") val type: String,
+    @SerialName("project_name") val projectName: String? = null,
+    @SerialName("incoming_physical_id") val incomingPhysicalId: String? = null,
+    @SerialName("existing_physical_id") val existingPhysicalId: String? = null,
+    @SerialName("submitted_by_name") val submittedBy: String? = null,
+    @SerialName("created_at") val createdAt: String,
+    @SerialName("entity_id") val incomingTreeId: String,
+    @SerialName("existing_entity_id") val existingTreeId: String? = null,
+)
+
+@Serializable
+data class ResolveConflictRequest(
+    val resolution: String,
+    val notes: String,
+    @SerialName("serial_input") val serialInput: String? = null,
+)
+
+@Serializable
+data class SerialCorrectionRequest(
+    @SerialName("serial_input") val serialInput: String,
+    val reason: String,
+)

@@ -86,7 +86,7 @@ class ObservationViewModel @Inject constructor(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationViewModel = hiltViewModel()) {
     val tree by vm.tree.collectAsStateWithLifecycle()
@@ -111,7 +111,12 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             tree?.let { TreeIdText(it.physicalTreeId, "") }
             if (amending) Notice("The original observation is kept and marked as superseded. Your correction is recorded with its reason.")
-            Picker("Status", statuses, status, { it.name + if (it.isTerminal) " (terminal)" else "" }, { vm.statusId.value = it.id })
+            Text("What do you see?", style = MaterialTheme.typography.titleSmall)
+            // One tap per tree: statuses as chips rather than a dropdown.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                statuses.forEach { st -> FilterChip(selected = st.id == statusId, onClick = { vm.statusId.value = st.id }, label = { Text(st.name) }) }
+            }
+            status?.takeIf { it.requiresPhoto }?.let { Text("“${it.name}” needs a photo.", style = MaterialTheme.typography.bodySmall) }
             DateField("Observed on", date, { vm.date.value = it ?: LocalDate.now() }, allowClear = false)
             OutlinedTextField(remarks, { vm.remarks.value = it }, label = { Text("Remarks") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
             if (amending) OutlinedTextField(reason, { vm.reason.value = it }, label = { Text("Reason for correction") }, modifier = Modifier.fillMaxWidth())

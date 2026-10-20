@@ -109,6 +109,27 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
     }
 
     /**
+     * The next serial in sequence for this area's uniqueness scope, staying inside the officer's
+     * allocated ranges when the scope has any. Only a suggestion: the label is the source of truth.
+     */
+    suspend fun suggestNextSerial(a: AreaSelection, userId: String): Long? {
+        val info = runCatching { prefix(a) }.getOrNull() ?: return null
+        val scheme = info.scheme.toScheme()
+        val scopeKey = TreeIdAssembler.serialScopeKey(
+            scheme.serialUniquenessScope,
+            TreeIdAssembler.ScopeEntities(a.projectId, a.plantingYearId, a.vendorId, a.sectorId, a.subSectorId),
+        )
+        val next = (db.trees().maxSerial(scopeKey) ?: 0L) + 1
+        val ranges = ref.allocations(scopeKey).filter { it.userId == null || it.userId == userId }.sortedBy { it.rangeStart }
+        val suggestion = when {
+            ranges.isEmpty() -> next
+            ranges.any { next in it.rangeStart..it.rangeEnd } -> next
+            else -> ranges.firstOrNull { it.rangeStart > next }?.rangeStart ?: return null
+        }
+        return suggestion.takeIf { it.toString().length <= info.serialWidth }
+    }
+
+    /**
      * Saves the tree, its initial observation, its photos and the outbox operation in ONE transaction,
      * so a crash can never leave a saved record without its queued sync operation.
      */

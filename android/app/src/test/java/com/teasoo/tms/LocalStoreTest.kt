@@ -104,6 +104,31 @@ class LocalStoreTest {
     }
 
     @Test
+    fun suggestsNextSerialInScopeAndAllocation() = runBlocking {
+        assertEquals(1L, trees.suggestNextSerial(area, user))
+        trees.register(newTree("41"), user)
+        trees.register(newTree("7"), user)
+        // Numeric, not text, maximum: "41" > "7".
+        assertEquals(42L, trees.suggestNextSerial(area, user))
+        // Another planting year is a separate serial scope.
+        assertEquals(1L, trees.suggestNextSerial(area.copy(plantingYearId = "y2025"), user))
+        // With an allocation, the suggestion jumps into the officer's range.
+        db.reference().upsertAllocations(listOf(SerialAllocationEntity("a1", "p1", "PLANTING_YEAR=y2024|PROJECT=p1", user, 100, 199, true)))
+        assertEquals(100L, trees.suggestNextSerial(area, user))
+    }
+
+    @Test
+    fun visitListFindsSerialsIgnoringLeadingZeros() = runBlocking {
+        trees.register(newTree("5"), user)
+        trees.register(newTree("6"), user)
+        val all = db.trees().visitList("p1", "y2024", "s1", "ss1", "").first()
+        assertEquals(2, all.size)
+        val hit = db.trees().visitList("p1", "y2024", "s1", null, "0005").first()
+        assertEquals(listOf("T4L-2024-000005"), hit.map { it.physicalTreeId })
+        assertTrue(db.trees().visitList("p1", "y2025", "s1", null, "").first().isEmpty())
+    }
+
+    @Test
     fun enforcesAllocatedSerialRanges() = runBlocking {
         db.reference().upsertAllocations(listOf(SerialAllocationEntity("a1", "p1", "PLANTING_YEAR=y2024|PROJECT=p1", user, 100, 199, true)))
         val info = trees.prefix(area)

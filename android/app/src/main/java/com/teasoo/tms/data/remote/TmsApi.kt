@@ -19,4 +19,10 @@ interface TmsApi {
 
     @POST("api/v1/media/upload-sessions") suspend fun uploadSession(@Body body: UploadSessionRequest): UploadSessionResponse
     @POST("api/v1/media/{id}/complete") suspend fun completeUpload(@Path("id") mediaId: String): MediaVerificationDto
+
+    // Oversight: online-only views for administrators (and the read-only summary for executives).
+    @GET("api/v1/reports/summary") suspend fun summary(@Query("project_id") projectId: String?): ReportSummary
+    @GET("api/v1/conflicts") suspend fun conflicts(@Query("status") status: String = "OPEN"): List<ConflictDto>
+    @POST("api/v1/conflicts/{id}/resolve") suspend fun resolveConflict(@Path("id") id: String, @Body body: ResolveConflictRequest)
+    @POST("api/v1/trees/{id}/physical-id-corrections") suspend fun correctSerial(@Path("id") treeId: String, @Body body: SerialCorrectionRequest)
 }

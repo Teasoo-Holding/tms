@@ -27,6 +27,8 @@ android {
         // Overridable per build: -PtmsApiBaseUrl=https://api.example.org/ -PtmsMapStyleUrl=https://...
         buildConfigField("String", "API_BASE_URL", "\"${project.findProperty("tmsApiBaseUrl") ?: "http://10.0.2.2:3000/"}\"")
         buildConfigField("String", "MAP_STYLE_URL", "\"${project.findProperty("tmsMapStyleUrl") ?: ""}\"")
+        // Web portal address, linked from the administrator screens for configuration work.
+        buildConfigField("String", "PORTAL_URL", "\"${project.findProperty("tmsPortalUrl") ?: ""}\"")
     }
 
     signingConfigs {
