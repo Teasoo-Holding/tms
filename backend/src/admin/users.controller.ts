@@ -24,11 +24,13 @@ const UserFields = {
   role: z.enum(['ADMIN', 'FIELD_OFFICER', 'EXECUTIVE']),
   password: z.string().max(200),
   active: z.boolean().default(true),
+  /** Executives only: see every project (Teasoo management) rather than assigned ones (clients, sponsors). */
+  all_projects: z.boolean().default(false),
 };
 const UserBody = z
   .object({ ...UserFields, username: UserFields.username.optional(), email: UserFields.email.optional(), phone: UserFields.phone.optional() })
   .refine((b) => !!(b.username || b.email || b.phone), { message: 'Give the user a username, email or phone number to sign in with', path: ['username'] });
-const UserPatch = z.object(UserFields).partial();
+const UserPatch = z.object({ ...UserFields, all_projects: z.boolean() }).partial();
 
 /** Which sign-in identifier collided, from the unique index name. */
 function takenMessage(e: any) {
@@ -54,7 +56,7 @@ const AllocationBody = z.object({
   notes: z.string().max(1000).nullish(),
 });
 
-const USER_COLUMNS = 'id, email, username, phone, full_name, role, active, created_at, updated_at';
+const USER_COLUMNS = 'id, email, username, phone, full_name, role, active, all_projects, created_at, updated_at';
 
 @Roles('ADMIN')
 @Controller()
@@ -85,8 +87,9 @@ export class UsersController {
       const user = await this.db
         .one(
           tx,
-          `INSERT INTO users (email, username, phone, full_name, role, password_hash, active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${USER_COLUMNS}`,
-          [b.email?.toLowerCase() ?? null, b.username ?? null, b.phone ?? null, b.full_name, b.role, hash, b.active],
+          `INSERT INTO users (email, username, phone, full_name, role, password_hash, active, all_projects)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING ${USER_COLUMNS}`,
+          [b.email?.toLowerCase() ?? null, b.username ?? null, b.phone ?? null, b.full_name, b.role, hash, b.active, b.role === 'EXECUTIVE' && b.all_projects],
         )
         .catch((e) => {
           if (isUniqueViolation(e)) throw takenMessage(e);
@@ -116,9 +119,9 @@ export class UsersController {
         .one(
           tx,
           `UPDATE users SET email = $2, full_name = $3, role = $4, active = $5, password_hash = COALESCE($6, password_hash),
-                  username = $7, phone = $8, updated_at = now()
+                  username = $7, phone = $8, all_projects = $9, updated_at = now()
             WHERE id = $1 RETURNING ${USER_COLUMNS}`,
-          [id, n.email?.toLowerCase() ?? null, n.full_name, n.role, n.active, hash, n.username ?? null, n.phone ?? null],
+          [id, n.email?.toLowerCase() ?? null, n.full_name, n.role, n.active, hash, n.username ?? null, n.phone ?? null, n.role === 'EXECUTIVE' && !!n.all_projects],
         )
         .catch((e) => {
           if (isUniqueViolation(e)) throw takenMessage(e);

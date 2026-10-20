@@ -332,7 +332,7 @@ describe('change feed', () => {
 describe('geography', () => {
   it('rejects invalid polygons and sub-sectors outside their sector', async () => {
     const bowtie = { type: 'Polygon', coordinates: [[[0, 0], [1, 1], [1, 0], [0, 1], [0, 0]]] };
-    const bad = await admin.post(`/projects/${f.projectId}/sectors`, { name: 'Bad', short_code: 'S99', reference_latitude: 0.5, reference_longitude: 0.5, boundary: bowtie }).expect(400);
+    const bad = await admin.post(`/projects/${f.projectId}/sectors`, { planting_year_id: f.year2024, name: 'Bad', short_code: 'S99', reference_latitude: 0.5, reference_longitude: 0.5, boundary: bowtie }).expect(400);
     expect(bad.body.code).toBe('GEOMETRY_INVALID');
     const far = { type: 'Polygon', coordinates: [[[10, 10], [10.1, 10], [10.1, 10.1], [10, 10.1], [10, 10]]] };
     const outside = await admin.post(`/sectors/${f.sectorId}/sub-sectors`, { name: 'Far', short_code: 'SS99', reference_latitude: 10.05, reference_longitude: 10.05, boundary: far }).expect(400);
@@ -475,5 +475,95 @@ describe('spec alignment: statuses, sign-in identifiers, filters, visits', () =>
     expect(mine.items.every((v: any) => v.recorded_by && v.physical_tree_id.includes('007001'))).toBe(true);
     const csv = await admin.get(`/reports/visits.csv?project_id=${f.projectId}`).expect(200);
     expect(csv.text.split('\n')[0]).toContain('observed_at,physical_tree_id');
+  });
+});
+
+describe('areas per planting year, vendors and their ID formats', () => {
+  // A 2026 survey: a square sector near Ibadan and a sub-sector inside it.
+  const sq = (lat: number, lon: number, d: number) => [
+    { latitude: lat, longitude: lon }, { latitude: lat + d, longitude: lon + d }, // deliberately out of order
+    { latitude: lat + d, longitude: lon }, { latitude: lat, longitude: lon + d },
+  ];
+  let year2026: string;
+  let sector26: string;
+  let sub26: string;
+  let vendor: string;
+
+  it('builds sector and sub-sector outlines from corner points within a planting year', async () => {
+    year2026 = (await admin.post(`/projects/${f.projectId}/planting-years`, { year_label: '2030' }).expect(201)).body.id;
+    const s = await admin.post(`/projects/${f.projectId}/sectors`, { planting_year_id: year2026, name: 'North 2026', short_code: 'S01', corners: sq(7.40, 3.90, 0.01) }).expect(201);
+    sector26 = s.body.id;
+    expect(s.body.planting_year_id).toBe(year2026);
+    expect(s.body.boundary.coordinates[0]).toHaveLength(5);
+    expect(s.body.reference_latitude).toBeGreaterThan(7.40);
+    // Corners a few metres outside the sector (phone GPS error) are accepted; far outside is refused.
+    const ok = await admin.post(`/sectors/${sector26}/sub-sectors`, { name: 'Edge', short_code: 'SS01', corners: sq(7.40 - 0.00005, 3.90, 0.004) }).expect(201);
+    sub26 = ok.body.id;
+    const far = await admin.post(`/sectors/${sector26}/sub-sectors`, { name: 'Far', short_code: 'SS02', corners: sq(7.50, 3.90, 0.004) }).expect(400);
+    expect(far.body.code).toBe('GEOMETRY_OUTSIDE_PARENT');
+    await admin.post(`/projects/${f.projectId}/sectors`, { planting_year_id: year2026, name: 'Dup', short_code: 'S01', corners: sq(7.5, 3.9, 0.01) }).expect(400);
+    const areas = (await admin.get(`/projects/${f.projectId}/areas?planting_year_id=${year2026}`).expect(200)).body;
+    expect(areas.some((a: any) => a.id === sector26)).toBe(true);
+    expect(areas.every((a: any) => a.planting_year_id === year2026 || a.planting_year_id === null)).toBe(true);
+  });
+
+  it("refuses a tree placed in another year's area", async () => {
+    const res = await sync(admin, [
+      createOp(treePayload(f, '8801', { planting_year_id: f.year2024, sector_id: sector26, sub_sector_id: sub26 })),
+    ]);
+    expect(res.body.results[0].code).toBe('AREA_OTHER_YEAR');
+  });
+
+  it('links vendors to a planting year and gives a vendor its own ID format', async () => {
+    vendor = (await admin.post('/vendors', { name: 'Konam Ltd', short_code: 'KNM' }).expect(201)).body.id;
+    await admin.post(`/planting-years/${year2026}/vendors`, { vendor_id: vendor }).expect(201);
+    const boot = (await admin.get('/mobile/bootstrap').expect(200)).body;
+    expect(boot.planting_year_vendors.some((l: any) => l.vendor_id === vendor && l.planting_year_id === year2026)).toBe(true);
+    expect(boot.sectors.find((s: any) => s.id === sector26).planting_year_id).toBe(year2026);
+
+    const fmt = await admin
+      .post(`/projects/${f.projectId}/tree-id-schemes`, {
+        vendor_id: vendor,
+        components: [
+          { type: 'PROJECT_CODE' }, { type: 'PLANTING_YEAR' }, { type: 'VENDOR_CODE' }, { type: 'TEXT', value: 'TR' }, { type: 'SECTOR_CODE' }, { type: 'SERIAL' },
+        ],
+        separator: '-', serial_width: 5, serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR', 'VENDOR'],
+      })
+      .expect(201);
+    const project = (await admin.get(`/projects/${f.projectId}`).expect(200)).body;
+    const active = project.tree_id_schemes.filter((s: any) => s.active);
+    expect(active.map((s: any) => s.vendor_name ?? 'default').sort()).toEqual(['Konam Ltd', 'default']);
+
+    const payload = treePayload(f, '15', {
+      planting_year_id: year2026, sector_id: sector26, sub_sector_id: sub26, vendor_id: vendor, id_scheme_id: fmt.body.id,
+      id_component_values: { PROJECT_CODE: 'T4L', PLANTING_YEAR: '2030', VENDOR_CODE: 'KNM', SECTOR_CODE: 'S01' },
+      physical_tree_id: 'T4L-2030-KNM-TR-S01-00015',
+    });
+    const res = await sync(admin, [createOp(payload)]);
+    expect(res.body.results[0].status).toBe('ACCEPTED');
+    expect(res.body.results[0].entity.physical_tree_id).toBe('T4L-2030-KNM-TR-S01-00015');
+
+    await admin.post(`/projects/${f.projectId}/tree-id-schemes`, {
+      components: [{ type: 'TEXT', value: 'bad text!' }, { type: 'SERIAL' }], separator: '-', serial_width: 5, serial_uniqueness_scope: [],
+    }).expect(400);
+    await admin.post(`/tree-id-schemes/${fmt.body.id}/retire`).expect(201);
+    const after = (await admin.get(`/projects/${f.projectId}`).expect(200)).body;
+    expect(after.tree_id_schemes.filter((s: any) => s.active)).toHaveLength(1);
+  });
+
+  it('lets Teasoo management executives see every project, while clients see only theirs', async () => {
+    const other = (await admin.post('/projects', { name: 'Green Belt', short_code: 'GB1', physical_id_uniqueness: 'PROJECT' }).expect(201)).body.id;
+    const client = await admin.post('/users', { username: 'sponsor1', full_name: 'Sponsor', role: 'EXECUTIVE', password: 'Str0ng!Passw0rd' }).expect(201);
+    const mgmt = await admin.post('/users', { username: 'md.teasoo', full_name: 'Managing Director', role: 'EXECUTIVE', password: 'Str0ng!Passw0rd', all_projects: true }).expect(201);
+    expect(mgmt.body.all_projects).toBe(true);
+    const signIn = async (login: string) =>
+      (await request(app.getHttpServer()).post('/api/v1/auth/login').send({ login, password: 'Str0ng!Passw0rd' }).expect(200)).body.access_token;
+    const mgmtToken = await signIn('md.teasoo');
+    const clientToken = await signIn('sponsor1');
+    const list = async (token: string) =>
+      (await request(app.getHttpServer()).get('/api/v1/projects').set('Authorization', `Bearer ${token}`).expect(200)).body.map((p: any) => p.id);
+    expect(await list(mgmtToken)).toContain(other);
+    expect(await list(clientToken)).toEqual([]);
+    expect(client.body.all_projects).toBe(false);
   });
 });

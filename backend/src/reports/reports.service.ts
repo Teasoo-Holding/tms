@@ -9,6 +9,7 @@ export interface ReportFilter {
   sector_id?: string;
   sub_sector_id?: string;
   species_id?: string;
+  vendor_id?: string;
   /** Current status (from each tree's latest visit). */
   status_id?: string;
   /** Date range (YYYY-MM-DD, inclusive): trees registered and visits recorded in the period. */
@@ -43,6 +44,7 @@ export class ReportsService {
     eq('t.sector_id', f.sector_id);
     eq('t.sub_sector_id', f.sub_sector_id);
     eq('t.species_id', f.species_id);
+    eq('t.vendor_id', f.vendor_id);
     eq('t.current_status_id', f.status_id);
     const s = this.access.treeFilter(grants, 't', params.length + 1);
     params.push(...s.params);

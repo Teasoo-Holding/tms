@@ -56,6 +56,6 @@ fun CustomFieldDto.toEntity() = CustomFieldEntity(
 fun IdSchemeEntity.toScheme() = TreeIdAssembler.Scheme(
     separator = separator,
     serialWidth = serialWidth,
-    components = TmsJson.decodeFromString(ListSerializer(SchemeComponentDto.serializer()), componentsJson).map { TreeIdAssembler.Component(it.type, it.required) },
+    components = TmsJson.decodeFromString(ListSerializer(SchemeComponentDto.serializer()), componentsJson).map { TreeIdAssembler.Component(it.type, it.required, it.value) },
     serialUniquenessScope = TmsJson.decodeFromString(ListSerializer(String.serializer()), serialScopeJson),
 )

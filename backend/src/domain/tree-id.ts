@@ -9,6 +9,8 @@ export const COMPONENT_TYPES = [
   'VENDOR_CODE',
   'SECTOR_CODE',
   'SUB_SECTOR_CODE',
+  /** Fixed text set in the format itself (e.g. a vendor's own tag prefix). */
+  'TEXT',
   'SERIAL',
 ] as const;
 export type ComponentType = (typeof COMPONENT_TYPES)[number];
@@ -22,6 +24,8 @@ export const MAX_SERIAL_WIDTH = 12;
 export interface SchemeComponent {
   type: ComponentType;
   required: boolean;
+  /** The text, for TEXT components. */
+  value?: string;
 }
 
 export interface IdScheme {
@@ -32,7 +36,7 @@ export interface IdScheme {
   serialUniquenessScope: ScopeDimension[];
 }
 
-export type ComponentValues = Partial<Record<Exclude<ComponentType, 'SERIAL'>, string | null | undefined>>;
+export type ComponentValues = Partial<Record<Exclude<ComponentType, 'SERIAL' | 'TEXT'>, string | null | undefined>>;
 
 export interface ScopeEntities {
   project: string;
@@ -67,7 +71,11 @@ export function validateScheme(scheme: IdScheme): string[] {
   }
   const types = scheme.components.map((c) => c.type);
   if (types.some((t) => !COMPONENT_TYPES.includes(t))) problems.push('COMPONENT_UNKNOWN');
-  if (new Set(types).size !== types.length) problems.push('COMPONENT_DUPLICATED');
+  const named = types.filter((t) => t !== 'TEXT');
+  if (new Set(named).size !== named.length) problems.push('COMPONENT_DUPLICATED');
+  if (scheme.components.some((c) => c.type === 'TEXT' && !CODE_PATTERN.test(c.value ?? '') || (c.type === 'TEXT' && (c.value ?? '').length > 16))) {
+    problems.push('TEXT_VALUE_INVALID');
+  }
   const serialIdx = types.indexOf('SERIAL');
   if (serialIdx === -1) problems.push('SERIAL_MISSING');
   else if (serialIdx !== types.length - 1) problems.push('SERIAL_NOT_LAST');
@@ -94,7 +102,7 @@ export function assemblePrefix(scheme: IdScheme, values: ComponentValues): strin
   const parts: string[] = [];
   for (const component of scheme.components) {
     if (component.type === 'SERIAL') continue;
-    const raw = values[component.type];
+    const raw = component.type === 'TEXT' ? component.value : values[component.type];
     const value = raw == null ? '' : String(raw).trim();
     if (value.length === 0) {
       if (component.required) throw new TreeIdError(`COMPONENT_MISSING:${component.type}`);

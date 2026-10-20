@@ -14,6 +14,7 @@ const Filter = z.object({
   sector_id: z.string().uuid().optional(),
   sub_sector_id: z.string().uuid().optional(),
   species_id: z.string().uuid().optional(),
+  vendor_id: z.string().uuid().optional(),
   status_id: z.string().uuid().optional(),
   from: day.optional(),
   to: day.optional(),

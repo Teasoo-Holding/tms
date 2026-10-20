@@ -60,7 +60,7 @@ data class ProjectDto(
 data class PlantingYearDto(val id: String, @SerialName("project_id") val projectId: String, @SerialName("year_label") val yearLabel: String, val active: Boolean)
 
 @Serializable
-data class SchemeComponentDto(val type: String, val required: Boolean = true)
+data class SchemeComponentDto(val type: String, val required: Boolean = true, val value: String? = null)
 
 @Serializable
 data class IdSchemeDto(

@@ -10,86 +10,398 @@
   "assemble": [
     {
       "name": "base format",
-      "scheme": { "separator": "-", "serialWidth": 6, "components": [
-        { "type": "PROJECT_CODE", "required": true },
-        { "type": "PLANTING_YEAR", "required": true },
-        { "type": "SERIAL", "required": true }
-      ], "serialUniquenessScope": ["PROJECT", "PLANTING_YEAR"] },
-      "values": { "PROJECT_CODE": "T4L", "PLANTING_YEAR": "2024" },
+      "scheme": {
+        "separator": "-",
+        "serialWidth": 6,
+        "components": [
+          {
+            "type": "PROJECT_CODE",
+            "required": true
+          },
+          {
+            "type": "PLANTING_YEAR",
+            "required": true
+          },
+          {
+            "type": "SERIAL",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": [
+          "PROJECT",
+          "PLANTING_YEAR"
+        ]
+      },
+      "values": {
+        "PROJECT_CODE": "T4L",
+        "PLANTING_YEAR": "2024"
+      },
       "serialInput": "1",
-      "expected": { "prefix": "T4L-2024-", "serial": "000001", "physicalId": "T4L-2024-000001", "normalized": "T4L-2024-000001",
-        "serialScopeKey": "PLANTING_YEAR=22222222-2222-2222-2222-222222222222|PROJECT=11111111-1111-1111-1111-111111111111" }
+      "expected": {
+        "prefix": "T4L-2024-",
+        "serial": "000001",
+        "physicalId": "T4L-2024-000001",
+        "normalized": "T4L-2024-000001",
+        "serialScopeKey": "PLANTING_YEAR=22222222-2222-2222-2222-222222222222|PROJECT=11111111-1111-1111-1111-111111111111"
+      }
     },
     {
       "name": "extended format with vendor and areas",
-      "scheme": { "separator": "-", "serialWidth": 6, "components": [
-        { "type": "PROJECT_CODE", "required": true },
-        { "type": "PLANTING_YEAR", "required": true },
-        { "type": "VENDOR_CODE", "required": true },
-        { "type": "SECTOR_CODE", "required": true },
-        { "type": "SUB_SECTOR_CODE", "required": true },
-        { "type": "SERIAL", "required": true }
-      ], "serialUniquenessScope": ["PROJECT"] },
-      "values": { "PROJECT_CODE": "T4L", "PLANTING_YEAR": "2024", "VENDOR_CODE": "V03", "SECTOR_CODE": "S02", "SUB_SECTOR_CODE": "SS04" },
+      "scheme": {
+        "separator": "-",
+        "serialWidth": 6,
+        "components": [
+          {
+            "type": "PROJECT_CODE",
+            "required": true
+          },
+          {
+            "type": "PLANTING_YEAR",
+            "required": true
+          },
+          {
+            "type": "VENDOR_CODE",
+            "required": true
+          },
+          {
+            "type": "SECTOR_CODE",
+            "required": true
+          },
+          {
+            "type": "SUB_SECTOR_CODE",
+            "required": true
+          },
+          {
+            "type": "SERIAL",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": [
+          "PROJECT"
+        ]
+      },
+      "values": {
+        "PROJECT_CODE": "T4L",
+        "PLANTING_YEAR": "2024",
+        "VENDOR_CODE": "V03",
+        "SECTOR_CODE": "S02",
+        "SUB_SECTOR_CODE": "SS04"
+      },
       "serialInput": "000001",
-      "expected": { "prefix": "T4L-2024-V03-S02-SS04-", "serial": "000001", "physicalId": "T4L-2024-V03-S02-SS04-000001", "normalized": "T4L-2024-V03-S02-SS04-000001",
-        "serialScopeKey": "PROJECT=11111111-1111-1111-1111-111111111111" }
+      "expected": {
+        "prefix": "T4L-2024-V03-S02-SS04-",
+        "serial": "000001",
+        "physicalId": "T4L-2024-V03-S02-SS04-000001",
+        "normalized": "T4L-2024-V03-S02-SS04-000001",
+        "serialScopeKey": "PROJECT=11111111-1111-1111-1111-111111111111"
+      }
     },
     {
       "name": "optional vendor omitted when absent",
-      "scheme": { "separator": "-", "serialWidth": 5, "components": [
-        { "type": "PROJECT_CODE", "required": true },
-        { "type": "VENDOR_CODE", "required": false },
-        { "type": "SERIAL", "required": true }
-      ], "serialUniquenessScope": [] },
-      "values": { "PROJECT_CODE": "T4L" },
+      "scheme": {
+        "separator": "-",
+        "serialWidth": 5,
+        "components": [
+          {
+            "type": "PROJECT_CODE",
+            "required": true
+          },
+          {
+            "type": "VENDOR_CODE",
+            "required": false
+          },
+          {
+            "type": "SERIAL",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": []
+      },
+      "values": {
+        "PROJECT_CODE": "T4L"
+      },
       "serialInput": " 42 ",
-      "expected": { "prefix": "T4L-", "serial": "00042", "physicalId": "T4L-00042", "normalized": "T4L-00042", "serialScopeKey": "GLOBAL" }
+      "expected": {
+        "prefix": "T4L-",
+        "serial": "00042",
+        "physicalId": "T4L-00042",
+        "normalized": "T4L-00042",
+        "serialScopeKey": "GLOBAL"
+      }
     },
     {
       "name": "lower-case codes are upper-cased; empty separator",
-      "scheme": { "separator": "", "serialWidth": 4, "components": [
-        { "type": "PROJECT_CODE", "required": true },
-        { "type": "SECTOR_CODE", "required": true },
-        { "type": "SERIAL", "required": true }
-      ], "serialUniquenessScope": ["SECTOR"] },
-      "values": { "PROJECT_CODE": "t4l", "SECTOR_CODE": "s1" },
+      "scheme": {
+        "separator": "",
+        "serialWidth": 4,
+        "components": [
+          {
+            "type": "PROJECT_CODE",
+            "required": true
+          },
+          {
+            "type": "SECTOR_CODE",
+            "required": true
+          },
+          {
+            "type": "SERIAL",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": [
+          "SECTOR"
+        ]
+      },
+      "values": {
+        "PROJECT_CODE": "t4l",
+        "SECTOR_CODE": "s1"
+      },
       "serialInput": "0099",
-      "expected": { "prefix": "T4LS1", "serial": "0099", "physicalId": "T4LS10099", "normalized": "T4LS10099",
-        "serialScopeKey": "SECTOR=44444444-4444-4444-4444-444444444444" }
+      "expected": {
+        "prefix": "T4LS1",
+        "serial": "0099",
+        "physicalId": "T4LS10099",
+        "normalized": "T4LS10099",
+        "serialScopeKey": "SECTOR=44444444-4444-4444-4444-444444444444"
+      }
+    },
+    {
+      "name": "vendor tag with fixed text, year and vendor code",
+      "scheme": {
+        "separator": "-",
+        "serialWidth": 5,
+        "components": [
+          {
+            "type": "PROJECT_CODE",
+            "required": true
+          },
+          {
+            "type": "PLANTING_YEAR",
+            "required": true
+          },
+          {
+            "type": "VENDOR_CODE",
+            "required": true
+          },
+          {
+            "type": "TEXT",
+            "required": true,
+            "value": "TR"
+          },
+          {
+            "type": "SECTOR_CODE",
+            "required": true
+          },
+          {
+            "type": "SERIAL",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": [
+          "PROJECT",
+          "PLANTING_YEAR",
+          "VENDOR"
+        ]
+      },
+      "values": {
+        "PROJECT_CODE": "T4L",
+        "PLANTING_YEAR": "2026",
+        "VENDOR_CODE": "knm",
+        "SECTOR_CODE": "S02"
+      },
+      "serialInput": "15",
+      "expected": {
+        "prefix": "T4L-2026-KNM-TR-S02-",
+        "serial": "00015",
+        "physicalId": "T4L-2026-KNM-TR-S02-00015",
+        "normalized": "T4L-2026-KNM-TR-S02-00015",
+        "serialScopeKey": "PLANTING_YEAR=22222222-2222-2222-2222-222222222222|PROJECT=11111111-1111-1111-1111-111111111111|VENDOR=33333333-3333-3333-3333-333333333333"
+      }
     }
   ],
   "serialErrors": [
-    { "serialWidth": 6, "input": "", "error": "SERIAL_REQUIRED" },
-    { "serialWidth": 6, "input": "   ", "error": "SERIAL_REQUIRED" },
-    { "serialWidth": 6, "input": "12a", "error": "SERIAL_NOT_NUMERIC" },
-    { "serialWidth": 6, "input": "-5", "error": "SERIAL_NOT_NUMERIC" },
-    { "serialWidth": 6, "input": "1234567", "error": "SERIAL_TOO_LONG" },
-    { "serialWidth": 6, "input": "0000000001", "error": "SERIAL_TOO_LONG" },
-    { "serialWidth": 6, "input": "0", "error": "SERIAL_ZERO" },
-    { "serialWidth": 6, "input": "000000", "error": "SERIAL_ZERO" }
+    {
+      "serialWidth": 6,
+      "input": "",
+      "error": "SERIAL_REQUIRED"
+    },
+    {
+      "serialWidth": 6,
+      "input": "   ",
+      "error": "SERIAL_REQUIRED"
+    },
+    {
+      "serialWidth": 6,
+      "input": "12a",
+      "error": "SERIAL_NOT_NUMERIC"
+    },
+    {
+      "serialWidth": 6,
+      "input": "-5",
+      "error": "SERIAL_NOT_NUMERIC"
+    },
+    {
+      "serialWidth": 6,
+      "input": "1234567",
+      "error": "SERIAL_TOO_LONG"
+    },
+    {
+      "serialWidth": 6,
+      "input": "0000000001",
+      "error": "SERIAL_TOO_LONG"
+    },
+    {
+      "serialWidth": 6,
+      "input": "0",
+      "error": "SERIAL_ZERO"
+    },
+    {
+      "serialWidth": 6,
+      "input": "000000",
+      "error": "SERIAL_ZERO"
+    }
   ],
   "missingComponent": {
-    "scheme": { "separator": "-", "serialWidth": 6, "components": [
-      { "type": "PROJECT_CODE", "required": true },
-      { "type": "VENDOR_CODE", "required": true },
-      { "type": "SERIAL", "required": true }
-    ], "serialUniquenessScope": [] },
-    "values": { "PROJECT_CODE": "T4L" },
+    "scheme": {
+      "separator": "-",
+      "serialWidth": 6,
+      "components": [
+        {
+          "type": "PROJECT_CODE",
+          "required": true
+        },
+        {
+          "type": "VENDOR_CODE",
+          "required": true
+        },
+        {
+          "type": "SERIAL",
+          "required": true
+        }
+      ],
+      "serialUniquenessScope": []
+    },
+    "values": {
+      "PROJECT_CODE": "T4L"
+    },
     "error": "COMPONENT_MISSING:VENDOR_CODE"
   },
   "normalize": [
-    { "input": "t4l-2024-000001", "expected": "T4L-2024-000001" },
-    { "input": " T4L - 2024 - 000001 ", "expected": "T4L-2024-000001" },
-    { "input": "T4L–2024—000001", "expected": "T4L-2024-000001" },
-    { "input": "T4L−2024-000001", "expected": "T4L-2024-000001" }
+    {
+      "input": "t4l-2024-000001",
+      "expected": "T4L-2024-000001"
+    },
+    {
+      "input": " T4L - 2024 - 000001 ",
+      "expected": "T4L-2024-000001"
+    },
+    {
+      "input": "T4L\u20132024\u2014000001",
+      "expected": "T4L-2024-000001"
+    },
+    {
+      "input": "T4L\u22122024-000001",
+      "expected": "T4L-2024-000001"
+    }
   ],
   "invalidSchemes": [
-    { "reason": "serial not last", "scheme": { "separator": "-", "serialWidth": 6, "components": [ { "type": "SERIAL", "required": true }, { "type": "PROJECT_CODE", "required": true } ], "serialUniquenessScope": [] } },
-    { "reason": "no serial", "scheme": { "separator": "-", "serialWidth": 6, "components": [ { "type": "PROJECT_CODE", "required": true } ], "serialUniquenessScope": [] } },
-    { "reason": "duplicate component", "scheme": { "separator": "-", "serialWidth": 6, "components": [ { "type": "PROJECT_CODE", "required": true }, { "type": "PROJECT_CODE", "required": true }, { "type": "SERIAL", "required": true } ], "serialUniquenessScope": [] } },
-    { "reason": "serial width out of range", "scheme": { "separator": "-", "serialWidth": 0, "components": [ { "type": "SERIAL", "required": true } ], "serialUniquenessScope": [] } },
-    { "reason": "unsupported separator", "scheme": { "separator": "#", "serialWidth": 6, "components": [ { "type": "SERIAL", "required": true } ], "serialUniquenessScope": [] } },
-    { "reason": "unknown scope dimension", "scheme": { "separator": "-", "serialWidth": 6, "components": [ { "type": "SERIAL", "required": true } ], "serialUniquenessScope": ["SPECIES"] } }
+    {
+      "reason": "serial not last",
+      "scheme": {
+        "separator": "-",
+        "serialWidth": 6,
+        "components": [
+          {
+            "type": "SERIAL",
+            "required": true
+          },
+          {
+            "type": "PROJECT_CODE",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": []
+      }
+    },
+    {
+      "reason": "no serial",
+      "scheme": {
+        "separator": "-",
+        "serialWidth": 6,
+        "components": [
+          {
+            "type": "PROJECT_CODE",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": []
+      }
+    },
+    {
+      "reason": "duplicate component",
+      "scheme": {
+        "separator": "-",
+        "serialWidth": 6,
+        "components": [
+          {
+            "type": "PROJECT_CODE",
+            "required": true
+          },
+          {
+            "type": "PROJECT_CODE",
+            "required": true
+          },
+          {
+            "type": "SERIAL",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": []
+      }
+    },
+    {
+      "reason": "serial width out of range",
+      "scheme": {
+        "separator": "-",
+        "serialWidth": 0,
+        "components": [
+          {
+            "type": "SERIAL",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": []
+      }
+    },
+    {
+      "reason": "unsupported separator",
+      "scheme": {
+        "separator": "#",
+        "serialWidth": 6,
+        "components": [
+          {
+            "type": "SERIAL",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": []
+      }
+    },
+    {
+      "reason": "unknown scope dimension",
+      "scheme": {
+        "separator": "-",
+        "serialWidth": 6,
+        "components": [
+          {
+            "type": "SERIAL",
+            "required": true
+          }
+        ],
+        "serialUniquenessScope": [
+          "SPECIES"
+        ]
+      }
+    }
   ]
 }

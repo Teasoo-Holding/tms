@@ -11,7 +11,8 @@ object TreeIdAssembler {
     private val DIGITS = Regex("^[0-9]+$")
     private val ZEROS = Regex("^0+$")
 
-    data class Component(val type: String, val required: Boolean)
+    /** [value] is the fixed text of a TEXT component (e.g. a vendor's own tag prefix). */
+    data class Component(val type: String, val required: Boolean, val value: String? = null)
 
     data class Scheme(
         val separator: String,
@@ -36,7 +37,7 @@ object TreeIdAssembler {
     /** Read-only prefix shown to the officer before they type the serial. */
     fun prefix(scheme: Scheme, values: Map<String, String?>): String {
         val parts = scheme.components.filter { it.type != "SERIAL" }.mapNotNull { c ->
-            val v = values[c.type]?.trim().orEmpty()
+            val v = (if (c.type == "TEXT") c.value else values[c.type])?.trim().orEmpty()
             when {
                 v.isNotEmpty() -> v.uppercase()
                 c.required -> throw TreeIdException("COMPONENT_MISSING:${c.type}")
