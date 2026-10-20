@@ -259,6 +259,33 @@ class LocalStoreTest {
     }
 
     @Test
+    fun theMostSpecificIdFormatAppliesForTheVendorAndYear() = runBlocking {
+        val components = """[{"type":"PROJECT_CODE","required":true},{"type":"PLANTING_YEAR","required":true},{"type":"VENDOR_CODE","required":true},""" +
+            """{"type":"TEXT","required":true,"value":"TR"},{"type":"SERIAL","required":true}]"""
+        db.reference().upsertVendors(listOf(VendorEntity("v1", "Konam", "KNM", true)))
+        db.reference().upsertSchemes(listOf(IdSchemeEntity("sch-knm", "p1", 2, components, "-", 5, """["PROJECT","PLANTING_YEAR","VENDOR"]""", true, vendorId = "v1")))
+        val knm = area.copy(vendorId = "v1")
+        assertEquals("T4L-2024-KNM-TR-", trees.prefix(knm).prefix)
+        // Another vendor (or none) falls back to the project's default format.
+        assertEquals("T4L-2024-", trees.prefix(area).prefix)
+        val active = db.reference().activeSchemes("p1")
+        assertEquals("sch-knm", resolveScheme(active, "y2024", "v1")!!.id)
+        assertEquals("sch1", resolveScheme(active, "y2024", "v2")!!.id)
+    }
+
+    @Test
+    fun sectorsAndVendorsFollowThePlantingYear() = runBlocking {
+        val r = db.reference()
+        r.upsertSectors(listOf(SectorEntity("s25", "p1", "North 2025", "S01", 7.4, 3.9, null, true, plantingYearId = "y2025")))
+        r.upsertVendors(listOf(VendorEntity("v1", "Konam", "KNM", true), VendorEntity("v2", "Other", "OTH", true)))
+        r.upsertYearVendors(listOf(PlantingYearVendorEntity("l1", "p1", "y2025", "v1", true)))
+        assertEquals(listOf("s1", "s25"), r.sectorsForYear("p1", "y2025").first().map { it.id }) // s1 is not tied to a year
+        assertEquals(listOf("s1"), r.sectorsForYear("p1", "y2024").first().map { it.id })
+        assertEquals(listOf("v1"), r.vendorsForYear("y2025").first().map { it.id })
+        assertTrue(r.vendorsForYear("y2024").first().isEmpty())
+    }
+
+    @Test
     fun enforcesAllocatedSerialRanges() = runBlocking {
         db.reference().upsertAllocations(listOf(SerialAllocationEntity("a1", "p1", "PLANTING_YEAR=y2024|PROJECT=p1", user, 100, 199, true)))
         val info = trees.prefix(area)

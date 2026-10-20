@@ -44,9 +44,14 @@ import javax.inject.Inject
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
-class AreaMapViewModel @Inject constructor(db: TmsDatabase) : ViewModel() {
+class AreaMapViewModel @Inject constructor(db: TmsDatabase, sessions: com.teasoo.tms.data.repo.FieldSessionRepository) : ViewModel() {
     val projectId = MutableStateFlow<String?>(null)
-    val sectors = projectId.filterNotNull().flatMapLatest { db.reference().sectors(it) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    /** The field session's planting year, when it is for this project: its survey is the one shown. */
+    val yearId = combine(projectId, sessions.session) { p, s -> s?.takeIf { it.projectId == p }?.plantingYearId }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val sectors = combine(projectId.filterNotNull(), yearId) { p, y -> p to y }
+        .flatMapLatest { (p, y) -> if (y == null) db.reference().sectors(p) else db.reference().sectorsForYear(p, y) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val subSectors = projectId.filterNotNull().flatMapLatest { db.reference().subSectors(it) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val shares = projectId.filterNotNull().flatMapLatest { db.trees().shareBySubSector(it) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 }
@@ -70,7 +75,8 @@ fun AreaMapScreen(app: AppViewModel, onBack: () -> Unit, vm: AreaMapViewModel = 
     val projectId by app.selectedProjectId.collectAsStateWithLifecycle()
     LaunchedEffect(projectId) { vm.projectId.value = projectId }
     val sectors by vm.sectors.collectAsStateWithLifecycle()
-    val subs by vm.subSectors.collectAsStateWithLifecycle()
+    // Only the sub-sectors of the sectors shown (this year's survey).
+    val subs = vm.subSectors.collectAsStateWithLifecycle().value.filter { s -> sectors.any { it.id == s.sectorId } }
     val shares by vm.shares.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     Scaffold(topBar = {

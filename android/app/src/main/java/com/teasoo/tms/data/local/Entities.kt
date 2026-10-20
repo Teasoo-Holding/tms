@@ -37,6 +37,9 @@ data class IdSchemeEntity(
     /** JSON array of scope dimensions. */
     val serialScopeJson: String,
     val active: Boolean,
+    /** Narrows the format to one vendor and/or planting year; both null = the project's default format. */
+    val vendorId: String? = null,
+    val plantingYearId: String? = null,
 )
 
 @Entity(tableName = "sectors", indices = [Index("projectId")])
@@ -50,6 +53,8 @@ data class SectorEntity(
     /** GeoJSON Polygon, or null. */
     val boundaryJson: String?,
     val active: Boolean,
+    /** The planting year whose land survey defined this sector; null = an older area usable in any year. */
+    val plantingYearId: String? = null,
 )
 
 @Entity(tableName = "sub_sectors", indices = [Index("sectorId"), Index("projectId")])
@@ -90,6 +95,16 @@ data class VendorEntity(
     @PrimaryKey val id: String,
     val name: String,
     val shortCode: String?,
+    val active: Boolean,
+)
+
+/** A vendor planting across a planting year's whole area. */
+@Entity(tableName = "planting_year_vendors", indices = [Index("plantingYearId")])
+data class PlantingYearVendorEntity(
+    @PrimaryKey val id: String,
+    val projectId: String,
+    val plantingYearId: String,
+    val vendorId: String,
     val active: Boolean,
 )
 

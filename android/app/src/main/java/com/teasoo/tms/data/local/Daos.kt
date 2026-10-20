@@ -30,9 +30,20 @@ interface ReferenceDao {
     @Query("SELECT * FROM projects WHERE id = :id") suspend fun project(id: String): ProjectEntity?
     @Query("SELECT * FROM planting_years WHERE projectId = :projectId ORDER BY yearLabel DESC") fun years(projectId: String): Flow<List<PlantingYearEntity>>
     @Query("SELECT * FROM planting_years WHERE id = :id") suspend fun year(id: String): PlantingYearEntity?
-    @Query("SELECT * FROM id_schemes WHERE projectId = :projectId AND active LIMIT 1") suspend fun activeScheme(projectId: String): IdSchemeEntity?
+    @Query("SELECT * FROM id_schemes WHERE projectId = :projectId AND active") suspend fun activeSchemes(projectId: String): List<IdSchemeEntity>
     @Query("SELECT * FROM id_schemes WHERE id = :id") suspend fun scheme(id: String): IdSchemeEntity?
     @Query("SELECT * FROM sectors WHERE projectId = :projectId ORDER BY shortCode") fun sectors(projectId: String): Flow<List<SectorEntity>>
+    /** The planting year's surveyed sectors, plus older sectors not tied to a year. */
+    @Query("SELECT * FROM sectors WHERE projectId = :projectId AND (plantingYearId = :yearId OR plantingYearId IS NULL) ORDER BY shortCode")
+    fun sectorsForYear(projectId: String, yearId: String): Flow<List<SectorEntity>>
+    @Upsert suspend fun upsertYearVendors(rows: List<PlantingYearVendorEntity>)
+    @Query("DELETE FROM planting_year_vendors WHERE id NOT IN (:keep)") suspend fun pruneYearVendors(keep: List<String>)
+    /** Vendors planting in a year; empty when the administrator has not linked any. */
+    @Query(
+        """SELECT v.* FROM vendors v JOIN planting_year_vendors l ON l.vendorId = v.id
+            WHERE l.plantingYearId = :yearId AND l.active AND v.active ORDER BY v.name""",
+    )
+    fun vendorsForYear(yearId: String): Flow<List<VendorEntity>>
     @Query("SELECT * FROM sectors WHERE id = :id") suspend fun sector(id: String): SectorEntity?
     @Query("SELECT * FROM sub_sectors WHERE projectId = :projectId ORDER BY shortCode") fun subSectors(projectId: String): Flow<List<SubSectorEntity>>
     @Query("SELECT * FROM sub_sectors WHERE id = :id") suspend fun subSector(id: String): SubSectorEntity?

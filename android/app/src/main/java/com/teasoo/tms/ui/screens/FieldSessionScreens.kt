@@ -18,6 +18,7 @@ import androidx.lifecycle.viewModelScope
 import com.teasoo.tms.data.local.*
 import com.teasoo.tms.data.repo.FieldSession
 import com.teasoo.tms.data.repo.FieldSessionRepository
+import com.teasoo.tms.data.repo.resolveScheme
 import com.teasoo.tms.data.session.SessionState
 import com.teasoo.tms.data.session.SessionStore
 import com.teasoo.tms.ui.components.DateField
@@ -151,8 +152,6 @@ class SessionSetupViewModel @Inject constructor(
     val projects = ref.projects().combine(isAdmin) { l, admin -> l.filter { it.status == "ACTIVE" || admin } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val grants = ref.assignments().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val vendors = ref.vendors().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
     val projectId = MutableStateFlow<String?>(null)
     val yearId = MutableStateFlow<String?>(null)
     val sectorId = MutableStateFlow<String?>(null)
@@ -164,11 +163,22 @@ class SessionSetupViewModel @Inject constructor(
         // Officers work in open planting years; administrators may back-enter closed ones.
         .combine(isAdmin) { l, admin -> l.filter { it.active || admin } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val sectors = projectId.filterNotNull().flatMapLatest { ref.sectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    // Each year's land survey has its own sectors.
+    val sectors = combine(projectId.filterNotNull(), yearId) { p, y -> p to y }
+        .flatMapLatest { (p, y) -> if (y == null) flowOf(emptyList()) else ref.sectorsForYear(p, y) }
+        .map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    /** Vendors planting in the chosen year; when none are linked, every active vendor is offered. */
+    private val linkedVendors = yearId.flatMapLatest { y -> if (y == null) flowOf(emptyList()) else ref.vendorsForYear(y) }
+    val vendors = combine(linkedVendors, ref.vendors()) { linked, all -> linked.ifEmpty { all.filter { it.active } } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val subSectors = projectId.filterNotNull().flatMapLatest { ref.subSectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val vendorNeeded = projectId.filterNotNull().mapLatest { id ->
-        ref.activeScheme(id)?.let { it.componentsJson.contains("VENDOR_CODE") || it.serialScopeJson.contains("VENDOR") } ?: false
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    /** A vendor is chosen when the year has vendors, or when the ID format uses one. */
+    val vendorNeeded = combine(projectId.filterNotNull(), yearId, linkedVendors) { p, y, linked -> Triple(p, y, linked) }
+        .mapLatest { (p, y, linked) ->
+            linked.isNotEmpty() || ref.activeSchemes(p).let { all ->
+                all.any { it.vendorId != null } || resolveScheme(all, y, null)?.let { it.componentsJson.contains("VENDOR_CODE") || it.serialScopeJson.contains("VENDOR") } == true
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     init {
         // Pre-fill from the current session, so "Change" only asks for what is different.
@@ -182,7 +192,13 @@ class SessionSetupViewModel @Inject constructor(
 
     fun selectProject(id: String) {
         if (projectId.value == id) return
-        projectId.value = id; yearId.value = null; sectorId.value = null; subSectorId.value = null
+        projectId.value = id; yearId.value = null; sectorId.value = null; subSectorId.value = null; vendorId.value = null
+    }
+
+    /** A different year means a different survey (areas) and possibly different vendors. */
+    fun selectYear(id: String) {
+        if (yearId.value == id) return
+        yearId.value = id; sectorId.value = null; subSectorId.value = null; vendorId.value = null
     }
 
     fun selectSector(id: String) {
@@ -230,7 +246,8 @@ fun SessionSetupScreen(onStarted: () -> Unit, onBack: () -> Unit, vm: SessionSet
     val mySubs = subSectors.filter { ss -> ss.sectorId == sectorId && (isAdmin || allowed(grants, ss.projectId, ss.sectorId, ss.id)) }
     // Single choices are made automatically.
     LaunchedEffect(projects) { if (projectId == null && projects.size == 1) vm.selectProject(projects[0].id) }
-    LaunchedEffect(years) { if (yearId == null && years.size == 1) vm.yearId.value = years[0].id }
+    LaunchedEffect(years) { if (yearId == null && years.size == 1) vm.selectYear(years[0].id) }
+    LaunchedEffect(vendors, vendorNeeded) { if (vendorNeeded && vendorId == null && vendors.size == 1) vm.vendorId.value = vendors[0].id }
     LaunchedEffect(mySectors) { if (sectorId == null && mySectors.size == 1) vm.selectSector(mySectors[0].id) }
     LaunchedEffect(mySubs) { if (subSectorId == null && mySubs.size == 1) vm.subSectorId.value = mySubs[0].id }
 
@@ -241,14 +258,16 @@ fun SessionSetupScreen(onStarted: () -> Unit, onBack: () -> Unit, vm: SessionSet
             Text("Choose these once. Every tree you register or visit will use them until you change them. You can switch sub-sector at any time as you move.",
                 style = MaterialTheme.typography.bodyMedium)
             Picker("Project", projects, projects.find { it.id == projectId }, { "${it.name} (${it.shortCode})" }, { vm.selectProject(it.id) })
-            Picker("Planting year", years, years.find { it.id == yearId }, { it.yearLabel + if (it.active) "" else " (closed – back-entry)" }, { vm.yearId.value = it.id },
+            Picker("Planting year", years, years.find { it.id == yearId }, { it.yearLabel + if (it.active) "" else " (closed – back-entry)" }, { vm.selectYear(it.id) },
                 enabled = projectId != null, supportingText = "The cohort on the labels, not necessarily this year")
-            Picker("Sector", mySectors, mySectors.find { it.id == sectorId }, { "${it.shortCode} · ${it.name}" }, { vm.selectSector(it.id) }, enabled = projectId != null)
-            Picker("Starting sub-sector", mySubs, mySubs.find { it.id == subSectorId }, { "${it.shortCode} · ${it.name}" }, { vm.subSectorId.value = it.id }, enabled = sectorId != null)
             if (vendorNeeded) {
                 Picker("Vendor", vendors, vendors.find { it.id == vendorId }, { listOfNotNull(it.shortCode, it.name).joinToString(" · ") }, { vm.vendorId.value = it.id },
-                    supportingText = "Part of this project’s tree ID")
+                    enabled = yearId != null, supportingText = "Whose trees you are tagging today; their tag format is used")
             }
+            Picker("Sector", mySectors, mySectors.find { it.id == sectorId }, { "${it.shortCode} · ${it.name}" }, { vm.selectSector(it.id) }, enabled = yearId != null,
+                supportingText = "From this year’s land survey")
+            Picker("Starting sub-sector", mySubs, mySubs.find { it.id == subSectorId }, { "${it.shortCode} · ${it.name}" }, { vm.subSectorId.value = it.id }, enabled = sectorId != null)
+            if (yearId != null && mySectors.isEmpty()) Notice("No surveyed areas for this planting year on this device yet. Sync, or ask an administrator to add this year's sectors.")
             DateField("Planted on (default for new trees)", plantedOn, { vm.plantedOn.value = it })
             if (projects.isEmpty()) Notice("No projects on this device yet. Sync while connected, or ask an administrator to assign you.")
             Button(
