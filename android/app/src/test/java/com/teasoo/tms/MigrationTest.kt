@@ -43,5 +43,11 @@ class MigrationTest {
             assertEquals(true, it.isNull(1))
             assertEquals("{}", it.getString(2))
         }
+        // Version 3: areas per planting year, vendors per year, per-vendor ID formats.
+        val v3 = helper.runMigrationsAndValidate("migration-test", 3, true)
+        v3.query("SELECT syncState FROM trees WHERE id = 't1'").use {
+            it.moveToFirst()
+            assertEquals("PENDING", it.getString(0))
+        }
     }
 }

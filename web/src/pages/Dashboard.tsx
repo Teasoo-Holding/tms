@@ -11,6 +11,14 @@ export const DATE_NOTE = 'Dates: tree counts cover trees registered in the perio
 export function DashboardPage() {
   const f = useReportFilters();
   const projectId = f.get('project_id');
+  const yearId = f.get('planting_year_id');
+  // With a planting year chosen, areas show only that year's survey (plus older areas not tied to a year).
+  const areas = useQuery({ queryKey: ['areas', projectId], queryFn: () => api.get<any[]>(`/projects/${projectId}/areas`), enabled: !!projectId && !!yearId });
+  const yearSectorIds = useMemo(
+    () => (projectId && yearId && areas.data ? new Set(areas.data.filter((a) => a.planting_year_id === yearId || a.planting_year_id == null).map((a) => a.id as string)) : null),
+    [projectId, yearId, areas.data],
+  );
+  const inYear = (sectorId: string) => !yearSectorIds || yearSectorIds.has(sectorId);
   const statuses = useQuery({ queryKey: ['tree-statuses'], queryFn: () => api.get<any[]>('/tree-statuses') });
   const species = useQuery({ queryKey: ['tree-species'], queryFn: () => api.get<any[]>('/tree-species') });
   const filter = qs({ ...f.values, overdue_days: f.get('overdue_days') || 90 });
@@ -192,7 +200,13 @@ export function DashboardPage() {
             />
           </ChartCard>
 
-          {projectId && <AreaShareCard projectId={projectId} rows={s.area_coverage} sectors={s.sector_share ?? []} />}
+          {projectId && (
+            <AreaShareCard
+              projectId={projectId}
+              rows={s.area_coverage.filter((r: any) => inYear(r.sector_id))}
+              sectors={(s.sector_share ?? []).filter((r: any) => inYear(r.id))}
+            />
+          )}
 
           <div className="grid charts">
             <ChartCard title="Registered trees by sector" empty={s.by_sector.length === 0 && 'No trees registered yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [`${r.short_code} · ${r.name}`, fmtNum(r.count)])} />}>
@@ -209,7 +223,7 @@ export function DashboardPage() {
               <SimpleTable
                 head={['Sub-sector', 'Area (ha)', 'Trees', 'Trees / ha']}
                 numeric={[1, 2, 3]}
-                rows={s.area_coverage.map((r: any) => [
+                rows={s.area_coverage.filter((r: any) => inYear(r.sector_id)).map((r: any) => [
                   `${r.sector_code}/${r.short_code} · ${r.name}`,
                   r.area_hectares ?? '—',
                   fmtNum(r.registered_trees),
@@ -281,7 +295,7 @@ function AreaShareCard({ projectId, rows, sectors }: { projectId: string; rows: 
         description="Each sub-sector at its reference point, sized by registered trees and coloured by the share of observed trees whose latest visit recorded them dead. Hover or click for figures."
       />
       {rows.length === 0 ? (
-        <div className="empty">This project has no sub-sectors yet.</div>
+        <div className="empty">No sub-sectors for this project or planting year yet.</div>
       ) : (
         <div className="stack">
           {mapFailed || !located ? (

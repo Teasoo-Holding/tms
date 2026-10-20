@@ -60,7 +60,7 @@ data class ProjectDto(
 data class PlantingYearDto(val id: String, @SerialName("project_id") val projectId: String, @SerialName("year_label") val yearLabel: String, val active: Boolean)
 
 @Serializable
-data class SchemeComponentDto(val type: String, val required: Boolean = true)
+data class SchemeComponentDto(val type: String, val required: Boolean = true, val value: String? = null)
 
 @Serializable
 data class IdSchemeDto(
@@ -68,6 +68,8 @@ data class IdSchemeDto(
     @SerialName("component_definition") val components: List<SchemeComponentDto>,
     val separator: String, @SerialName("serial_width") val serialWidth: Int,
     @SerialName("serial_uniqueness_scope") val serialUniquenessScope: List<String>, val active: Boolean,
+    @SerialName("vendor_id") val vendorId: String? = null,
+    @SerialName("planting_year_id") val plantingYearId: String? = null,
 )
 
 @Serializable
@@ -75,6 +77,16 @@ data class SectorDto(
     val id: String, @SerialName("project_id") val projectId: String, val name: String, @SerialName("short_code") val shortCode: String,
     @SerialName("reference_latitude") val referenceLatitude: Double, @SerialName("reference_longitude") val referenceLongitude: Double,
     val boundary: JsonElement? = null, val active: Boolean,
+    @SerialName("planting_year_id") val plantingYearId: String? = null,
+)
+
+@Serializable
+data class PlantingYearVendorDto(
+    val id: String,
+    @SerialName("project_id") val projectId: String,
+    @SerialName("planting_year_id") val plantingYearId: String,
+    @SerialName("vendor_id") val vendorId: String,
+    val active: Boolean = true,
 )
 
 @Serializable
@@ -142,6 +154,7 @@ data class BootstrapResponse(
     val assignments: List<AssignmentDto>,
     @SerialName("serial_allocations") val serialAllocations: List<SerialAllocationDto>,
     @SerialName("custom_fields") val customFields: List<CustomFieldDto> = emptyList(),
+    @SerialName("planting_year_vendors") val plantingYearVendors: List<PlantingYearVendorDto> = emptyList(),
 )
 
 // ---------------------------------------------------------------- field records

@@ -19,6 +19,11 @@ export class AccessService {
 
   async grants(user: AuthUser, q: Queryable = this.db): Promise<AreaGrant[] | 'ALL'> {
     if (user.role === 'ADMIN') return 'ALL';
+    if (user.role === 'EXECUTIVE') {
+      // Teasoo management sees every project; clients and sponsors only those they are assigned to.
+      const u = await this.db.one(q, 'SELECT all_projects FROM users WHERE id = $1', [user.id]);
+      if (u?.all_projects) return 'ALL';
+    }
     const { rows } = await q.query(
       `SELECT a.project_id, a.sector_id, a.sub_sector_id
          FROM user_project_assignments a JOIN projects p ON p.id = a.project_id

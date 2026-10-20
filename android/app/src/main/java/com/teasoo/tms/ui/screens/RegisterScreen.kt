@@ -73,11 +73,18 @@ class RegisterViewModel @Inject constructor(
     // Officers work in open planting years; administrators may back-enter closed ones.
     val years = projectId.filterNotNull().flatMapLatest { ref.years(it) }.combine(isAdmin) { l, admin -> l.filter { it.active || admin } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val sectors = projectId.filterNotNull().flatMapLatest { ref.sectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val yearId = form.map { it.yearId }.distinctUntilChanged()
+    // Each year's land survey has its own sectors.
+    val sectors = combine(projectId.filterNotNull(), yearId) { p, y -> p to y }
+        .flatMapLatest { (p, y) -> if (y == null) flowOf(emptyList()) else ref.sectorsForYear(p, y) }
+        .map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val subSectors = projectId.filterNotNull().flatMapLatest { ref.subSectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val species = ref.species().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val statuses = ref.statuses().map { l -> l.filter { it.active && !it.isTerminal } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val vendors = ref.vendors().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val linkedVendors = yearId.flatMapLatest { y -> if (y == null) flowOf(emptyList()) else ref.vendorsForYear(y) }
+    /** Vendors planting in the chosen year, or every active vendor when none are linked. */
+    val vendors = combine(linkedVendors, ref.vendors()) { linked, all -> linked.ifEmpty { all.filter { it.active } } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val assignments = ref.assignments().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val treeFieldDefs = projectId.filterNotNull().flatMapLatest { ref.customFields(it, "TREE") }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val observationFieldDefs = projectId.filterNotNull().flatMapLatest { ref.customFields(it, "OBSERVATION") }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -117,8 +124,10 @@ class RegisterViewModel @Inject constructor(
 
     private suspend fun refresh() {
         val pid = projectId.value ?: return
-        val scheme = ref.activeScheme(pid)
-        vendorNeeded.value = scheme?.let { s -> s.componentsJson.contains("VENDOR_CODE") || s.serialScopeJson.contains("VENDOR") } ?: false
+        val all = ref.activeSchemes(pid)
+        val f = form.value
+        vendorNeeded.value = (f.yearId != null && ref.vendorsForYear(f.yearId).first().isNotEmpty()) || all.any { it.vendorId != null } ||
+            resolveScheme(all, f.yearId, null)?.let { s -> s.componentsJson.contains("VENDOR_CODE") || s.serialScopeJson.contains("VENDOR") } == true
         val a = area()
         if (a == null) {
             prefix.value = null; serialCheck.value = null; return
@@ -220,7 +229,7 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             replacing?.let { Notice("Replacing ${it.physicalTreeId}. The replacement gets its own new ID and planting year; the original keeps its history.") }
 
-            Picker("Planting year", years, years.find { it.id == f.yearId }, { it.yearLabel + if (it.active) "" else " (closed – back-entry)" }, { y -> vm.update { it.copy(yearId = y.id) } },
+            Picker("Planting year", years, years.find { it.id == f.yearId }, { it.yearLabel + if (it.active) "" else " (closed – back-entry)" }, { y -> vm.update { if (it.yearId == y.id) it else it.copy(yearId = y.id, sectorId = null, subSectorId = null, vendorId = null) } },
                 supportingText = "Choose the cohort on the label, not today’s year")
             Picker("Sector", mySectors, mySectors.find { it.id == f.sectorId }, { "${it.shortCode} · ${it.name}" }, { s -> vm.update { it.copy(sectorId = s.id, subSectorId = null) } })
             Picker("Sub-sector", mySubs, mySubs.find { it.id == f.subSectorId }, { "${it.shortCode} · ${it.name}" }, { s -> vm.update { it.copy(subSectorId = s.id) } }, enabled = f.sectorId != null)

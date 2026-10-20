@@ -77,7 +77,8 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
     /** The read-only part of the ID that the officer does not type. */
     suspend fun prefix(a: AreaSelection): PrefixInfo {
         val project = ref.project(a.projectId) ?: throw RegistrationException("Project not found. Sync to refresh.")
-        val scheme = ref.activeScheme(a.projectId) ?: throw RegistrationException("This project has no tree ID format yet. Ask an administrator.")
+        val scheme = resolveScheme(ref.activeSchemes(a.projectId), a.plantingYearId, a.vendorId)
+            ?: throw RegistrationException("No tree ID format applies to this project, year and vendor yet. Ask an administrator.")
         val year = ref.year(a.plantingYearId)
         val sector = ref.sector(a.sectorId)
         val sub = ref.subSector(a.subSectorId)

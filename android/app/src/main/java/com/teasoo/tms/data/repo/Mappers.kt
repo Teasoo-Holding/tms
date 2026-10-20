@@ -17,9 +17,20 @@ fun IdSchemeDto.toEntity() = IdSchemeEntity(
     componentsJson = TmsJson.encodeToString(ListSerializer(SchemeComponentDto.serializer()), components),
     separator = separator, serialWidth = serialWidth,
     serialScopeJson = TmsJson.encodeToString(ListSerializer(String.serializer()), serialUniquenessScope),
-    active = active,
+    active = active, vendorId = vendorId, plantingYearId = plantingYearId,
 )
-fun SectorDto.toEntity() = SectorEntity(id, projectId, name, shortCode, referenceLatitude, referenceLongitude, boundary.asText(), active)
+fun SectorDto.toEntity() = SectorEntity(id, projectId, name, shortCode, referenceLatitude, referenceLongitude, boundary.asText(), active, plantingYearId)
+fun PlantingYearVendorDto.toEntity() = PlantingYearVendorEntity(id, projectId, plantingYearId, vendorId, active)
+
+/**
+ * The ID format for registrations by [vendorId] in [yearId]: the most specific active format wins
+ * (vendor + year, then vendor, then year, then the project default).
+ */
+fun resolveScheme(active: List<IdSchemeEntity>, yearId: String?, vendorId: String?): IdSchemeEntity? =
+    active.firstOrNull { it.vendorId != null && it.vendorId == vendorId && it.plantingYearId == yearId }
+        ?: active.firstOrNull { it.vendorId != null && it.vendorId == vendorId && it.plantingYearId == null }
+        ?: active.firstOrNull { it.vendorId == null && it.plantingYearId != null && it.plantingYearId == yearId }
+        ?: active.firstOrNull { it.vendorId == null && it.plantingYearId == null }
 fun SubSectorDto.toEntity() = SubSectorEntity(id, sectorId, projectId, name, shortCode, referenceLatitude, referenceLongitude, boundary.asText(), active)
 fun SpeciesDto.toEntity() = SpeciesEntity(id, scientificName, commonName, active)
 fun StatusDto.toEntity() = StatusEntity(id, code, name, isTerminal, allowsReplacement, requiresPhoto, sortOrder, active)
@@ -56,6 +67,6 @@ fun CustomFieldDto.toEntity() = CustomFieldEntity(
 fun IdSchemeEntity.toScheme() = TreeIdAssembler.Scheme(
     separator = separator,
     serialWidth = serialWidth,
-    components = TmsJson.decodeFromString(ListSerializer(SchemeComponentDto.serializer()), componentsJson).map { TreeIdAssembler.Component(it.type, it.required) },
+    components = TmsJson.decodeFromString(ListSerializer(SchemeComponentDto.serializer()), componentsJson).map { TreeIdAssembler.Component(it.type, it.required, it.value) },
     serialUniquenessScope = TmsJson.decodeFromString(ListSerializer(String.serializer()), serialScopeJson),
 )

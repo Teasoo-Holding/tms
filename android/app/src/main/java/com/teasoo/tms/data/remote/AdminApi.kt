@@ -24,10 +24,18 @@ interface AdminApi {
     @PATCH("api/v1/planting-years/{id}") suspend fun updatePlantingYear(@Path("id") id: String, @Body body: JsonObject): AdminPlantingYearDto
 
     @POST("api/v1/projects/{id}/tree-id-schemes") suspend fun createScheme(@Path("id") projectId: String, @Body body: SchemeRequest): AdminSchemeDto
+    /** Retires a vendor or year format so the broader one applies again (the project default cannot be retired: 400 DEFAULT_FORMAT). */
+    @POST("api/v1/tree-id-schemes/{id}/retire") suspend fun retireScheme(@Path("id") id: String): JsonElement
+
+    // ---------------------------------------------------------------- vendors per planting year
+    @POST("api/v1/planting-years/{id}/vendors") suspend fun linkVendor(@Path("id") plantingYearId: String, @Body body: LinkVendorRequest): JsonElement
+    @POST("api/v1/planting-year-vendors/{id}/unlink") suspend fun unlinkVendor(@Path("id") linkId: String): JsonElement
 
     // ---------------------------------------------------------------- areas
     /** Decode with [decodeAreas]. */
-    @GET("api/v1/projects/{id}/areas") suspend fun areasRaw(@Path("id") projectId: String): JsonElement
+    @GET("api/v1/projects/{id}/areas")
+    suspend fun areasRaw(@Path("id") projectId: String, @Query("planting_year_id") plantingYearId: String? = null): JsonElement
+    /** The body must carry `planting_year_id`. */
     @POST("api/v1/projects/{id}/sectors") suspend fun createSector(@Path("id") projectId: String, @Body body: AreaRequest): JsonElement
     @PATCH("api/v1/sectors/{id}") suspend fun updateSector(@Path("id") id: String, @Body body: JsonObject): JsonElement
     @POST("api/v1/sectors/{id}/sub-sectors") suspend fun createSubSector(@Path("id") sectorId: String, @Body body: AreaRequest): JsonElement
@@ -84,7 +92,9 @@ interface AdminApi {
         @Query("status_id") statusId: String? = null,
         @Query("from") from: String? = null,
         @Query("to") to: String? = null,
+        @Query("vendor_id") vendorId: String? = null,
     ): AnalyticsSummary
 }
 
-suspend fun AdminApi.areas(projectId: String): List<AdminSectorDto> = decodeAreas(areasRaw(projectId))
+/** All sectors, or with [plantingYearId] that year's survey plus older areas not tied to a year. */
+suspend fun AdminApi.areas(projectId: String, plantingYearId: String? = null): List<AdminSectorDto> = decodeAreas(areasRaw(projectId, plantingYearId))

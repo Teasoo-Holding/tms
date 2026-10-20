@@ -29,6 +29,8 @@ class ReferenceRepository @Inject constructor(private val db: TmsDatabase) {
         ref.upsertAssignments(b.assignments.map { it.toEntity() })
         ref.clearAllocations()
         ref.upsertAllocations(b.serialAllocations.map { it.toEntity() })
+        ref.upsertYearVendors(b.plantingYearVendors.map { it.toEntity() })
+        ref.pruneYearVendors(b.plantingYearVendors.map { it.id })
         ref.upsertCustomFields(b.customFields.map { it.toEntity() })
         ref.pruneCustomFields(b.customFields.map { it.id })
     }
@@ -59,6 +61,7 @@ class ReferenceRepository @Inject constructor(private val db: TmsDatabase) {
             "vendor" -> ref.upsertVendors(listOf(decode(VendorDto.serializer()).toEntity()))
             "assignment" -> ref.upsertAssignments(listOf(decode(AssignmentDto.serializer()).toEntity()))
             "serial_allocation" -> ref.upsertAllocations(listOf(decode(SerialAllocationDto.serializer()).toEntity()))
+            "planting_year_vendor" -> ref.upsertYearVendors(listOf(decode(PlantingYearVendorDto.serializer()).toEntity()))
             "custom_field" -> ref.upsertCustomFields(listOf(decode(CustomFieldDto.serializer()).toEntity()))
             "tree" -> applyTree(decode(TreeDto.serializer()))
             "observation" -> {

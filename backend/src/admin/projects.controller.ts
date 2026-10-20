@@ -31,13 +31,16 @@ const PlantingYearBody = z.object({
 
 const SchemeBody = z.object({
   components: z
-    .array(z.object({ type: z.enum(COMPONENT_TYPES), required: z.boolean().default(true) }))
+    .array(z.object({ type: z.enum(COMPONENT_TYPES), required: z.boolean().default(true), value: z.string().trim().max(16).optional() }))
     .min(1)
-    .max(6),
+    .max(8),
   separator: z.string().max(1),
   serial_width: z.number().int(),
   serial_uniqueness_scope: z.array(z.enum(SCOPE_DIMENSIONS)),
   active_from: z.string().datetime({ offset: true }).optional(),
+  /** Narrow the format to one vendor and/or one planting year; omit both for the project's default format. */
+  vendor_id: z.string().uuid().nullish(),
+  planting_year_id: z.string().uuid().nullish(),
 });
 
 const CustomFieldBody = z
@@ -91,11 +94,21 @@ export class ProjectsController {
     await this.access.assertProject(user, id);
     const project = await this.db.one(this.db, 'SELECT * FROM projects WHERE id = $1', [id]);
     if (!project) throw notFound('Project');
-    const [years, schemes] = await Promise.all([
+    const [years, schemes, vendors] = await Promise.all([
       this.db.query('SELECT * FROM planting_years WHERE project_id = $1 ORDER BY year_label', [id]),
-      this.db.query('SELECT * FROM tree_id_schemes WHERE project_id = $1 ORDER BY version DESC', [id]),
+      this.db.query(
+        `SELECT s.*, v.name AS vendor_name, v.short_code AS vendor_short_code, py.year_label
+           FROM tree_id_schemes s LEFT JOIN vendors v ON v.id = s.vendor_id LEFT JOIN planting_years py ON py.id = s.planting_year_id
+          WHERE s.project_id = $1 ORDER BY s.version DESC`,
+        [id],
+      ),
+      this.db.query(
+        `SELECT l.*, v.name AS vendor_name, v.short_code AS vendor_short_code
+           FROM planting_year_vendors l JOIN vendors v ON v.id = l.vendor_id WHERE l.project_id = $1 ORDER BY v.name`,
+        [id],
+      ),
     ]);
-    return { ...project, planting_years: years.rows, tree_id_schemes: schemes.rows };
+    return { ...project, planting_years: years.rows, tree_id_schemes: schemes.rows, planting_year_vendors: vendors.rows };
   }
 
   @Roles('ADMIN')
@@ -199,13 +212,24 @@ export class ProjectsController {
     if (problems.length) throw badRequest('SCHEME_INVALID', 'The ID format is not valid.', problems);
     return this.db.tx(async (tx) => {
       if (!(await this.db.one(tx, 'SELECT id FROM projects WHERE id = $1 FOR UPDATE', [projectId]))) throw notFound('Project');
+      if (b.planting_year_id && !(await this.db.one(tx, 'SELECT id FROM planting_years WHERE id = $1 AND project_id = $2', [b.planting_year_id, projectId]))) {
+        throw badRequest('PLANTING_YEAR_INVALID', 'The planting year does not belong to this project.');
+      }
+      if (b.vendor_id && !(await this.db.one(tx, 'SELECT id FROM vendors WHERE id = $1', [b.vendor_id]))) throw notFound('Vendor');
       const { rows } = await tx.query('SELECT COALESCE(max(version), 0) + 1 AS v FROM tree_id_schemes WHERE project_id = $1', [projectId]);
-      await tx.query('UPDATE tree_id_schemes SET active = false, updated_at = now() WHERE project_id = $1 AND active', [projectId]);
+      // Replaces the current format for the same vendor/year scope only; other vendors' formats stay.
+      await tx.query(
+        `UPDATE tree_id_schemes SET active = false, updated_at = now()
+          WHERE project_id = $1 AND active AND vendor_id IS NOT DISTINCT FROM $2 AND planting_year_id IS NOT DISTINCT FROM $3`,
+        [projectId, b.vendor_id ?? null, b.planting_year_id ?? null],
+      );
       const created = await this.db.one(
         tx,
-        `INSERT INTO tree_id_schemes (project_id, version, component_definition, separator, serial_width, serial_uniqueness_scope, active_from, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, now()), $8) RETURNING *`,
-        [projectId, rows[0].v, JSON.stringify(b.components), b.separator, b.serial_width, JSON.stringify(b.serial_uniqueness_scope), b.active_from ?? null, user.id],
+        `INSERT INTO tree_id_schemes (project_id, version, component_definition, separator, serial_width, serial_uniqueness_scope, active_from, created_by,
+                                      vendor_id, planting_year_id)
+         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, now()), $8, $9, $10) RETURNING *`,
+        [projectId, rows[0].v, JSON.stringify(b.components), b.separator, b.serial_width, JSON.stringify(b.serial_uniqueness_scope), b.active_from ?? null, user.id,
+          b.vendor_id ?? null, b.planting_year_id ?? null],
       );
       await this.audit.record({ actorId: user.id, action: 'tree_id_scheme.create', entityType: 'tree_id_scheme', entityId: created!.id, projectId, after: created }, tx);
       return created;
@@ -262,6 +286,53 @@ export class ProjectsController {
         [id, n.label, JSON.stringify(n.options), n.required, n.sticky, n.help_text, n.sort_order, n.active],
       );
       await this.audit.record({ actorId: user.id, action: 'custom_field.update', entityType: 'custom_field', entityId: id, projectId: before.project_id, before, after }, tx);
+      return after;
+    });
+  }
+
+  /** Retires a vendor- or year-specific format so the broader one applies again (the project default cannot be retired). */
+  @Roles('ADMIN')
+  @Post('tree-id-schemes/:id/retire')
+  async retireScheme(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.db.tx(async (tx) => {
+      const before = await this.db.one(tx, 'SELECT * FROM tree_id_schemes WHERE id = $1 FOR UPDATE', [id]);
+      if (!before) throw notFound('ID format');
+      if (!before.vendor_id && !before.planting_year_id) throw badRequest('DEFAULT_FORMAT', 'The project default format can be replaced but not retired.');
+      const after = await this.db.one(tx, 'UPDATE tree_id_schemes SET active = false, updated_at = now() WHERE id = $1 RETURNING *', [id]);
+      await this.audit.record({ actorId: user.id, action: 'tree_id_scheme.retire', entityType: 'tree_id_scheme', entityId: id, projectId: before.project_id, before, after }, tx);
+      return after;
+    });
+  }
+
+  // ------------------------------------------------------------------ vendors per planting year
+  /** A vendor plants across the whole surveyed area of a planting year. */
+  @Roles('ADMIN')
+  @Post('planting-years/:id/vendors')
+  async linkVendor(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) yearId: string, @Body() body: unknown) {
+    const b = parse(z.object({ vendor_id: z.string().uuid() }), body);
+    return this.db.tx(async (tx) => {
+      const year = await this.db.one(tx, 'SELECT id, project_id FROM planting_years WHERE id = $1', [yearId]);
+      if (!year) throw notFound('Planting year');
+      if (!(await this.db.one(tx, 'SELECT id FROM vendors WHERE id = $1', [b.vendor_id]))) throw notFound('Vendor');
+      const row = await this.db.one(
+        tx,
+        `INSERT INTO planting_year_vendors (project_id, planting_year_id, vendor_id) VALUES ($1, $2, $3)
+         ON CONFLICT (planting_year_id, vendor_id) DO UPDATE SET active = true, updated_at = now() RETURNING *`,
+        [year.project_id, yearId, b.vendor_id],
+      );
+      await this.audit.record({ actorId: user.id, action: 'planting_year_vendor.link', entityType: 'planting_year_vendor', entityId: row!.id, projectId: year.project_id, after: row }, tx);
+      return row;
+    });
+  }
+
+  @Roles('ADMIN')
+  @Post('planting-year-vendors/:id/unlink')
+  async unlinkVendor(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    return this.db.tx(async (tx) => {
+      const before = await this.db.one(tx, 'SELECT * FROM planting_year_vendors WHERE id = $1 FOR UPDATE', [id]);
+      if (!before) throw notFound('Vendor link');
+      const after = await this.db.one(tx, 'UPDATE planting_year_vendors SET active = false, updated_at = now() WHERE id = $1 RETURNING *', [id]);
+      await this.audit.record({ actorId: user.id, action: 'planting_year_vendor.unlink', entityType: 'planting_year_vendor', entityId: id, projectId: before.project_id, before, after }, tx);
       return after;
     });
   }

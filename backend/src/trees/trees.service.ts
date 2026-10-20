@@ -123,12 +123,16 @@ export class TreesService {
     }
     const area = await this.db.one(
       tx,
-      `SELECT ss.*, s.short_code AS sector_code, s.active AS sector_active
+      `SELECT ss.*, s.short_code AS sector_code, s.active AS sector_active, s.planting_year_id AS sector_year_id
          FROM sub_sectors ss JOIN sectors s ON s.id = ss.sector_id
         WHERE ss.id = $1 AND ss.sector_id = $2 AND ss.project_id = $3`,
       [p.sub_sector_id, p.sector_id, p.project_id],
     );
     if (!area) throw new Rejection('AREA_INVALID', 'The sub-sector does not belong to the selected sector and project.');
+    // Areas are surveyed per planting year; a tree belongs to an area of its own year.
+    if (area.sector_year_id && area.sector_year_id !== p.planting_year_id) {
+      throw new Rejection('AREA_OTHER_YEAR', `Sector ${area.sector_code} belongs to a different planting year's survey.`);
+    }
     if (!area.active || !area.sector_active) throw new Rejection('AREA_INACTIVE', 'The selected area has been deactivated.');
     const grants = await this.access.grants(actor, tx);
     if (!this.access.canAccessArea(grants, p.project_id, p.sector_id, p.sub_sector_id)) {
@@ -185,12 +189,12 @@ export class TreesService {
       scheme_version: schemeRow.version,
       separator: scheme.separator,
       serial_width: scheme.serialWidth,
-      components: scheme.components.map((c) => ({
-        type: c.type,
-        value: c.type === 'SERIAL' ? assembled.serial : (values[c.type as Exclude<ComponentType, 'SERIAL'>] ?? null)?.toUpperCase() ?? null,
-        entity_id: c.type === 'SERIAL' ? null : entityIds[c.type],
-        matches_current_code: c.type === 'SERIAL' ? true : (values[c.type as keyof ComponentValues] ?? null)?.toUpperCase() === (currentValues[c.type] ?? null),
-      })),
+      components: scheme.components.map((c) => {
+        if (c.type === 'SERIAL') return { type: c.type, value: assembled.serial, entity_id: null, matches_current_code: true };
+        if (c.type === 'TEXT') return { type: c.type, value: c.value?.toUpperCase() ?? null, entity_id: null, matches_current_code: true };
+        const v = (values[c.type as keyof ComponentValues] ?? null)?.toUpperCase() ?? null;
+        return { type: c.type, value: v, entity_id: entityIds[c.type], matches_current_code: v === (currentValues[c.type] ?? null) };
+      }),
     };
     const serialKey = serialScopeKey(scheme.serialUniquenessScope, {
       project: project.id,
@@ -486,7 +490,7 @@ export class TreesService {
     const scheme: IdScheme = {
       separator: snapshot.separator,
       serialWidth: snapshot.serial_width,
-      components: snapshot.components.map((c: any) => ({ type: c.type, required: c.value != null })),
+      components: snapshot.components.map((c: any) => ({ type: c.type, required: c.value != null, value: c.type === 'TEXT' ? c.value : undefined })),
       serialUniquenessScope: [],
     };
     const values: ComponentValues = Object.fromEntries(snapshot.components.filter((c: any) => c.type !== 'SERIAL').map((c: any) => [c.type, c.value]));

@@ -9,9 +9,10 @@ const LOADERS: Record<string, string> = {
   project: `SELECT id, name, short_code, description, location, start_date, end_date, status, physical_id_uniqueness, updated_at
               FROM projects WHERE id = ANY($1)`,
   planting_year: `SELECT id, project_id, year_label, start_date, end_date, active, updated_at FROM planting_years WHERE id = ANY($1)`,
-  tree_id_scheme: `SELECT id, project_id, version, component_definition, separator, serial_width, serial_uniqueness_scope, active_from, active, updated_at
+  tree_id_scheme: `SELECT id, project_id, vendor_id, planting_year_id, version, component_definition, separator, serial_width, serial_uniqueness_scope,
+                          active_from, active, updated_at
                      FROM tree_id_schemes WHERE id = ANY($1)`,
-  sector: `SELECT id, project_id, name, short_code, description, reference_latitude, reference_longitude,
+  sector: `SELECT id, project_id, planting_year_id, name, short_code, description, reference_latitude, reference_longitude,
                   ST_AsGeoJSON(boundary_geometry)::json AS boundary, active, updated_at FROM sectors WHERE id = ANY($1)`,
   sub_sector: `SELECT id, sector_id, project_id, name, short_code, description, reference_latitude, reference_longitude,
                       ST_AsGeoJSON(boundary_geometry)::json AS boundary, active, updated_at FROM sub_sectors WHERE id = ANY($1)`,
@@ -31,6 +32,7 @@ const LOADERS: Record<string, string> = {
                        o.custom_fields, o.height_cm::float8 AS height_cm, o.height_method, o.height_measurement,
                        u.full_name AS recorded_by_name, t.project_id, t.sector_id, t.sub_sector_id
                   FROM tree_observations o JOIN trees t ON t.id = o.tree_id JOIN users u ON u.id = o.recorded_by WHERE o.id = ANY($1)`,
+  planting_year_vendor: `SELECT id, project_id, planting_year_id, vendor_id, active, updated_at FROM planting_year_vendors WHERE id = ANY($1)`,
   custom_field: `SELECT id, project_id, applies_to, key, label, field_type, options, required, sticky, help_text, sort_order, active, updated_at
                    FROM custom_field_definitions WHERE id = ANY($1)`,
   media: `SELECT m.id, m.tree_id, m.observation_id, m.checksum_sha256, m.byte_size, m.mime_type, m.upload_state,
@@ -87,6 +89,7 @@ export class SyncDataService {
         projects: await this.load(tx, 'project', projects),
         planting_years: await this.load(tx, 'planting_year', await idsOf(`SELECT id FROM planting_years WHERE project_id = ANY($1)`, [projects])),
         tree_id_schemes: await this.load(tx, 'tree_id_scheme', await idsOf(`SELECT id FROM tree_id_schemes WHERE project_id = ANY($1)`, [projects])),
+        planting_year_vendors: await this.load(tx, 'planting_year_vendor', await idsOf(`SELECT id FROM planting_year_vendors WHERE project_id = ANY($1)`, [projects])),
         custom_fields: await this.load(tx, 'custom_field', await idsOf(`SELECT id FROM custom_field_definitions WHERE project_id = ANY($1)`, [projects])),
         sectors: (await this.load(tx, 'sector', await idsOf(`SELECT id FROM sectors WHERE project_id = ANY($1)`, [projects]))).filter((r) =>
           this.visible(user, grants, 'sector', r),

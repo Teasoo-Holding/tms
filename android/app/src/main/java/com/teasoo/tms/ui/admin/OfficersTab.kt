@@ -28,6 +28,7 @@ internal fun OfficersTab(vm: ProjectSetupViewModel) {
     val assignments = collect(vm.assignments)
     val users = collect(vm.users)
     val areas = collect(vm.areas)
+    val project = collect(vm.project)
     val saving = collect(vm.saving)
     val formError = collect(vm.formError)
     var adding by remember { mutableStateOf(false) }
@@ -36,7 +37,8 @@ internal fun OfficersTab(vm: ProjectSetupViewModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SectionHeader(
             "Officers",
-            supporting = "Who works on this project. Assign a person to the whole project, one sector or one sub-sector; their phone downloads only that area.",
+            supporting = "Who works on this project. Assign a field officer to the whole project, one sector or one sub-sector; their phone downloads only that area. " +
+                "Clients and sponsors (executives) are assigned to the whole project to see its dashboard.",
             action = { if (assignments.isNotEmpty()) TextButton(onClick = { vm.clearFormError(); adding = true }) { Icon(Icons.Default.Add, null); Text("Assign") } },
         )
         if (assignments.isEmpty()) {
@@ -60,7 +62,8 @@ internal fun OfficersTab(vm: ProjectSetupViewModel) {
         Spacer(Modifier.height(24.dp))
     }
 
-    if (adding) AssignDialog(vm.projectId, users.filter { it.active && it.role != "EXECUTIVE" }, areas, saving, formError,
+    val yearLabels = project?.plantingYears.orEmpty().associate { it.id to it.yearLabel }
+    if (adding) AssignDialog(vm.projectId, users.filter { it.active && !(it.role == "EXECUTIVE" && it.allProjects) }, areas, yearLabels, saving, formError,
         onAssign = { vm.assign(it) { adding = false } }, onDismiss = { adding = false })
     revoking?.let { a ->
         ConfirmDialog(
@@ -77,6 +80,7 @@ private fun AssignDialog(
     projectId: String,
     users: List<AdminUserDto>,
     areas: List<AdminSectorDto>,
+    yearLabels: Map<String, String>,
     saving: Boolean,
     error: String?,
     onAssign: (AssignmentRequest) -> Unit,
@@ -86,7 +90,9 @@ private fun AssignDialog(
     var level by remember { mutableStateOf("PROJECT") }
     var sector by remember { mutableStateOf<AdminSectorDto?>(null) }
     var sub by remember { mutableStateOf<AdminSubSectorDto?>(null) }
-    val activeSectors = areas.filter { it.active }
+    val activeSectors = areas.filter { it.active }.sortedWith(compareByDescending<AdminSectorDto> { it.plantingYearId?.let(yearLabels::get) ?: "" }.thenBy { it.shortCode })
+    val executive = user?.role == "EXECUTIVE"
+    fun sectorLabel(s: AdminSectorDto) = "${s.name} (${s.shortCode})" + (s.plantingYearId?.let(yearLabels::get)?.let { " · $it" } ?: " · no year")
     val valid = user != null && when (level) {
         "SECTOR" -> sector != null
         "SUB_SECTOR" -> sector != null && sub != null
@@ -105,16 +111,21 @@ private fun AssignDialog(
         },
         onDismiss = onDismiss,
     ) {
-        if (users.isEmpty()) Hint("No active field officers or administrators. Create one under Users first.")
-        Picker("Person", users.sortedBy { it.fullName }, user, { "${it.fullName} (${roleLabel(it.role)})" }, { user = it })
-        ChoiceChips(
+        if (users.isEmpty()) Hint("No active people to assign. Create one under Users first.")
+        Picker(
+            "Person", users.sortedWith(compareBy({ it.role == "EXECUTIVE" }, { it.fullName.lowercase() })), user,
+            { "${it.fullName} (${if (it.role == "EXECUTIVE") "Client / sponsor" else roleLabel(it.role)})" },
+            { user = it; if (it.role == "EXECUTIVE") { level = "PROJECT"; sector = null; sub = null } },
+        )
+        if (executive) Hint("Clients and sponsors see this project's dashboard (read only). Teasoo management already sees every project.")
+        if (!executive) ChoiceChips(
             "Covers", listOf("PROJECT", "SECTOR", "SUB_SECTOR"), level,
             { when (it) { "SECTOR" -> "A sector"; "SUB_SECTOR" -> "A sub-sector"; else -> "Whole project" } },
             { level = it; if (it == "PROJECT") { sector = null; sub = null } },
         )
         if (level != "PROJECT") {
             if (activeSectors.isEmpty()) Hint("This project has no active sectors yet. Add them under Areas.")
-            Picker("Sector", activeSectors, sector, { "${it.name} (${it.shortCode})" }, { sector = it; sub = null })
+            Picker("Sector", activeSectors, sector, ::sectorLabel, { sector = it; sub = null })
         }
         if (level == "SUB_SECTOR") {
             val subs = sector?.subSectors?.filter { it.active }.orEmpty()

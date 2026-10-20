@@ -17,7 +17,7 @@ class TreeIdAssemblerTest {
     private fun scheme(o: JsonObject) = TreeIdAssembler.Scheme(
         separator = o.s("separator"),
         serialWidth = o["serialWidth"]!!.jsonPrimitive.int,
-        components = o["components"]!!.jsonArray.map { c -> TreeIdAssembler.Component(c.jsonObject.s("type"), c.jsonObject["required"]!!.jsonPrimitive.boolean) },
+        components = o["components"]!!.jsonArray.map { c -> TreeIdAssembler.Component(c.jsonObject.s("type"), c.jsonObject["required"]!!.jsonPrimitive.boolean, c.jsonObject["value"]?.jsonPrimitive?.content) },
         serialUniquenessScope = o["serialUniquenessScope"]!!.jsonArray.map { it.jsonPrimitive.content },
     )
     private fun values(o: JsonObject) = o.mapValues { it.value.jsonPrimitive.content }

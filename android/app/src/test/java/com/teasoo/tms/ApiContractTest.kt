@@ -52,7 +52,7 @@ class ApiContractTest {
         repo.applyBootstrap(boot)
         val projectId = boot.projects.first().id
         assertEquals(boot.projects.size, db.reference().projects().first().size)
-        assertNotNull(db.reference().activeScheme(projectId))
+        assertNotNull(com.teasoo.tms.data.repo.resolveScheme(db.reference().activeSchemes(projectId), null, null))
         assertTrue("boundaries are stored for offline maps", db.reference().subSectors(projectId).first().all { it.boundaryJson != null })
 
         val trees = TmsJson.decodeFromString(MobileTreesResponse.serializer(), fixture("trees.json"))

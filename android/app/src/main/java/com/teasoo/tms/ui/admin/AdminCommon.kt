@@ -80,10 +80,11 @@ fun adminErrorMessage(e: Throwable): String = when (e) {
 private val SCHEME_PROBLEMS = mapOf(
     "SEPARATOR_UNSUPPORTED" to "Use one of - _ / . or no separator.",
     "SERIAL_WIDTH_OUT_OF_RANGE" to "The serial width must be between 1 and 12 digits.",
-    "COMPONENT_DUPLICATED" to "Each part can appear only once.",
-    "SERIAL_MISSING" to "The ID needs a serial number.",
-    "SERIAL_NOT_LAST" to "The serial number must be the last part.",
-    "SERIAL_MUST_BE_REQUIRED" to "The serial number is always required.",
+    "COMPONENT_DUPLICATED" to "Each part can appear only once (fixed text can repeat).",
+    "TEXT_VALUE_INVALID" to "Fixed text needs 1 to 16 letters or digits.",
+    "SERIAL_MISSING" to "The ID needs a tree number.",
+    "SERIAL_NOT_LAST" to "The tree number must be the last part.",
+    "SERIAL_MUST_BE_REQUIRED" to "The tree number is always required.",
     "SCOPE_DIMENSION_DUPLICATED" to "Each uniqueness dimension can be chosen once.",
 )
 

@@ -16,7 +16,8 @@ export async function validatePolygon(q: Queryable, polygon: unknown, parentGeom
   if (parentGeometrySql) {
     const parent = await q.query(
       `SELECT boundary_geometry IS NULL AS no_parent,
-              ST_CoveredBy(ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), boundary_geometry) AS inside
+              -- 15 m allowance: corners walked with a phone GPS are a few metres off.
+              ST_CoveredBy(ST_SetSRID(ST_GeomFromGeoJSON($2), 4326), ST_Buffer(boundary_geometry::geography, 15)::geometry) AS inside
          FROM ${parentGeometrySql.table} WHERE id = $1`,
       [parentGeometrySql.id, text],
     );
