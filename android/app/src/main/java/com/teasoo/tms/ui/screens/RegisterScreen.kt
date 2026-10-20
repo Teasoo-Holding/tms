@@ -48,6 +48,9 @@ data class RegisterForm(
     val remarks: String = "",
     val confirmed: Boolean = false,
     val photos: List<CapturedPhoto> = emptyList(),
+    val treeFields: Map<String, String> = emptyMap(),
+    val observationFields: Map<String, String> = emptyMap(),
+    val height: HeightReading? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -76,6 +79,9 @@ class RegisterViewModel @Inject constructor(
     val statuses = ref.statuses().map { l -> l.filter { it.active && !it.isTerminal } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val vendors = ref.vendors().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val assignments = ref.assignments().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val treeFieldDefs = projectId.filterNotNull().flatMapLatest { ref.customFields(it, "TREE") }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val observationFieldDefs = projectId.filterNotNull().flatMapLatest { ref.customFields(it, "OBSERVATION") }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val showFieldErrors = MutableStateFlow(false)
 
     val prefix = MutableStateFlow<Result<PrefixInfo>?>(null)
     val serialCheck = MutableStateFlow<SerialCheck?>(null)
@@ -135,6 +141,11 @@ class RegisterViewModel @Inject constructor(
         saving.value = true
         saveError.value = null
         try {
+            val missing = missingRequired(treeFieldDefs.value, f.treeFields) + missingRequired(observationFieldDefs.value, f.observationFields)
+            if (missing.isNotEmpty()) {
+                showFieldErrors.value = true
+                throw RegistrationException("Fill in: ${missing.joinToString()}.")
+            }
             val id = trees.register(
                 NewTree(
                     area = a, speciesId = f.speciesId ?: throw RegistrationException("Choose a species."),
@@ -143,6 +154,9 @@ class RegisterViewModel @Inject constructor(
                     observedAt = observedInstant(f.observedOn), plantedOn = f.plantedOn?.toString(),
                     notes = f.notes.ifBlank { null }, remarks = f.remarks.ifBlank { null }, photos = f.photos,
                     replacesTreeId = replacesTreeId,
+                    treeFields = toFieldValues(treeFieldDefs.value, f.treeFields),
+                    observationFields = toFieldValues(observationFieldDefs.value, f.observationFields),
+                    height = f.height,
                 ),
                 session.userId() ?: throw RegistrationException("Sign in again to save."),
             )
@@ -260,6 +274,13 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
             Text("No GPS is recorded for the tree; its location is the sub-sector.", style = MaterialTheme.typography.bodySmall)
 
             PhotoRow(f.photos, onAdd = { camera = true }, onRemove = vm::removePhoto, required = photoMissing)
+            val treeFieldDefs by vm.treeFieldDefs.collectAsStateWithLifecycle()
+            val observationFieldDefs by vm.observationFieldDefs.collectAsStateWithLifecycle()
+            val showFieldErrors by vm.showFieldErrors.collectAsStateWithLifecycle()
+            // Stick length is not remembered here; the default 1 m pole is offered.
+            HeightSection(f.height, { h -> vm.form.update { it.copy(height = h) } }, f.photos, 100.0, {})
+            CustomFieldsForm(treeFieldDefs, f.treeFields, { k, v -> vm.form.update { it.copy(treeFields = it.treeFields + (k to v)) } }, showFieldErrors)
+            CustomFieldsForm(observationFieldDefs, f.observationFields, { k, v -> vm.form.update { it.copy(observationFields = it.observationFields + (k to v)) } }, showFieldErrors)
 
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(

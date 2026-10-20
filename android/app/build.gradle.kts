@@ -62,6 +62,8 @@ android {
     sourceSets {
         // Shared tree-ID vectors keep this implementation in step with the backend.
         getByName("test").resources.srcDir("../../spec")
+        // Exported Room schemas for migration tests (Robolectric reads the debug variant's assets; not in release builds).
+        getByName("debug").assets.srcDir("$projectDir/schemas")
     }
     testOptions { unitTests.isIncludeAndroidResources = true }
 }

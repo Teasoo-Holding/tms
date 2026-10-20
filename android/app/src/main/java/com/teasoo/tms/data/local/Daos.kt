@@ -41,6 +41,15 @@ interface ReferenceDao {
     @Query("SELECT * FROM statuses WHERE id = :id") suspend fun status(id: String): StatusEntity?
     @Query("SELECT * FROM vendors ORDER BY name") fun vendors(): Flow<List<VendorEntity>>
     @Query("SELECT * FROM vendors WHERE id = :id") suspend fun vendor(id: String): VendorEntity?
+
+    @Upsert suspend fun upsertCustomFields(rows: List<CustomFieldEntity>)
+    @Query("DELETE FROM custom_fields WHERE id NOT IN (:keep)") suspend fun pruneCustomFields(keep: List<String>)
+    /** Active fields for a form, in the administrator's order. */
+    @Query("SELECT * FROM custom_fields WHERE projectId = :projectId AND appliesTo = :appliesTo AND active ORDER BY sortOrder, label")
+    fun customFields(projectId: String, appliesTo: String): Flow<List<CustomFieldEntity>>
+    /** Every field, including deactivated ones, so stored values keep their labels. */
+    @Query("SELECT * FROM custom_fields WHERE projectId = :projectId ORDER BY appliesTo, sortOrder, label")
+    fun allCustomFields(projectId: String): Flow<List<CustomFieldEntity>>
     @Query("SELECT * FROM assignments WHERE active") fun assignments(): Flow<List<AssignmentEntity>>
     @Query("SELECT * FROM serial_allocations WHERE active AND scopeKey = :scopeKey") suspend fun allocations(scopeKey: String): List<SerialAllocationEntity>
 }

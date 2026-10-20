@@ -41,6 +41,7 @@ class LocalStoreTest {
         // The engine's network collaborators are not exercised by these tests.
         val api = Proxy.newProxyInstance(TmsApi::class.java.classLoader, arrayOf(TmsApi::class.java)) { _, _, _ -> error("no network in tests") } as TmsApi
         engine = SyncEngine(db, api, SessionStore(context), ReferenceRepository(db), OkHttpClient())
+        engine.retentionDays = 0 // offloading rules are tested directly; retention has its own test
         val r = db.reference()
         r.upsertProjects(listOf(ProjectEntity("p1", "Trees for Life", "T4L", "ACTIVE", "PROJECT", null)))
         r.upsertYears(listOf(PlantingYearEntity("y2024", "p1", "2024", true), PlantingYearEntity("y2025", "p1", "2025", true)))
@@ -126,6 +127,70 @@ class LocalStoreTest {
         val hit = db.trees().visitList("p1", "y2024", "s1", null, "0005").first()
         assertEquals(listOf("T4L-2024-000005"), hit.map { it.physicalTreeId })
         assertTrue(db.trees().visitList("p1", "y2025", "s1", null, "").first().isEmpty())
+    }
+
+    @Test
+    fun customFieldsAndHeightAreSavedAndQueuedForSync() = runBlocking {
+        val id = trees.register(
+            newTree("88").copy(
+                treeFields = mapOf("nursery_batch_no" to kotlinx.serialization.json.JsonPrimitive("B-17")),
+                observationFields = mapOf("pests" to kotlinx.serialization.json.JsonPrimitive("None")),
+                height = HeightReading(42.5, "PHOTO_REFERENCE", """{"reference_cm":100,"points":{}}"""),
+            ),
+            user,
+        )
+        assertEquals("""{"nursery_batch_no":"B-17"}""", db.trees().get(id)!!.customFieldsJson)
+        val obs = db.observations().forTree(id).first().single()
+        assertEquals(42.5, obs.heightCm!!, 0.0)
+        val payload = TmsJson.parseToJsonElement(db.outbox().due(Long.MAX_VALUE, 10).single().payloadJson).jsonObject
+        assertEquals("B-17", payload["custom_fields"]!!.jsonObject["nursery_batch_no"]!!.jsonPrimitive.content)
+        val initial = payload["initial_observation"]!!.jsonObject
+        assertEquals("PHOTO_REFERENCE", initial["height_method"]!!.jsonPrimitive.content)
+        assertEquals(100, initial["height_measurement"]!!.jsonObject["reference_cm"]!!.jsonPrimitive.int)
+        assertEquals("None", initial["custom_fields"]!!.jsonObject["pests"]!!.jsonPrimitive.content)
+
+        trees.addObservation(id, "st-healthy", Instant.parse("2026-03-01T10:00:00Z"), null, emptyList(), user, height = HeightReading(80.0, "MANUAL"))
+        val op = db.outbox().due(Long.MAX_VALUE, 10).last()
+        assertEquals(80.0, TmsJson.parseToJsonElement(op.payloadJson).jsonObject["height_cm"]!!.jsonPrimitive.double, 0.0)
+    }
+
+    @Test
+    fun heightFromPhotoScalesTheTreeByTheStick() {
+        // A 1 m stick spanning 20% of a 1000 px tall photo; the tree spans 50%.
+        val m = com.teasoo.tms.ui.components.HeightMeasurement(
+            referenceCm = 100.0,
+            points = mapOf(
+                "ref_top" to androidx.compose.ui.geometry.Offset(0.2f, 0.6f), "ref_bottom" to androidx.compose.ui.geometry.Offset(0.2f, 0.8f),
+                "tree_top" to androidx.compose.ui.geometry.Offset(0.5f, 0.3f), "tree_base" to androidx.compose.ui.geometry.Offset(0.5f, 0.8f),
+            ),
+            mediaId = "m", imageWidth = 750, imageHeight = 1000,
+        )
+        assertEquals(250.0, m.heightCm()!!, 0.5)
+        val round = com.teasoo.tms.ui.components.HeightMeasurement.parse(m.toJson())!!
+        assertEquals(250.0, round.heightCm()!!, 0.5)
+        assertNull(m.copy(points = m.points - "tree_base").heightCm())
+    }
+
+    @Test
+    fun verifiedPhotosAreKeptForTheRetentionPeriodUnlessStorageIsLow() = runBlocking {
+        val p = photo()
+        val id = trees.register(newTree("77", listOf(p)), user)
+        val m = db.media().forTree(id).first().single()
+        db.media().upsert(
+            m.copy(
+                state = MediaState.VERIFIED, serverChecksum = m.checksumSha256, serverByteSize = m.byteSize,
+                remoteVerifiedAt = "2026-01-01T00:00:00Z", associationVerifiedAt = "2026-01-01T00:00:00Z", ackPersistedAt = "2026-01-01T00:00:00Z",
+                capturedAt = Instant.now().toString(),
+            ),
+        )
+        db.outbox().due(Long.MAX_VALUE, 100).forEach { db.outbox().delete(it.operationId) }
+        engine.retentionDays = 30
+        engine.freeBytes = { Long.MAX_VALUE }
+        engine.cleanupMedia()
+        assertTrue("kept as a second copy for 30 days", p.file.exists())
+        engine.freeBytes = { 0L }
+        engine.cleanupMedia()
+        assertFalse("offloaded early when the phone runs out of space", p.file.exists())
     }
 
     @Test

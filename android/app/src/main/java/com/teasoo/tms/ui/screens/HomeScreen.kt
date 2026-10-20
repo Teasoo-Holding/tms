@@ -45,10 +45,26 @@ fun HomeScreen(vm: AppViewModel, nav: NavController) {
 @Composable
 private fun AccountMenu(session: SessionState.Active, vm: AppViewModel) {
     var menu by remember { mutableStateOf(false) }
+    var blocked by remember { mutableStateOf(false) }
+    val sync by vm.sync.collectAsStateWithLifecycle()
+    val unsent = sync.pendingOperations + sync.unsentPhotos
     IconButton(onClick = { menu = true }) { Icon(Icons.Default.AccountCircle, contentDescription = "Account") }
     DropdownMenu(menu, { menu = false }) {
         DropdownMenuItem(text = { Text("${session.user.fullName}\n${roleLabel(session.user.role)}") }, onClick = {}, enabled = false)
-        DropdownMenuItem(text = { Text("Sign out") }, onClick = { menu = false; vm.signOut() })
+        DropdownMenuItem(text = { Text("Sign out") }, onClick = { menu = false; if (unsent > 0) blocked = true else vm.signOut() })
+    }
+    // Every record must reach the server under the account that entered it before anyone signs out.
+    if (blocked) {
+        AlertDialog(
+            onDismissRequest = { blocked = false },
+            title = { Text("Sync before signing out") },
+            text = {
+                Text("${sync.pendingOperations} records and ${sync.unsentPhotos} photos on this phone have not reached the server yet. " +
+                    "Connect to the internet and sync; you can sign out once everything is sent.")
+            },
+            confirmButton = { Button(onClick = { vm.syncNow(); blocked = false }, enabled = !sync.running) { Text("Sync now") } },
+            dismissButton = { TextButton(onClick = { blocked = false }) { Text("Cancel") } },
+        )
     }
 }
 

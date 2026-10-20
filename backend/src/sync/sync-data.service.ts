@@ -21,14 +21,18 @@ const LOADERS: Record<string, string> = {
   vendor: `SELECT id, name, short_code, active, updated_at FROM vendors WHERE id = ANY($1)`,
   assignment: `SELECT id, user_id, project_id, sector_id, sub_sector_id, active, updated_at FROM user_project_assignments WHERE id = ANY($1)`,
   serial_allocation: `SELECT id, project_id, scope_key, user_id, range_start, range_end, active, updated_at FROM serial_allocations WHERE id = ANY($1)`,
-  tree: `SELECT id, physical_tree_id, physical_tree_id_normalized, serial_number, id_scheme_id, id_scheme_version, id_components_snapshot,
-                project_id, planting_year_id, sector_id, sub_sector_id, species_id, current_status_id, last_observed_at, vendor_id,
-                replaces_tree_id, planted_on, notes, created_by, created_at, updated_at, synced_at, revision, record_state
-           FROM trees WHERE id = ANY($1)`,
+  tree: `SELECT t.id, t.physical_tree_id, t.physical_tree_id_normalized, t.serial_number, t.id_scheme_id, t.id_scheme_version,
+                t.id_components_snapshot, t.project_id, t.planting_year_id, t.sector_id, t.sub_sector_id, t.species_id, t.current_status_id,
+                t.last_observed_at, t.vendor_id, t.replaces_tree_id, t.planted_on, t.notes, t.custom_fields, t.created_by,
+                u.full_name AS created_by_name, t.created_at, t.updated_at, t.synced_at, t.revision, t.record_state
+           FROM trees t JOIN users u ON u.id = t.created_by WHERE t.id = ANY($1)`,
   observation: `SELECT o.id, o.tree_id, o.observed_status_id, o.observed_at, o.recorded_at, o.synced_at, o.recorded_by, o.remarks,
                        o.revision, o.is_initial, o.is_amendment, o.amends_observation_id, o.amendment_reason,
-                       t.project_id, t.sector_id, t.sub_sector_id
-                  FROM tree_observations o JOIN trees t ON t.id = o.tree_id WHERE o.id = ANY($1)`,
+                       o.custom_fields, o.height_cm::float8 AS height_cm, o.height_method, o.height_measurement,
+                       u.full_name AS recorded_by_name, t.project_id, t.sector_id, t.sub_sector_id
+                  FROM tree_observations o JOIN trees t ON t.id = o.tree_id JOIN users u ON u.id = o.recorded_by WHERE o.id = ANY($1)`,
+  custom_field: `SELECT id, project_id, applies_to, key, label, field_type, options, required, sticky, help_text, sort_order, active, updated_at
+                   FROM custom_field_definitions WHERE id = ANY($1)`,
   media: `SELECT m.id, m.tree_id, m.observation_id, m.checksum_sha256, m.byte_size, m.mime_type, m.upload_state,
                  m.remote_verified_at, m.association_verified_at, m.captured_at, t.project_id, t.sector_id, t.sub_sector_id
             FROM tree_media m JOIN trees t ON t.id = m.tree_id WHERE m.id = ANY($1)`,
@@ -83,6 +87,7 @@ export class SyncDataService {
         projects: await this.load(tx, 'project', projects),
         planting_years: await this.load(tx, 'planting_year', await idsOf(`SELECT id FROM planting_years WHERE project_id = ANY($1)`, [projects])),
         tree_id_schemes: await this.load(tx, 'tree_id_scheme', await idsOf(`SELECT id FROM tree_id_schemes WHERE project_id = ANY($1)`, [projects])),
+        custom_fields: await this.load(tx, 'custom_field', await idsOf(`SELECT id FROM custom_field_definitions WHERE project_id = ANY($1)`, [projects])),
         sectors: (await this.load(tx, 'sector', await idsOf(`SELECT id FROM sectors WHERE project_id = ANY($1)`, [projects]))).filter((r) =>
           this.visible(user, grants, 'sector', r),
         ),
@@ -121,7 +126,12 @@ export class SyncDataService {
     const trees = await this.load(this.db, 'tree', ids);
     const obsIds = ids.length ? (await this.db.query('SELECT id FROM tree_observations WHERE tree_id = ANY($1)', [ids])).rows.map((r) => r.id) : [];
     const observations = await this.load(this.db, 'observation', obsIds);
-    return { trees, observations, next_after_id: ids.length === limit ? ids[ids.length - 1] : null };
+    // Photo records let the phone show (and fetch on demand) pictures taken on other devices.
+    const mediaIds = ids.length
+      ? (await this.db.query(`SELECT id FROM tree_media WHERE tree_id = ANY($1) AND upload_state = 'VERIFIED'`, [ids])).rows.map((r) => r.id)
+      : [];
+    const media = await this.load(this.db, 'media', mediaIds);
+    return { trees, observations, media, next_after_id: ids.length === limit ? ids[ids.length - 1] : null };
   }
 
   /** Incremental changes after a server-issued cursor, filtered to the user's authorised scope. */

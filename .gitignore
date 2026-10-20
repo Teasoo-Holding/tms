@@ -16,3 +16,4 @@ local.properties
 .neon
 node_modules/
 .env.local
+.claude/worktrees/

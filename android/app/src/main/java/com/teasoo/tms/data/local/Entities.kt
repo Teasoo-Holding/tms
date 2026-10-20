@@ -1,5 +1,6 @@
 package com.teasoo.tms.data.local
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -112,6 +113,27 @@ data class SerialAllocationEntity(
     val active: Boolean,
 )
 
+/** Administrator-defined extra field (e.g. nursery batch number) for a project's trees or observations. */
+@Entity(tableName = "custom_fields", indices = [Index("projectId")])
+data class CustomFieldEntity(
+    @PrimaryKey val id: String,
+    val projectId: String,
+    /** TREE (asked once, at registration) or OBSERVATION (asked at every visit). */
+    val appliesTo: String,
+    val key: String,
+    val label: String,
+    /** TEXT, NUMBER, DATE, SELECT or BOOLEAN. */
+    val fieldType: String,
+    /** JSON array of choices for SELECT. */
+    val optionsJson: String,
+    val required: Boolean,
+    /** Pre-filled with the last value for the rest of the field session. */
+    val sticky: Boolean,
+    val helpText: String?,
+    val sortOrder: Int,
+    val active: Boolean,
+)
+
 // ---------------------------------------------------------------- field records
 
 object SyncState {
@@ -153,6 +175,9 @@ data class TreeEntity(
     val recordState: String,
     val syncState: String,
     val syncMessage: String?,
+    /** JSON object of custom field values keyed by field key. */
+    @ColumnInfo(defaultValue = "{}") val customFieldsJson: String = "{}",
+    val createdByName: String? = null,
 )
 
 @Entity(tableName = "observations", indices = [Index("treeId"), Index("amendsObservationId")])
@@ -169,6 +194,13 @@ data class ObservationEntity(
     val amendmentReason: String?,
     val syncState: String,
     val syncMessage: String?,
+    @ColumnInfo(defaultValue = "{}") val customFieldsJson: String = "{}",
+    val heightCm: Double? = null,
+    /** MANUAL or PHOTO_REFERENCE. */
+    val heightMethod: String? = null,
+    /** Reference length and marked points when measured on a photo. */
+    val heightMeasurementJson: String? = null,
+    val recordedByName: String? = null,
 )
 
 object MediaState {

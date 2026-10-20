@@ -67,7 +67,7 @@ private fun MainNav(vm: AppViewModel) {
         composable(Routes.SYNC) { SyncScreen(vm, onOpenTree = { nav.navigate(Routes.tree(it)) }, onBack = { nav.popBackStack() }) }
         composable(Routes.MAP) { AreaMapScreen(vm, onBack = { nav.popBackStack() }) }
         composable(Routes.SESSION_SETUP) { SessionSetupScreen(onStarted = { nav.popBackStack(Routes.HOME, inclusive = false) }, onBack = { nav.popBackStack() }) }
-        composable(Routes.SESSION_REGISTER) { RapidRegisterScreen(onBack = { nav.popBackStack() }) }
+        composable(Routes.SESSION_REGISTER) { RapidRegisterScreen(onBack = { nav.popBackStack() }, onVisitTree = { nav.navigate(Routes.observe(it)) }) }
         composable(Routes.SESSION_VISIT) {
             VisitScreen(
                 onObserve = { nav.navigate(Routes.observe(it)) },

@@ -355,3 +355,78 @@ describe('exports', () => {
     expect(res.text).toContain(`"'=HYPERLINK(""http://evil"")"`);
   });
 });
+
+describe('custom fields, tree height and attribution', () => {
+  let batchField: any;
+
+  it('administrators add project fields that devices receive with their configuration', async () => {
+    const res = await admin
+      .post(`/projects/${f.projectId}/custom-fields`, { applies_to: 'TREE', label: 'Nursery batch no.', field_type: 'TEXT', sticky: true })
+      .expect(201);
+    batchField = res.body;
+    expect(batchField.key).toBe('nursery_batch_no');
+    await admin.post(`/projects/${f.projectId}/custom-fields`, { applies_to: 'OBSERVATION', label: 'Pests', field_type: 'SELECT' }).expect(400);
+    await admin
+      .post(`/projects/${f.projectId}/custom-fields`, { applies_to: 'OBSERVATION', label: 'Pests', field_type: 'SELECT', options: ['None', 'Termites'] })
+      .expect(201);
+    await officer.post(`/projects/${f.projectId}/custom-fields`, { applies_to: 'TREE', label: 'X', field_type: 'TEXT' }).expect(403);
+    const boot = await officer.get('/mobile/bootstrap').expect(200);
+    expect(boot.body.custom_fields.map((d: any) => d.key).sort()).toEqual(['nursery_batch_no', 'pests']);
+  });
+
+  it('stores field values and height, and refuses fields the project does not have', async () => {
+    const payload = treePayload(f, '7001', {
+      custom_fields: { nursery_batch_no: 'B-17' },
+      initial_observation: {
+        id: randomUUID(), status_id: f.status.PLANTED, observed_at: '2024-06-01T09:00:00Z',
+        height_cm: 42.25, height_method: 'PHOTO_REFERENCE', height_measurement: { reference_cm: 100, points: { ref_top: [0.4, 0.1] } },
+        custom_fields: { pests: 'Termites' },
+      },
+    });
+    const ok = await sync(officer, [createOp(payload)]);
+    expect(ok.body.results[0].status).toBe('ACCEPTED');
+    expect(ok.body.results[0].entity.custom_fields).toEqual({ nursery_batch_no: 'B-17' });
+    const tree = await officer.get(`/trees/${payload.id}`).expect(200);
+    expect(tree.body.custom_fields.nursery_batch_no).toBe('B-17');
+    expect(tree.body.observations[0].height_cm).toBe(42.3);
+    expect(tree.body.observations[0].height_method).toBe('PHOTO_REFERENCE');
+    expect(tree.body.observations[0].custom_fields).toEqual({ pests: 'Termites' });
+
+    const growth = await sync(officer, [observationOp(payload.id, f.status.HEALTHY, { height_cm: 80 })]);
+    expect(growth.body.results[0].status).toBe('ACCEPTED');
+    expect(growth.body.results[0].entity.height_method).toBe('MANUAL');
+
+    const unknown = await sync(officer, [createOp(treePayload(f, '7002', { custom_fields: { colour: 'red' } }))]);
+    expect(unknown.body.results[0].status).toBe('REJECTED');
+    expect(unknown.body.results[0].code).toBe('CUSTOM_FIELD_UNKNOWN');
+  });
+
+  it('a deactivated field keeps old values valid and leaves new forms', async () => {
+    await admin.patch(`/custom-fields/${batchField.id}`, { active: false, label: 'Batch (old)' }).expect(200);
+    const res = await sync(officer, [createOp(treePayload(f, '7003', { custom_fields: { nursery_batch_no: 'B-18' } }))]);
+    expect(res.body.results[0].status).toBe('ACCEPTED');
+    const fields = (await admin.get(`/projects/${f.projectId}/custom-fields`).expect(200)).body;
+    expect(fields.find((d: any) => d.id === batchField.id).active).toBe(false);
+  });
+
+  it('records who entered every tree and observation in the audit log', async () => {
+    const logs = (await admin.get(`/audit-logs?actor_id=${f.officerId}&action=tree.create`).expect(200)).body;
+    const entry = logs.find((l: any) => l.entity_label === 'T4L-2024-007001');
+    expect(entry).toBeDefined();
+    expect(entry.actor_name).toBeTruthy();
+    expect(entry.metadata.device_id).toBe(officer.deviceId);
+    const obs = (await admin.get(`/audit-logs?action=observation.create`).expect(200)).body;
+    expect(obs.some((l: any) => l.entity_label === 'T4L-2024-007001')).toBe(true);
+    await officer.get('/audit-logs').expect(403);
+    const users = (await admin.get('/users').expect(200)).body;
+    expect(users.find((u: any) => u.id === f.officerId).trees_registered).toBeGreaterThan(0);
+  });
+
+  it('reports growth, weekly activity and status breakdowns', async () => {
+    const s = (await exec.get(`/reports/summary?project_id=${f.projectId}`).expect(200)).body;
+    expect(s.growth.some((g: any) => g.avg_height_cm > 0)).toBe(true);
+    expect(s.activity_by_week).toHaveLength(12);
+    expect(s.status_by_sector.length).toBeGreaterThan(0);
+    expect(s.status_by_species.length).toBeGreaterThan(0);
+  });
+});

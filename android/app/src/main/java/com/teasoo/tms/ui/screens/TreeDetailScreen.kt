@@ -18,6 +18,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.NavController
 import com.teasoo.tms.data.local.*
+import com.teasoo.tms.data.repo.PhotoLoader
 import com.teasoo.tms.data.session.SessionState
 import com.teasoo.tms.data.session.SessionStore
 import com.teasoo.tms.ui.Routes
@@ -40,7 +41,7 @@ data class TreeDetail(
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
-class TreeDetailViewModel @Inject constructor(db: TmsDatabase, session: SessionStore, saved: SavedStateHandle) : ViewModel() {
+class TreeDetailViewModel @Inject constructor(db: TmsDatabase, session: SessionStore, saved: SavedStateHandle, private val photos: PhotoLoader) : ViewModel() {
     private val id: String = checkNotNull(saved["id"])
     private val ref = db.reference()
     val userId = flow { emit(session.userId()) }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -55,6 +56,11 @@ class TreeDetailViewModel @Inject constructor(db: TmsDatabase, session: SessionS
     val observations = db.observations().forTree(id).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val statuses = ref.statuses().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val media = db.media().forTree(id).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    /** All of the project's extra fields, including deactivated ones, to label stored values. */
+    val fieldDefs = db.trees().observe(id).filterNotNull().map { it.projectId }.distinctUntilChanged()
+        .flatMapLatest { ref.allCustomFields(it) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    suspend fun photo(m: MediaEntity, maxPx: Int) = photos.load(m, maxPx)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +72,7 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
     val media by vm.media.collectAsStateWithLifecycle()
     val userId by vm.userId.collectAsStateWithLifecycle()
     val isAdmin by vm.isAdmin.collectAsStateWithLifecycle()
+    val fieldDefs by vm.fieldDefs.collectAsStateWithLifecycle()
     var correcting by remember { mutableStateOf(false) }
     Scaffold(topBar = {
         TopAppBar(
@@ -87,6 +94,8 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
                     Field("Planted on", t.plantedOn)
                     Field("ID format", "version ${t.idSchemeVersion}")
                     t.notes?.let { Field("Notes", it) }
+                    displayFields(fieldDefs.filter { it.appliesTo == "TREE" }, t.customFieldsJson).forEach { (label, value) -> Field(label, value) }
+                    Field("Registered by", if (t.createdBy == userId) "you" else t.createdByName ?: "another user")
                     d.original?.let { o -> TextButton(onClick = { nav.navigate(Routes.tree(o.id)) }) { Text("Replaces ${o.physicalTreeId}") } }
                     d.replacement?.let { r -> TextButton(onClick = { nav.navigate(Routes.tree(r.id)) }) { Text("Replaced by ${r.physicalTreeId}") } }
                 }
@@ -104,6 +113,18 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
             }
             if (correcting) CorrectSerialDialog(t.id, t.physicalTreeId, t.serialNumber, onClose = { correcting = false })
 
+            val heights = observations.filter { it.id !in superseded && it.heightCm != null }
+                .mapNotNull { o -> runCatching { java.time.Instant.parse(o.observedAt) }.getOrNull()?.let { it to o.heightCm!! } }
+            if (heights.isNotEmpty()) {
+                Text("Growth", style = MaterialTheme.typography.titleMedium)
+                ElevatedCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        heights.maxByOrNull { it.first }?.let { (_, cm) -> Text("Latest height ${formatHeight(cm)}", style = MaterialTheme.typography.bodyMedium) }
+                        GrowthChart(heights)
+                    }
+                }
+            }
+
             Text("Observation history", style = MaterialTheme.typography.titleMedium)
             observations.forEach { o ->
                 val s = statuses.find { it.id == o.statusId }
@@ -118,8 +139,19 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
                         if (o.isInitial) Text("Registration", style = MaterialTheme.typography.labelMedium)
                         if (o.amendsObservationId != null) Text("Correction: ${o.amendmentReason}", style = MaterialTheme.typography.labelMedium)
                         if (isSuperseded) Text("Superseded by a correction", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            "Recorded by ${if (o.recordedBy == userId) "you" else o.recordedByName ?: "another user"}",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        o.heightCm?.let { cm ->
+                            Text("Height ${formatHeight(cm)}" + if (o.heightMethod == "PHOTO_REFERENCE") " · measured on photo" else "", style = MaterialTheme.typography.bodyMedium)
+                        }
+                        displayFields(fieldDefs.filter { it.appliesTo == "OBSERVATION" }, o.customFieldsJson).forEach { (label, value) ->
+                            Text("$label: $value", style = MaterialTheme.typography.bodyMedium)
+                        }
                         o.remarks?.let { Text(it) }
-                        if (photos.isNotEmpty()) Text(photos.joinToString { photoState(it) }, style = MaterialTheme.typography.bodySmall)
+                        PhotoStrip(photos, vm::photo, HeightMeasurement.parse(o.heightMeasurementJson))
+                        if (photos.any { it.state != MediaState.VERIFIED }) Text(photos.joinToString { photoState(it) }, style = MaterialTheme.typography.bodySmall)
                         SyncBadge(o.syncState)
                         o.syncMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                         if (!isSuperseded && (o.recordedBy == userId) && t.recordState != "REJECTED") {

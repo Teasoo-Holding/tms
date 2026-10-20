@@ -43,12 +43,17 @@ data class TreeEntry(
     val notes: String = "",
     val observedOn: LocalDate = LocalDate.now(),
     val photos: List<CapturedPhoto> = emptyList(),
+    /** Custom field text for the tree and its first observation, keyed by field key. */
+    val treeFields: Map<String, String> = emptyMap(),
+    val observationFields: Map<String, String> = emptyMap(),
+    val height: HeightReading? = null,
 )
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class RapidRegisterViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    db: TmsDatabase,
+    private val db: TmsDatabase,
     private val trees: TreeRepository,
     private val sessions: FieldSessionRepository,
     private val auth: SessionStore,
@@ -67,8 +72,22 @@ class RapidRegisterViewModel @Inject constructor(
     val lastSaved = MutableStateFlow<String?>(null)
     val error = MutableStateFlow<String?>(null)
     val saving = MutableStateFlow(false)
+    val showFieldErrors = MutableStateFlow(false)
+    val referenceCm = MutableStateFlow(100.0)
+    private val projectId = session.filterNotNull().map { it.projectId }.distinctUntilChanged()
+    val treeFieldDefs = projectId.flatMapLatest { ref.customFields(it, "TREE") }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val observationFieldDefs = projectId.flatMapLatest { ref.customFields(it, "OBSERVATION") }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     init {
+        viewModelScope.launch { referenceCm.value = sessions.referenceCm() }
+        // Sticky field values (e.g. today's nursery batch) are carried into every new tree.
+        viewModelScope.launch {
+            combine(session.filterNotNull(), treeFieldDefs, observationFieldDefs) { s, t, o -> Triple(s.stickyValues, t, o) }.collect { (sticky, t, o) ->
+                fun prefill(defs: List<com.teasoo.tms.data.local.CustomFieldEntity>, current: Map<String, String>) =
+                    defs.filter { it.sticky && current[it.key].isNullOrBlank() }.mapNotNull { d -> sticky[d.key]?.let { d.key to it } }.toMap() + current.filterValues { it.isNotBlank() }
+                entry.update { it.copy(treeFields = prefill(t, it.treeFields), observationFields = prefill(o, it.observationFields)) }
+            }
+        }
         // Re-derive the prefix and next-serial suggestion whenever the sub-sector (or session) changes.
         viewModelScope.launch {
             session.filterNotNull().distinctUntilChanged().collect { s ->
@@ -88,6 +107,18 @@ class RapidRegisterViewModel @Inject constructor(
     }
 
     fun update(change: (TreeEntry) -> TreeEntry) = entry.update(change)
+    fun setTreeField(key: String, v: String) = entry.update { it.copy(treeFields = it.treeFields + (key to v)) }
+    fun setObservationField(key: String, v: String) = entry.update { it.copy(observationFields = it.observationFields + (key to v)) }
+    fun setHeight(h: HeightReading?) = entry.update { it.copy(height = h) }
+    fun setReferenceCm(cm: Double) = viewModelScope.launch { referenceCm.value = cm; sessions.setReferenceCm(cm) }
+
+    /** Last recorded species and status of a tree already on the device, to confirm it is the right one. */
+    suspend fun describe(treeId: String): String? {
+        val t = db.trees().get(treeId) ?: return null
+        val species = ref.species().first().find { it.id == t.speciesId }?.let { it.commonName ?: it.scientificName }
+        val status = t.currentStatusId?.let { ref.status(it)?.name }
+        return listOfNotNull(species, status, t.lastObservedAt?.let { "last seen ${formatInstant(it)}" }).joinToString(" · ")
+    }
 
     /** Remembered for the rest of the session. */
     fun setSpecies(id: String) = viewModelScope.launch { sessions.update { it.copy(speciesId = id) } }
@@ -115,6 +146,11 @@ class RapidRegisterViewModel @Inject constructor(
         saving.value = true
         error.value = null
         try {
+            val missing = missingRequired(treeFieldDefs.value, e.treeFields) + missingRequired(observationFieldDefs.value, e.observationFields)
+            if (missing.isNotEmpty()) {
+                showFieldErrors.value = true
+                throw RegistrationException("Fill in: ${missing.joinToString()}.")
+            }
             trees.register(
                 NewTree(
                     area = s.area(),
@@ -127,12 +163,23 @@ class RapidRegisterViewModel @Inject constructor(
                     notes = e.notes.ifBlank { null },
                     remarks = e.remarks.ifBlank { null },
                     photos = e.photos,
+                    treeFields = toFieldValues(treeFieldDefs.value, e.treeFields),
+                    observationFields = toFieldValues(observationFieldDefs.value, e.observationFields),
+                    height = e.height,
                 ),
                 auth.userId() ?: throw RegistrationException("Sign in again to save."),
             )
+            val sticky = (treeFieldDefs.value + observationFieldDefs.value).filter { it.sticky }
+                .associate { d -> d.key to (e.treeFields[d.key] ?: e.observationFields[d.key]).orEmpty() }
+            if (sticky.isNotEmpty()) sessions.update { it.copy(stickyValues = it.stickyValues + sticky) }
+            showFieldErrors.value = false
             lastSaved.value = ok.assembled.physicalId
             // Ready for the next tree: keep the session choices, clear what belongs to this tree.
-            entry.value = TreeEntry(observedOn = e.observedOn)
+            entry.value = TreeEntry(
+                observedOn = e.observedOn,
+                treeFields = e.treeFields.filterKeys { k -> treeFieldDefs.value.any { it.key == k && it.sticky } },
+                observationFields = e.observationFields.filterKeys { k -> observationFieldDefs.value.any { it.key == k && it.sticky } },
+            )
             check.value = null
             suggestion.value = trees.suggestNextSerial(s.area(), auth.userId().orEmpty())
             SyncScheduler.syncNow(context)
@@ -152,7 +199,7 @@ class RapidRegisterViewModel @Inject constructor(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RapidRegisterScreen(onBack: () -> Unit, vm: RapidRegisterViewModel = hiltViewModel(), sessionVm: FieldSessionViewModel = hiltViewModel()) {
+fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: RapidRegisterViewModel = hiltViewModel(), sessionVm: FieldSessionViewModel = hiltViewModel()) {
     val ctx by sessionVm.context.collectAsStateWithLifecycle()
     val treesCount by sessionVm.treesThisSession.collectAsStateWithLifecycle()
     val s by vm.session.collectAsStateWithLifecycle()
@@ -165,6 +212,10 @@ fun RapidRegisterScreen(onBack: () -> Unit, vm: RapidRegisterViewModel = hiltVie
     val lastSaved by vm.lastSaved.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val saving by vm.saving.collectAsStateWithLifecycle()
+    val treeFieldDefs by vm.treeFieldDefs.collectAsStateWithLifecycle()
+    val observationFieldDefs by vm.observationFieldDefs.collectAsStateWithLifecycle()
+    val showFieldErrors by vm.showFieldErrors.collectAsStateWithLifecycle()
+    val referenceCm by vm.referenceCm.collectAsStateWithLifecycle()
     var camera by remember { mutableStateOf(false) }
     var moreDetails by remember { mutableStateOf(false) }
     val serialFocus = remember { FocusRequester() }
@@ -219,7 +270,15 @@ fun RapidRegisterScreen(onBack: () -> Unit, vm: RapidRegisterViewModel = hiltVie
                         when (val c = check) {
                             is SerialCheck.Invalid -> Text(c.message, color = MaterialTheme.colorScheme.error)
                             is SerialCheck.NotAllocated -> Text(c.message, color = MaterialTheme.colorScheme.error)
-                            is SerialCheck.LocalDuplicate -> Text("${c.physicalId} is already registered on this device. Check the label.", color = MaterialTheme.colorScheme.error)
+                            // A known ID means a visit to an existing tree, not a mistake.
+                            is SerialCheck.LocalDuplicate -> Card(Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("${c.physicalId} is already registered.", style = MaterialTheme.typography.titleSmall)
+                                    val about by produceState<String?>(null, c.existingTreeId) { value = vm.describe(c.existingTreeId) }
+                                    about?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                                    Button(onClick = { onVisitTree(c.existingTreeId) }) { Text("Record a visit to this tree") }
+                                }
+                            }
                             is SerialCheck.Ok -> Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(e.confirmed, { v -> vm.update { it.copy(confirmed = v) } })
                                 Text("Matches the label: ", style = MaterialTheme.typography.bodyMedium)
@@ -240,6 +299,9 @@ fun RapidRegisterScreen(onBack: () -> Unit, vm: RapidRegisterViewModel = hiltVie
             }
             OutlinedTextField(e.remarks, { v -> vm.update { it.copy(remarks = v) } }, label = { Text("Remarks (optional)") }, modifier = Modifier.fillMaxWidth())
             PhotoRow(e.photos, onAdd = { camera = true }, onRemove = vm::removePhoto, required = photoMissing)
+            HeightSection(e.height, vm::setHeight, e.photos, referenceCm, vm::setReferenceCm)
+            CustomFieldsForm(treeFieldDefs, e.treeFields, vm::setTreeField, showFieldErrors)
+            CustomFieldsForm(observationFieldDefs, e.observationFields, vm::setObservationField, showFieldErrors)
 
             TextButton(onClick = { moreDetails = !moreDetails }) { Text(if (moreDetails) "Hide details" else "More details (dates, notes)") }
             AnimatedVisibility(moreDetails) {

@@ -42,7 +42,16 @@ export class UsersController {
 
   @Get('users')
   async list() {
-    return (await this.db.query(`SELECT ${USER_COLUMNS} FROM users ORDER BY full_name`)).rows;
+    // Activity per account: what each person entered and when their phone last synced.
+    return (
+      await this.db.query(
+        `SELECT ${USER_COLUMNS},
+                (SELECT count(*) FROM trees t WHERE t.created_by = users.id)::int AS trees_registered,
+                (SELECT count(*) FROM tree_observations o WHERE o.recorded_by = users.id AND NOT o.is_initial)::int AS observations_recorded,
+                (SELECT max(d.last_sync_at) FROM devices d WHERE d.user_id = users.id) AS last_sync_at
+           FROM users ORDER BY full_name`,
+      )
+    ).rows;
   }
 
   @Post('users')
@@ -228,15 +237,35 @@ export class UsersController {
     @Query('entity_type') entityType?: string,
     @Query('entity_id') entityId?: string,
     @Query('project_id') projectId?: string,
+    @Query('actor_id') actorId?: string,
+    @Query('action') action?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
     @Query('limit') limit = '100',
     @Query('before_id') beforeId?: string,
   ) {
+    const uuid = (v?: string) => (v && /^[0-9a-f-]{36}$/i.test(v) ? v : null);
+    const day = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
+    // entity_label names the record in words (tree ID, project, user) so the log reads without lookups.
     const { rows } = await this.db.query(
-      `SELECT l.*, u.full_name AS actor_name FROM audit_logs l LEFT JOIN users u ON u.id = l.actor_id
+      `SELECT l.*, u.full_name AS actor_name, u.role AS actor_role, p.name AS project_name,
+              COALESCE(t.physical_tree_id, ot.physical_tree_id, pe.name, ue.full_name, l.after ->> 'name', l.after ->> 'label',
+                       l.after ->> 'year_label', l.before ->> 'name') AS entity_label,
+              COALESCE(t.id, ot.id) AS tree_id
+         FROM audit_logs l
+         LEFT JOIN users u ON u.id = l.actor_id
+         LEFT JOIN projects p ON p.id = l.project_id
+         LEFT JOIN trees t ON l.entity_type = 'tree' AND t.id::text = l.entity_id
+         LEFT JOIN tree_observations o ON l.entity_type = 'observation' AND o.id::text = l.entity_id
+         LEFT JOIN trees ot ON ot.id = o.tree_id
+         LEFT JOIN projects pe ON l.entity_type = 'project' AND pe.id::text = l.entity_id
+         LEFT JOIN users ue ON l.entity_type = 'user' AND ue.id::text = l.entity_id
         WHERE ($1::text IS NULL OR l.entity_type = $1) AND ($2::text IS NULL OR l.entity_id = $2)
           AND ($3::uuid IS NULL OR l.project_id = $3) AND ($5::bigint IS NULL OR l.id < $5)
+          AND ($6::uuid IS NULL OR l.actor_id = $6) AND ($7::text IS NULL OR l.action LIKE $7 || '%')
+          AND ($8::date IS NULL OR l.created_at >= $8::date) AND ($9::date IS NULL OR l.created_at < $9::date + 1)
         ORDER BY l.id DESC LIMIT $4`,
-      [entityType ?? null, entityId ?? null, projectId ?? null, Math.min(Number(limit) || 100, 500), beforeId ?? null],
+      [entityType || null, entityId || null, uuid(projectId), Math.min(Number(limit) || 100, 500), beforeId || null, uuid(actorId), action || null, day(from), day(to)],
     );
     return rows;
   }

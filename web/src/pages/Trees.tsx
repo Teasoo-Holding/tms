@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api, qs } from '../api/client';
-import { ErrorNotice, fmtDate, fmtNum, RecordStatePill, StatusPill } from '../components/ui';
+import { EmptyState, ErrorNotice, fmtDate, fmtNum, PageHeader, RecordStatePill, StatusPill } from '../components/ui';
 
 const PAGE = 50;
 
@@ -46,10 +46,11 @@ export function TreesPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1>Trees</h1>
-        <span className="muted">{trees.data ? `${fmtNum(trees.data.total)} matching` : ''}</span>
-      </div>
+      <PageHeader
+        title="Trees"
+        subtitle="The tree registry. Filter by project, area, species or status, or search by the ID on the label; open a tree for its history and photos."
+        actions={trees.data && <span className="pill">{fmtNum(trees.data.total)} matching</span>}
+      />
       <form className="filters" onSubmit={(e) => (e.preventDefault(), set('q', q.trim()))}>
         <label className="field">
           Tree ID
@@ -64,7 +65,7 @@ export function TreesPage() {
         {select('record_state', 'Record', [['CONFLICT', 'In conflict'], ['REJECTED', 'Rejected']], 'Registry (active)')}
       </form>
       <ErrorNotice error={trees.error} />
-      <div className={`card table-wrap ${trees.isFetching ? 'refetching' : ''}`}>
+      <div className={`card table-wrap tall ${trees.isFetching ? 'refetching' : ''}`}>
         <table>
           <thead>
             <tr><th>Tree ID</th><th>Planting year</th><th>Area</th><th>Species</th><th>Status</th><th>Last observed</th><th>Replaces</th></tr>
@@ -83,7 +84,7 @@ export function TreesPage() {
             ))}
           </tbody>
         </table>
-        {trees.data?.items.length === 0 && <div className="empty">No trees match these filters.</div>}
+        {trees.data?.items.length === 0 && <EmptyState title="No trees match these filters">Clear a filter or check the tree ID. Trees appear after field devices sync.</EmptyState>}
       </div>
       {trees.data && trees.data.total > PAGE && (
         <div className="row" style={{ marginTop: 12 }}>

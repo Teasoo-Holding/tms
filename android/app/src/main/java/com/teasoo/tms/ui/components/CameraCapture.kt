@@ -24,6 +24,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import com.teasoo.tms.data.repo.CapturedPhoto
 import com.teasoo.tms.data.repo.PhotoStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Full-screen CameraX capture into app-private storage. Reports camera or storage failures
@@ -37,6 +40,7 @@ fun CameraCaptureDialog(photoStore: PhotoStore, onCaptured: (CapturedPhoto) -> U
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val imageCapture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build() }
     val lowStorage = photoStore.freeBytes() < PhotoStore.CRITICAL_STORAGE_BYTES
 
@@ -80,8 +84,12 @@ fun CameraCaptureDialog(photoStore: PhotoStore, onCaptured: (CapturedPhoto) -> U
                                 ContextCompat.getMainExecutor(context),
                                 object : ImageCapture.OnImageSavedCallback {
                                     override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                                        busy = false
-                                        onCaptured(photoStore.finalize(id, file))
+                                        // Resizing a full-resolution capture takes a moment; keep the UI responsive.
+                                        scope.launch {
+                                            val photo = withContext(Dispatchers.IO) { photoStore.finalize(id, file) }
+                                            busy = false
+                                            onCaptured(photo)
+                                        }
                                     }
                                     override fun onError(exception: ImageCaptureException) {
                                         busy = false
