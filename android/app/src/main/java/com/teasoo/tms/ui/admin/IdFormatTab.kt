@@ -2,6 +2,7 @@ package com.teasoo.tms.ui.admin
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -12,31 +13,43 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.teasoo.tms.data.remote.ProjectDetailDto
+import com.teasoo.tms.data.remote.AdminPlantingYearDto
 import com.teasoo.tms.data.remote.AdminSchemeDto
+import com.teasoo.tms.data.remote.AdminYearVendorDto
+import com.teasoo.tms.data.remote.ProjectDetailDto
 import com.teasoo.tms.data.remote.SchemeComponent
 import com.teasoo.tms.data.remote.SchemeRequest
+import com.teasoo.tms.ui.components.Picker
 
-val COMPONENT_TYPES = listOf("PROJECT_CODE", "PLANTING_YEAR", "VENDOR_CODE", "SECTOR_CODE", "SUB_SECTOR_CODE", "SERIAL")
+val COMPONENT_TYPES = listOf("PROJECT_CODE", "PLANTING_YEAR", "VENDOR_CODE", "TEXT", "SECTOR_CODE", "SUB_SECTOR_CODE", "SERIAL")
 val SCOPE_DIMENSIONS = listOf("PROJECT", "PLANTING_YEAR", "VENDOR", "SECTOR", "SUB_SECTOR")
+/** Parts that are the same on every tree in the format's scope; the others change with where the tree is. */
+val FIXED_TYPES = setOf("PROJECT_CODE", "PLANTING_YEAR", "VENDOR_CODE", "TEXT")
+/** Serial numbers restart per project + year + vendor: recommended when several vendors tag trees. */
+val RECOMMENDED_VENDOR_SCOPE = listOf("PROJECT", "PLANTING_YEAR", "VENDOR")
+private const val MAX_PARTS = 8
 private val SEPARATORS = listOf("-", "_", "/", ".", "")
+private val TEXT_PATTERN = Regex("^[A-Z0-9]{1,16}$")
 
 fun componentLabel(type: String) = when (type) {
     "PROJECT_CODE" -> "Project code"
     "PLANTING_YEAR" -> "Planting year"
     "VENDOR_CODE" -> "Vendor code"
+    "TEXT" -> "Fixed text"
     "SECTOR_CODE" -> "Sector code"
     "SUB_SECTOR_CODE" -> "Sub-sector code"
-    "SERIAL" -> "Serial number"
+    "SERIAL" -> "Tree number"
     else -> type
 }
+
+private fun componentText(c: SchemeComponent) = if (c.type == "TEXT") "“${c.value.orEmpty()}”" else componentLabel(c.type)
 
 fun scopeLabel(dim: String) = when (dim) {
     "PROJECT" -> "Project"
@@ -49,174 +62,400 @@ fun scopeLabel(dim: String) = when (dim) {
 
 private fun separatorLabel(s: String) = if (s.isEmpty()) "None" else "“$s”"
 
-/** Example ID for a format, using this project’s real codes where they exist. */
+/** Example ID for a format, using this project’s real codes where they exist. Fixed text parts show their own value. */
 fun previewId(components: List<SchemeComponent>, separator: String, serialWidth: Int, samples: Map<String, String>, serial: Int = 1): String {
-    val parts = components.filter { it.type != "SERIAL" }.mapNotNull { samples[it.type]?.uppercase() }
+    val parts = components.filter { it.type != "SERIAL" }.mapNotNull { c ->
+        (if (c.type == "TEXT") c.value?.takeIf { it.isNotBlank() } ?: "TEXT" else samples[c.type])?.uppercase()
+    }
     val serialText = serial.toString().padStart(serialWidth.coerceIn(1, 12), '0')
     return if (parts.isEmpty()) serialText else parts.joinToString(separator) + separator + serialText
 }
 
 private fun schemeProblems(components: List<SchemeComponent>, scope: List<String>): List<String> = buildList {
     val types = components.map { it.type }
-    if (types.toSet().size != types.size) add("Each part can appear only once.")
-    if ("SERIAL" !in types) add("The ID needs a serial number.") else if (types.last() != "SERIAL") add("The serial number must be the last part.")
+    val named = types.filter { it != "TEXT" }
+    if (named.toSet().size != named.size) add("Each part can appear only once (fixed text can repeat).")
+    if (components.size > MAX_PARTS) add("An ID can have at most $MAX_PARTS parts.")
+    if (components.any { it.type == "TEXT" && !TEXT_PATTERN.matches(it.value.orEmpty()) }) add("Fixed text needs 1 to 16 letters or digits.")
+    if ("SERIAL" !in types) add("The ID needs a tree number.") else if (types.last() != "SERIAL") add("The tree number must be the last part.")
     if (scope.toSet().size != scope.size) add("Each uniqueness dimension can be chosen once.")
     val needs = mapOf("PLANTING_YEAR" to "PLANTING_YEAR", "VENDOR" to "VENDOR_CODE", "SECTOR" to "SECTOR_CODE", "SUB_SECTOR" to "SUB_SECTOR_CODE")
     scope.forEach { d ->
         val c = needs[d]
-        if (c != null && c !in types) add("Serials are unique per ${scopeLabel(d).lowercase()}, but the ID does not show it, so two trees could carry the same visible ID.")
+        if (c != null && c !in types) add("Tree numbers restart for each ${scopeLabel(d).lowercase()}, but the ID does not show it, so two trees could carry the same visible ID.")
+    }
+}
+
+private fun isWarning(problem: String) = problem.startsWith("Tree numbers restart for each")
+
+private fun scopeSentence(scope: List<String>) =
+    if (scope.isEmpty()) "Tree numbers are unique across the whole system (they never restart)."
+    else "Tree numbers restart for each " + scope.joinToString(" + ") { scopeLabel(it).lowercase() } + "."
+
+private fun FormatScope.needsVendor() = this == FormatScope.VENDOR || this == FormatScope.VENDOR_YEAR
+private fun FormatScope.needsYear() = this == FormatScope.YEAR || this == FormatScope.VENDOR_YEAR
+
+/** The builder's working copy of a format. */
+private class FormatDraft(kind: FormatScope, vendorId: String?, base: AdminSchemeDto?) {
+    var kind by mutableStateOf(kind)
+    var vendorId by mutableStateOf(vendorId)
+    val components = mutableStateListOf<SchemeComponent>().apply {
+        addAll(
+            base?.components?.takeIf { it.isNotEmpty() }
+                ?: listOfNotNull(SchemeComponent("PROJECT_CODE"), SchemeComponent("PLANTING_YEAR"), SchemeComponent("VENDOR_CODE").takeIf { kind.needsVendor() }, SchemeComponent("SERIAL")),
+        )
+    }
+    var separator by mutableStateOf(base?.separator ?: "-")
+    var width by mutableIntStateOf(base?.serialWidth ?: 5)
+    val scope = mutableStateListOf<String>().apply {
+        addAll(base?.serialUniquenessScope ?: if (kind.needsVendor()) RECOMMENDED_VENDOR_SCOPE else listOf("PROJECT", "PLANTING_YEAR"))
+    }
+}
+
+/**
+ * ID formats for the selected year: the project default, the year's format and each vendor's, from general to specific,
+ * plus a builder for any of these scopes.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun IdFormatTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: ProjectSetupViewModel) {
+    val areas = collect(vm.areas)
+    val saving = collect(vm.saving)
+    val formError = collect(vm.formError)
+    val linked = p.linkedVendors(year?.id)
+    val defaultScheme = p.schemes.activeIn(null, null)
+    val yearScheme = year?.let { p.schemes.activeIn(null, it.id) }
+    fun samplesFor(vendorCode: String?) = idSamples(p, year, vendorCode, areas)
+
+    var draft by remember { mutableStateOf<FormatDraft?>(null) }
+    var confirming by remember { mutableStateOf(false) }
+    var retiring by remember { mutableStateOf<AdminSchemeDto?>(null) }
+    var showHistory by remember { mutableStateOf(false) }
+
+    fun start(kind: FormatScope, vendorId: String?) {
+        val v = vendorId.takeIf { kind.needsVendor() }
+        val y = year?.id.takeIf { kind.needsYear() }
+        // Start from the format this scope uses today, so a change is a small edit.
+        val base = p.schemes.activeIn(v, y) ?: p.schemes.effectiveFor(v, y ?: year?.id)
+        vm.clearFormError()
+        draft = FormatDraft(kind, v, base)
+    }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        val d = draft
+        if (d != null) {
+            FormatBuilder(p, year, linked, d, saving, ::samplesFor, onCancel = { draft = null }, onSave = { vm.clearFormError(); confirming = true })
+            Spacer(Modifier.height(24.dp))
+            return@Column
+        }
+
+        SectionHeader(
+            "Tree ID formats" + (year?.let { " for ${it.yearLabel}" } ?: ""),
+            supporting = "The most specific format wins: a vendor's format for this year, then the vendor's format, then the year's, then the project default. " +
+                "Changes apply to new registrations only; registered IDs never change.",
+        )
+
+        FormatLevelCard(
+            title = "Project default",
+            subtitle = "Used when nothing more specific is set",
+            scheme = defaultScheme,
+            samples = samplesFor(null),
+            emptyText = "Not set yet. Officers can't register trees until a format exists.",
+            actionLabel = if (defaultScheme == null) "Set the project default" else "Change",
+            onAction = { start(FormatScope.DEFAULT, null) },
+            onRetire = null,
+        )
+
+        if (year == null) {
+            Hint("Add a planting year to give it, or its vendors, their own formats.")
+        } else {
+            FormatLevelCard(
+                title = "Year ${year.yearLabel}",
+                subtitle = "For all ${year.yearLabel} trees, unless the vendor has its own format",
+                scheme = yearScheme,
+                samples = samplesFor(null),
+                emptyText = "No format of its own – ${year.yearLabel} uses the project default.",
+                actionLabel = if (yearScheme == null) "Set a ${year.yearLabel} format" else "Change",
+                onAction = { start(FormatScope.YEAR, null) },
+                onRetire = yearScheme?.let { s -> { vm.clearFormError(); retiring = s } },
+            )
+
+            SectionHeader("Vendors in ${year.yearLabel}", supporting = "Each vendor may tag its trees its own way.")
+            if (linked.isEmpty()) Hint("No vendors linked to ${year.yearLabel} yet. Add them under Vendors.")
+            linked.forEach { link ->
+                VendorFormatCard(
+                    p, year, link, samplesFor(link.vendorShortCode),
+                    onSet = { start(FormatScope.VENDOR_YEAR, link.vendorId) },
+                    onRetire = { vm.clearFormError(); retiring = it },
+                )
+            }
+        }
+
+        if (p.schemes.isNotEmpty()) {
+            TextButton(onClick = { showHistory = !showHistory }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(if (showHistory) "Hide history" else "Show all formats and history (${p.schemes.size})")
+            }
+            if (showHistory) p.schemes.sortedByDescending { it.version }.forEach { s -> VersionRow(s, idSamples(p, year, s.vendorShortCode, areas)) }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+
+    val d = draft
+    if (confirming && d != null) {
+        val vendor = linked.firstOrNull { it.vendorId == d.vendorId }
+        val title = scopeDraftTitle(d.kind, year, vendor)
+        val replaced = p.schemes.activeIn(d.vendorId.takeIf { d.kind.needsVendor() }, year?.id.takeIf { d.kind.needsYear() })
+        FormDialog(
+            "Save the format for $title?", "Save", true, saving, formError,
+            onConfirm = {
+                vm.createScheme(
+                    SchemeRequest(
+                        d.components.toList(), d.separator, d.width, d.scope.toList(),
+                        vendorId = d.vendorId.takeIf { d.kind.needsVendor() },
+                        plantingYearId = year?.id.takeIf { d.kind.needsYear() },
+                    ),
+                ) { confirming = false; draft = null }
+            },
+            onDismiss = { confirming = false },
+        ) {
+            PreviewBox(previewId(d.components, d.separator, d.width, samplesFor(vendor?.vendorShortCode), 1))
+            Text(
+                (if (replaced != null) "It replaces the current format for $title. " else "") +
+                    "Other formats are not changed. New registrations use it; trees already registered keep their IDs, and phones receive it at their next sync.",
+            )
+        }
+    }
+    retiring?.let { s ->
+        val fallback = p.schemes.filter { it.id != s.id }.effectiveFor(s.vendorId, s.plantingYearId)
+        ConfirmDialog(
+            "Retire the format for ${s.scopeTitle()}?",
+            "New registrations for ${s.scopeTitle()} will use " + (fallback?.let { "the ${it.scopeTitle().lowercase()} format" } ?: "no format") +
+                ". Trees already registered keep their IDs.",
+            "Retire", saving, formError, destructive = true,
+            onConfirm = { vm.retireScheme(s) { retiring = null } },
+            onDismiss = { retiring = null },
+        )
+    }
+}
+
+private fun scopeDraftTitle(kind: FormatScope, year: AdminPlantingYearDto?, vendor: AdminYearVendorDto?): String {
+    val v = vendor?.vendorName ?: "the vendor"
+    return when (kind) {
+        FormatScope.DEFAULT -> "the project default"
+        FormatScope.YEAR -> "year ${year?.yearLabel ?: ""}".trim()
+        FormatScope.VENDOR -> "$v (all years)"
+        FormatScope.VENDOR_YEAR -> "$v in ${year?.yearLabel ?: "this year"}"
+    }
+}
+
+@Composable
+private fun FormatLevelCard(
+    title: String,
+    subtitle: String,
+    scheme: AdminSchemeDto?,
+    samples: Map<String, String>,
+    emptyText: String,
+    actionLabel: String,
+    onAction: () -> Unit,
+    onRetire: (() -> Unit)?,
+) {
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall)
+                    Hint(subtitle)
+                }
+                if (scheme != null) Tag("In use")
+            }
+            if (scheme == null) Text(emptyText, style = MaterialTheme.typography.bodyMedium)
+            else SchemeSummary(scheme, samples)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onAction, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(actionLabel) }
+                if (onRetire != null) TextButton(onClick = onRetire, modifier = Modifier.heightIn(min = 48.dp)) { Text("Retire") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SchemeSummary(s: AdminSchemeDto, samples: Map<String, String>) {
+    PreviewBox(previewId(s.components, s.separator, s.serialWidth, samples, 1))
+    Text(s.components.joinToString(" + ") { componentText(it) + if (!it.required) " (optional)" else "" }, style = MaterialTheme.typography.bodyMedium)
+    Hint("Version ${s.version} · separator ${separatorLabel(s.separator)} · ${s.serialWidth}-digit tree number. ${scopeSentence(s.serialUniquenessScope)}")
+}
+
+@Composable
+private fun VendorFormatCard(
+    p: ProjectDetailDto,
+    year: AdminPlantingYearDto,
+    link: AdminYearVendorDto,
+    samples: Map<String, String>,
+    onSet: () -> Unit,
+    onRetire: (AdminSchemeDto) -> Unit,
+) {
+    val effective = p.schemes.effectiveFor(link.vendorId, year.id)
+    val own = listOfNotNull(p.schemes.activeIn(link.vendorId, year.id), p.schemes.activeIn(link.vendorId, null))
+    OutlinedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(link.vendorName ?: "Vendor", style = MaterialTheme.typography.titleSmall)
+            if (effective == null) Hint("No format applies yet.")
+            else {
+                Text(
+                    previewId(effective.components, effective.separator, effective.serialWidth, samples, 1),
+                    fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary,
+                )
+                Hint(if (effective.vendorId == null) "Uses the ${effective.scopeTitle().lowercase()} format" else "Uses its own format: ${effective.scopeTitle()}")
+            }
+            own.forEach { s ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(s.scopeTitle(), style = MaterialTheme.typography.bodyMedium)
+                        Text(previewId(s.components, s.separator, s.serialWidth, samples), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    }
+                    TextButton(onClick = { onRetire(s) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Retire") }
+                }
+            }
+            OutlinedButton(onClick = onSet, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                Text(if (own.isEmpty()) "Give ${link.vendorName ?: "this vendor"} its own format" else "Change its format")
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun IdFormatTab(p: ProjectDetailDto, vm: ProjectSetupViewModel) {
-    val areas = collect(vm.areas)
-    val vendors = collect(vm.vendors)
-    val saving = collect(vm.saving)
-    val formError = collect(vm.formError)
-    val active = p.schemes.firstOrNull { it.active } ?: p.schemes.maxByOrNull { it.version }
-    val samples = mapOf(
-        "PROJECT_CODE" to p.shortCode,
-        "PLANTING_YEAR" to (p.plantingYears.filter { it.active }.maxByOrNull { it.yearLabel }?.yearLabel ?: p.plantingYears.maxByOrNull { it.yearLabel }?.yearLabel ?: "2024"),
-        "VENDOR_CODE" to (vendors.firstOrNull { it.active && !it.shortCode.isNullOrBlank() }?.shortCode ?: "V01"),
-        "SECTOR_CODE" to (areas.firstOrNull { it.active }?.shortCode ?: "S1"),
-        "SUB_SECTOR_CODE" to (areas.flatMap { it.subSectors }.firstOrNull { it.active }?.shortCode ?: "A1"),
-    )
+private fun FormatBuilder(
+    p: ProjectDetailDto,
+    year: AdminPlantingYearDto?,
+    linked: List<AdminYearVendorDto>,
+    d: FormatDraft,
+    saving: Boolean,
+    samplesFor: (String?) -> Map<String, String>,
+    onCancel: () -> Unit,
+    onSave: () -> Unit,
+) {
+    val vendor = linked.firstOrNull { it.vendorId == d.vendorId }
+    val samples = samplesFor(vendor?.vendorShortCode)
+    val problems = schemeProblems(d.components, d.scope)
+    val blocking = problems.filterNot(::isWarning)
+    val scopeOk = (!d.kind.needsVendor() || vendor != null) && (!d.kind.needsYear() || year != null)
+    val replaced = p.schemes.activeIn(d.vendorId.takeIf { d.kind.needsVendor() }, year?.id.takeIf { d.kind.needsYear() })
+    val vendorInvolved = d.kind.needsVendor() || d.components.any { it.type == "VENDOR_CODE" }
 
-    var editing by rememberSaveable { mutableStateOf(false) }
-    val components = remember(active?.id) {
-        mutableStateListOf<SchemeComponent>().apply {
-            addAll(active?.components?.takeIf { it.isNotEmpty() } ?: listOf(SchemeComponent("PROJECT_CODE"), SchemeComponent("PLANTING_YEAR"), SchemeComponent("SERIAL")))
-        }
-    }
-    var separator by remember(active?.id) { mutableStateOf(active?.separator ?: "-") }
-    var width by remember(active?.id) { mutableIntStateOf(active?.serialWidth ?: 6) }
-    val scope = remember(active?.id) { mutableStateListOf<String>().apply { addAll(active?.serialUniquenessScope ?: listOf("PROJECT", "PLANTING_YEAR")) } }
-    var confirming by remember { mutableStateOf(false) }
-    val problems = schemeProblems(components, scope)
-    val blocking = problems.filter { !it.startsWith("Serials are unique per") }
+    SectionHeader("New ID format", supporting = "Choose who it applies to, then build the ID from its parts. The preview uses this project's real codes.")
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionHeader("Tree ID format", supporting = "How officers’ tree labels are built. A new format applies to new registrations only; registered IDs never change.")
-
-        if (active != null && !editing) {
-            ElevatedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Current format · version ${active.version}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                        if (active.active) Tag("In use")
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val kinds = listOfNotNull(FormatScope.DEFAULT, FormatScope.YEAR.takeIf { year != null }, FormatScope.VENDOR, FormatScope.VENDOR_YEAR.takeIf { year != null })
+            ChoiceChips(
+                "Applies to", kinds, d.kind,
+                {
+                    when (it) {
+                        FormatScope.DEFAULT -> "Project default"
+                        FormatScope.YEAR -> "This year (${year?.yearLabel})"
+                        FormatScope.VENDOR -> "A vendor (all years)"
+                        FormatScope.VENDOR_YEAR -> "A vendor in ${year?.yearLabel}"
                     }
-                    PreviewBox(previewId(active.components, active.separator, active.serialWidth, samples, 1))
-                    Text(active.components.joinToString(" + ") { componentLabel(it.type) + if (!it.required) " (optional)" else "" }, style = MaterialTheme.typography.bodyMedium)
-                    Text("Separator ${separatorLabel(active.separator)} · serial ${active.serialWidth} digits", style = MaterialTheme.typography.bodySmall)
-                    Text(scopeSentence(active.serialUniquenessScope), style = MaterialTheme.typography.bodySmall)
-                    OutlinedButton(onClick = { vm.clearFormError(); editing = true }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Create a new version") }
-                }
+                },
+                { d.kind = it },
+            )
+            if (d.kind.needsVendor()) {
+                if (linked.isEmpty()) Hint("No vendors are linked to ${year?.yearLabel ?: "this year"}. Add them under Vendors first.")
+                Picker("Vendor", linked, vendor, { (it.vendorName ?: "Vendor") + (it.vendorShortCode?.let { c -> " ($c)" } ?: "") }, { d.vendorId = it.vendorId })
             }
-        }
-        if (active == null && !editing) {
-            EmptyState(Icons.Default.Add, "No ID format yet", "Choose the parts of a tree ID (for example project code, planting year and a serial number). Officers cannot register trees until a format exists.",
-                "Design ID format", { vm.clearFormError(); editing = true })
-        }
+            Hint(
+                when (d.kind) {
+                    FormatScope.DEFAULT -> "Used for every tree unless a more specific format is set."
+                    FormatScope.YEAR -> "Used for trees planted in ${year?.yearLabel}, unless the vendor has its own format."
+                    FormatScope.VENDOR -> "Used for this vendor's trees in every year, unless it has a format for that year."
+                    FormatScope.VENDOR_YEAR -> "Used only for this vendor's trees in ${year?.yearLabel}."
+                } + if (replaced != null) " It replaces the current one (version ${replaced.version})." else "",
+            )
 
-        if (editing) {
-            ElevatedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Live preview", style = MaterialTheme.typography.labelLarge)
-                    PreviewBox(previewId(components, separator, width, samples, 1))
-                    Text("Another example: ${previewId(components, separator, width, samples, 123)}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+            HorizontalDivider()
+            Text("Live preview", style = MaterialTheme.typography.labelLarge)
+            PreviewBox(previewId(d.components, d.separator, d.width, samples, 1))
+            Text("Next trees: ${previewId(d.components, d.separator, d.width, samples, 2)}, ${previewId(d.components, d.separator, d.width, samples, 3)}",
+                style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
 
-                    HorizontalDivider()
-                    Text("Parts, in order", style = MaterialTheme.typography.titleSmall)
-                    components.forEachIndexed { i, c ->
-                        ComponentRow(
-                            c, index = i, count = components.size,
-                            onUp = { if (i > 0) components.add(i - 1, components.removeAt(i)) },
-                            onDown = { if (i < components.lastIndex - 1) components.add(i + 1, components.removeAt(i)) },
-                            onRemove = { components.removeAt(i) },
-                            onRequired = { components[i] = c.copy(required = it) },
+            HorizontalDivider()
+            Text("Parts, in order", style = MaterialTheme.typography.titleSmall)
+            Hint("Fixed parts are the same on every tree this format covers. Changing parts depend on the tree.")
+            d.components.forEachIndexed { i, c ->
+                ComponentRow(
+                    c, index = i, count = d.components.size, samples = samples,
+                    onUp = { if (i > 0) d.components.add(i - 1, d.components.removeAt(i)) },
+                    onDown = { if (i < d.components.lastIndex - 1) d.components.add(i + 1, d.components.removeAt(i)) },
+                    onRemove = { d.components.removeAt(i) },
+                    onRequired = { d.components[i] = c.copy(required = it) },
+                    onValue = { d.components[i] = c.copy(value = it) },
+                )
+            }
+            val unused = COMPONENT_TYPES.filter { t -> t != "SERIAL" && (t == "TEXT" || d.components.none { it.type == t }) }
+            if (d.components.size < MAX_PARTS && unused.isNotEmpty()) {
+                Text("Add a part", style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    unused.forEach { t ->
+                        AssistChip(
+                            onClick = {
+                                val part = if (t == "TEXT") SchemeComponent("TEXT", required = true, value = "") else SchemeComponent(t)
+                                val serialAt = d.components.indexOfFirst { it.type == "SERIAL" }
+                                if (serialAt >= 0) d.components.add(serialAt, part) else d.components.add(part)
+                            },
+                            label = { Text(componentLabel(t) + if (t in FIXED_TYPES) " · fixed" else " · changing") },
+                            leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) },
+                            modifier = Modifier.heightIn(min = 48.dp),
                         )
                     }
-                    val unused = COMPONENT_TYPES.filter { t -> t != "SERIAL" && components.none { it.type == t } }
-                    if (unused.isNotEmpty()) {
-                        Text("Add a part", style = MaterialTheme.typography.labelLarge)
+                }
+            } else if (d.components.size >= MAX_PARTS) Hint("An ID can have at most $MAX_PARTS parts.")
+            if (d.components.none { it.type == "SERIAL" }) {
+                TextButton(onClick = { d.components.add(SchemeComponent("SERIAL")) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Add tree number") }
+            }
 
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            unused.forEach { t ->
-                                AssistChip(
-                                    onClick = {
-                                        val serialAt = components.indexOfFirst { it.type == "SERIAL" }
-                                        if (serialAt >= 0) components.add(serialAt, SchemeComponent(t)) else components.add(SchemeComponent(t))
-                                    },
-                                    label = { Text(componentLabel(t)) },
-                                    leadingIcon = { Icon(Icons.Default.Add, null, Modifier.size(18.dp)) },
-                                    modifier = Modifier.heightIn(min = 40.dp),
-                                )
-                            }
-                        }
-                    }
-                    if (components.none { it.type == "SERIAL" }) TextButton(onClick = { components.add(SchemeComponent("SERIAL")) }) { Text("Add serial number") }
+            HorizontalDivider()
+            ChoiceChips("Separator", SEPARATORS, d.separator, ::separatorLabel, { d.separator = it })
+            Text("Tree number width", style = MaterialTheme.typography.labelLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                FilledTonalIconButton(onClick = { d.width = (d.width - 1).coerceAtLeast(1) }, enabled = d.width > 1, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Remove, "Fewer digits") }
+                Text("${d.width} digits", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.titleMedium)
+                FilledTonalIconButton(onClick = { d.width = (d.width + 1).coerceAtMost(12) }, enabled = d.width < 12, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Add, "More digits") }
+            }
+            Hint("Numbers are padded with zeros; up to ${"9".repeat(d.width).toLongOrNull()?.let { "%,d".format(it) } ?: "many"} trees before they run out.")
 
-                    HorizontalDivider()
-                    ChoiceChips("Separator", SEPARATORS, separator, ::separatorLabel, { separator = it })
-                    Text("Serial width", style = MaterialTheme.typography.labelLarge)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        FilledTonalIconButton(onClick = { width = (width - 1).coerceAtLeast(1) }, enabled = width > 1) { Icon(Icons.Default.Remove, "Fewer digits") }
-                        Text("$width digits", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.titleMedium)
-                        FilledTonalIconButton(onClick = { width = (width + 1).coerceAtMost(12) }, enabled = width < 12) { Icon(Icons.Default.Add, "More digits") }
-                    }
-                    Hint("Serials are padded with zeros to this width; up to ${"9".repeat(width).toLongOrNull()?.let { "%,d".format(it) } ?: "many"} trees per scope.")
-
-                    HorizontalDivider()
-                    Text("Serial numbers restart for each…", style = MaterialTheme.typography.titleSmall)
-
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SCOPE_DIMENSIONS.forEach { d ->
-                            FilterChip(
-                                selected = d in scope,
-                                onClick = { if (d in scope) scope.remove(d) else scope.add(d) },
-                                label = { Text(scopeLabel(d)) },
-                                modifier = Modifier.heightIn(min = 40.dp),
-                            )
-                        }
-                    }
-                    Hint(scopeSentence(scope))
-
-                    problems.forEach { Text("• $it", color = if (it in blocking) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.bodySmall) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { editing = false }, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Cancel") }
-                        Button(onClick = { vm.clearFormError(); confirming = true }, enabled = blocking.isEmpty() && !saving, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Save format") }
+            HorizontalDivider()
+            Text("Tree numbers restart for each…", style = MaterialTheme.typography.titleSmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SCOPE_DIMENSIONS.forEach { dim ->
+                    FilterChip(
+                        selected = dim in d.scope,
+                        onClick = { if (dim in d.scope) d.scope.remove(dim) else d.scope.add(dim) },
+                        label = { Text(scopeLabel(dim)) },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
+                }
+            }
+            Hint(scopeSentence(d.scope))
+            if (vendorInvolved && d.scope.toSet() != RECOMMENDED_VENDOR_SCOPE.toSet()) {
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Recommended with vendors: restart numbers for each project + planting year + vendor, so each vendor counts its own trees.",
+                            style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { d.scope.clear(); d.scope.addAll(RECOMMENDED_VENDOR_SCOPE) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Use recommended") }
                     }
                 }
             }
-        }
 
-        if (p.schemes.isNotEmpty()) {
-            SectionHeader("Version history")
-            p.schemes.sortedByDescending { it.version }.forEach { s -> VersionRow(s, samples) }
-        }
-        Spacer(Modifier.height(24.dp))
-    }
-
-    if (confirming) {
-        val next = (p.schemes.maxOfOrNull { it.version } ?: 0) + 1
-        FormDialog(
-            "Save ID format version $next?", "Save", true, saving, formError,
-            onConfirm = {
-                vm.createScheme(SchemeRequest(components.toList(), separator, width, scope.toList())) { confirming = false; editing = false }
-            },
-            onDismiss = { confirming = false },
-        ) {
-            PreviewBox(previewId(components, separator, width, samples, 1))
-            Text("New registrations will use this format. Trees already registered keep their IDs, and officers’ phones receive the new format at their next sync.")
+            problems.forEach { Text("• $it", color = if (isWarning(it)) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            if (!scopeOk) Text("• Choose the vendor this format is for.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Cancel") }
+                Button(onClick = onSave, enabled = blocking.isEmpty() && scopeOk && !saving, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Save format") }
+            }
         }
     }
 }
-
-private fun scopeSentence(scope: List<String>) =
-    if (scope.isEmpty()) "Serials are unique across the whole system (global)."
-    else "Serials are unique within each " + scope.joinToString(" + ") { scopeLabel(it).lowercase() } + "."
 
 @Composable
 private fun PreviewBox(text: String) {
@@ -225,25 +464,65 @@ private fun PreviewBox(text: String) {
     }
 }
 
+private fun partHelp(type: String, samples: Map<String, String>) = when (type) {
+    "PROJECT_CODE" -> "Always ${samples["PROJECT_CODE"]}"
+    "PLANTING_YEAR" -> "The planting year, e.g. ${samples["PLANTING_YEAR"]}"
+    "VENDOR_CODE" -> "The vendor's short code, e.g. ${samples["VENDOR_CODE"]}"
+    "TEXT" -> "Letters or digits you choose, the same on every tree"
+    "SECTOR_CODE" -> "The tree's sector, e.g. ${samples["SECTOR_CODE"]}"
+    "SUB_SECTOR_CODE" -> "The tree's sub-sector, e.g. ${samples["SUB_SECTOR_CODE"]}"
+    "SERIAL" -> "Counts up for each new tree. Always last."
+    else -> ""
+}
+
 @Composable
-private fun ComponentRow(c: SchemeComponent, index: Int, count: Int, onUp: () -> Unit, onDown: () -> Unit, onRemove: () -> Unit, onRequired: (Boolean) -> Unit) {
+private fun ComponentRow(
+    c: SchemeComponent,
+    index: Int,
+    count: Int,
+    samples: Map<String, String>,
+    onUp: () -> Unit,
+    onDown: () -> Unit,
+    onRemove: () -> Unit,
+    onRequired: (Boolean) -> Unit,
+    onValue: (String) -> Unit,
+) {
     val serial = c.type == "SERIAL"
+    val fixed = c.type in FIXED_TYPES
     OutlinedCard(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(start = 12.dp, end = 4.dp).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("${index + 1}.", style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(24.dp))
-            Column(Modifier.weight(1f)) {
-                Text(componentLabel(c.type), style = MaterialTheme.typography.bodyLarge)
-                if (serial) Text("Always last and required", style = MaterialTheme.typography.bodySmall)
-                else Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
+            Row(Modifier.heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${index + 1}.", style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(24.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(componentLabel(c.type), style = MaterialTheme.typography.bodyLarge)
+                        if (fixed) Tag("fixed")
+                        else Tag("changing", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer)
+                    }
+                    Text(partHelp(c.type, samples), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (serial) Icon(Icons.Default.Lock, "Always last", Modifier.padding(12.dp), tint = MaterialTheme.colorScheme.outline)
+                else {
+                    IconButton(onClick = onUp, enabled = index > 0) { Icon(Icons.Default.KeyboardArrowUp, "Move up") }
+                    IconButton(onClick = onDown, enabled = index < count - 2) { Icon(Icons.Default.KeyboardArrowDown, "Move down") }
+                    IconButton(onClick = onRemove) { Icon(Icons.Default.Close, "Remove") }
+                }
+            }
+            if (c.type == "TEXT") {
+                val value = c.value.orEmpty()
+                OutlinedTextField(
+                    value, { raw -> onValue(raw.uppercase().filter { it in 'A'..'Z' || it in '0'..'9' }.take(16)) },
+                    label = { Text("Text") }, singleLine = true,
+                    isError = value.isEmpty(),
+                    supportingText = { Text(if (value.isEmpty()) "Type 1 to 16 letters or digits, e.g. NG" else "Letters and digits, up to 16") },
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth().padding(end = 8.dp, bottom = 4.dp),
+                )
+            } else if (!serial) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = c.required, onCheckedChange = onRequired)
                     Text("Required", style = MaterialTheme.typography.bodySmall)
                 }
-            }
-            if (serial) Icon(Icons.Default.Lock, "Fixed position", Modifier.padding(12.dp), tint = MaterialTheme.colorScheme.outline)
-            else {
-                IconButton(onClick = onUp, enabled = index > 0) { Icon(Icons.Default.KeyboardArrowUp, "Move up") }
-                IconButton(onClick = onDown, enabled = index < count - 2) { Icon(Icons.Default.KeyboardArrowDown, "Move down") }
-                IconButton(onClick = onRemove) { Icon(Icons.Default.Close, "Remove") }
             }
         }
     }
@@ -254,7 +533,7 @@ private fun VersionRow(s: AdminSchemeDto, samples: Map<String, String>) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Version ${s.version}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text("${s.scopeTitle()} · version ${s.version}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 if (s.active) Tag("In use") else InactiveTag()
             }
             Text(previewId(s.components, s.separator, s.serialWidth, samples), fontFamily = FontFamily.Monospace)

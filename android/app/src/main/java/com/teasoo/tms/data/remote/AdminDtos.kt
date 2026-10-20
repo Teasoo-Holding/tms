@@ -96,8 +96,9 @@ data class AdminPlantingYearDto(
     val active: Boolean = true,
 )
 
+/** One part of a tree ID. [value] is the text of a TEXT (fixed text) part; null for every other type. */
 @Serializable
-data class SchemeComponent(val type: String, val required: Boolean = true)
+data class SchemeComponent(val type: String, val required: Boolean = true, val value: String? = null)
 
 @Serializable
 data class AdminSchemeDto(
@@ -110,7 +111,28 @@ data class AdminSchemeDto(
     val active: Boolean = false,
     @SerialName("active_from") val activeFrom: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
+    /** Both null: the project default. Otherwise the format applies to this vendor and/or planting year only. */
+    @SerialName("vendor_id") val vendorId: String? = null,
+    @SerialName("planting_year_id") val plantingYearId: String? = null,
+    @SerialName("vendor_name") val vendorName: String? = null,
+    @SerialName("vendor_short_code") val vendorShortCode: String? = null,
+    @SerialName("year_label") val yearLabel: String? = null,
 )
+
+/** A vendor planting in one planting year (it plants across the year's whole surveyed area). */
+@Serializable
+data class AdminYearVendorDto(
+    val id: String,
+    @SerialName("project_id") val projectId: String? = null,
+    @SerialName("planting_year_id") val plantingYearId: String,
+    @SerialName("vendor_id") val vendorId: String,
+    @SerialName("vendor_name") val vendorName: String? = null,
+    @SerialName("vendor_short_code") val vendorShortCode: String? = null,
+    val active: Boolean = true,
+)
+
+@Serializable
+data class LinkVendorRequest(@SerialName("vendor_id") val vendorId: String)
 
 @Serializable
 data class ProjectDetailDto(
@@ -125,6 +147,7 @@ data class ProjectDetailDto(
     @SerialName("physical_id_uniqueness") val physicalIdUniqueness: String = "PROJECT",
     @SerialName("planting_years") val plantingYears: List<AdminPlantingYearDto> = emptyList(),
     @SerialName("tree_id_schemes") val schemes: List<AdminSchemeDto> = emptyList(),
+    @SerialName("planting_year_vendors") val plantingYearVendors: List<AdminYearVendorDto> = emptyList(),
 )
 
 @Serializable
@@ -161,6 +184,9 @@ data class SchemeRequest(
     val separator: String,
     @SerialName("serial_width") val serialWidth: Int,
     @SerialName("serial_uniqueness_scope") val serialUniquenessScope: List<String>,
+    /** Both null: the project default format. Nulls are omitted from the body. */
+    @SerialName("vendor_id") val vendorId: String? = null,
+    @SerialName("planting_year_id") val plantingYearId: String? = null,
 )
 
 // ---------------------------------------------------------------- areas
@@ -188,19 +214,51 @@ data class AdminSectorDto(
     @Serializable(with = LenientDouble::class) @SerialName("reference_longitude") val referenceLongitude: Double? = null,
     val boundary: JsonElement? = null,
     val active: Boolean = true,
+    /** Null for an older area not tied to a planting year. */
+    @SerialName("planting_year_id") val plantingYearId: String? = null,
     @SerialName("sub_sectors") val subSectors: List<AdminSubSectorDto> = emptyList(),
 )
 
-/** The boundary is deliberately absent: sending null would erase a polygon drawn in the web portal. */
+/** A corner of a surveyed area, walked with a GPS phone. */
+@Serializable
+data class CornerDto(val latitude: Double, val longitude: Double)
+
+/**
+ * Sector or sub-sector. With [corners] (3-12, any order) the server builds the outline and sets the reference
+ * point, so leave the reference null. The boundary is deliberately absent: sending null would erase an outline.
+ * [plantingYearId] is required when creating a sector and ignored otherwise (a sub-sector inherits its sector's year).
+ */
 @Serializable
 data class AreaRequest(
     val name: String,
     @SerialName("short_code") val shortCode: String,
     val description: String? = null,
-    @SerialName("reference_latitude") val referenceLatitude: Double,
-    @SerialName("reference_longitude") val referenceLongitude: Double,
+    @SerialName("reference_latitude") val referenceLatitude: Double? = null,
+    @SerialName("reference_longitude") val referenceLongitude: Double? = null,
     val active: Boolean = true,
+    val corners: List<CornerDto>? = null,
+    @SerialName("planting_year_id") val plantingYearId: String? = null,
 )
+
+/** PATCH body: a blank description is cleared; absent corners and reference point keep the current shape. */
+fun AreaRequest.toAreaPatch(): JsonObject {
+    val omitWhenNull = setOf("reference_latitude", "reference_longitude", "corners", "planting_year_id")
+    val o = copy(plantingYearId = null).toPatchBody(keepNulls = true)
+    return JsonObject(o.filter { (k, v) -> !(v is JsonNull && k in omitWhenNull) })
+}
+
+/** Corners of a GeoJSON Polygon's outer ring, without the closing point (GeoJSON is longitude, latitude). */
+fun boundaryCorners(boundary: JsonElement?): List<CornerDto> {
+    val o = boundary as? JsonObject ?: return emptyList()
+    val ring = (o["coordinates"] as? JsonArray)?.firstOrNull() as? JsonArray ?: return emptyList()
+    val points = ring.mapNotNull { p ->
+        val xy = p as? JsonArray ?: return@mapNotNull null
+        val lon = (xy.getOrNull(0) as? JsonPrimitive)?.content?.toDoubleOrNull()
+        val lat = (xy.getOrNull(1) as? JsonPrimitive)?.content?.toDoubleOrNull()
+        if (lat == null || lon == null) null else CornerDto(lat, lon)
+    }
+    return if (points.size > 1 && points.first() == points.last()) points.dropLast(1) else points
+}
 
 /** `GET projects/{id}/areas` returns a bare array of sectors; an object `{sectors: [...]}` is accepted too. */
 fun decodeAreas(element: JsonElement): List<AdminSectorDto> {
@@ -349,6 +407,8 @@ data class AdminUserDto(
     @Serializable(with = LenientInt::class) @SerialName("trees_registered") val treesRegistered: Int = 0,
     @Serializable(with = LenientInt::class) @SerialName("observations_recorded") val observationsRecorded: Int = 0,
     @SerialName("last_sync_at") val lastSyncAt: String? = null,
+    /** EXECUTIVE only: Teasoo management sees every project; otherwise only assigned projects. */
+    @SerialName("all_projects") val allProjects: Boolean = false,
 )
 
 @Serializable
@@ -361,6 +421,8 @@ data class UserCreateRequest(
     val role: String,
     val password: String,
     val active: Boolean = true,
+    /** Meaningful only for EXECUTIVE. */
+    @SerialName("all_projects") val allProjects: Boolean = false,
 )
 
 /** Sent with keepNulls = false: only the non-null fields change. A password resets it. */
@@ -374,6 +436,7 @@ data class UserPatch(
     val role: String? = null,
     val active: Boolean? = null,
     val password: String? = null,
+    @SerialName("all_projects") val allProjects: Boolean? = null,
 )
 
 @Serializable

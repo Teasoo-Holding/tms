@@ -43,6 +43,7 @@ class UsersViewModel @Inject constructor(@ApplicationContext context: Context, p
 }
 
 private val ROLES = listOf("FIELD_OFFICER", "ADMIN", "EXECUTIVE")
+private const val ALL_PROJECTS_LABEL = "Teasoo management – sees all projects"
 private const val PASSWORD_HINT = "At least 10 characters. The person signs in with it and can be asked to change it."
 
 private sealed interface UserAction {
@@ -140,7 +141,14 @@ private fun UserCard(u: AdminUserDto, onEdit: () -> Unit, onPassword: () -> Unit
                 Text(listOfNotNull(u.username?.let { "@$it" }, u.phone, u.email).joinToString(" · ").ifBlank { "No sign-in name" }, style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Tag(roleLabel(u.role))
-                    Text("${"%,d".format(u.treesRegistered)} trees · ${"%,d".format(u.observationsRecorded)} observations", style = MaterialTheme.typography.bodySmall)
+                    if (u.role != "EXECUTIVE") Text("${"%,d".format(u.treesRegistered)} trees · ${"%,d".format(u.observationsRecorded)} observations", style = MaterialTheme.typography.bodySmall)
+                }
+                if (u.role == "EXECUTIVE") {
+                    Text(
+                        if (u.allProjects) ALL_PROJECTS_LABEL else "Client or sponsor – sees assigned projects only",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (u.allProjects) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 Text(
                     "Last sync ${relativeTime(u.lastSyncAt)}" + if (stale) " – over 7 days" else "",
@@ -187,19 +195,21 @@ private fun UserDialog(existing: AdminUserDto?, saving: Boolean, error: String?,
     var role by remember { mutableStateOf(existing?.role ?: "FIELD_OFFICER") }
     var password by remember { mutableStateOf("") }
     var active by remember { mutableStateOf(existing?.active ?: true) }
+    var allProjects by remember { mutableStateOf(existing?.allProjects ?: false) }
+    val allProjectsNow = role == "EXECUTIVE" && allProjects
     val emailOk = email.isBlank() || android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
     val usernameOk = username.isBlank() || Regex("^(?=.*[A-Za-z])[A-Za-z0-9._-]{3,40}$").matches(username.trim())
     val phoneOk = phone.isBlank() || Regex("^\\+?[0-9]{7,16}$").matches(phone.replace(Regex("[\\s().-]"), ""))
     val hasLogin = listOf(username, phone, email).any { it.isNotBlank() }
     fun differs(now: String, before: String?) = now.trim() != before.orEmpty()
     val changed = existing == null || name.trim() != existing.fullName || differs(email, existing.email) || differs(username, existing.username) ||
-        differs(phone, existing.phone) || role != existing.role
+        differs(phone, existing.phone) || role != existing.role || allProjectsNow != existing.allProjects
     val valid = name.isNotBlank() && emailOk && usernameOk && phoneOk && hasLogin && changed && (existing != null || password.isNotEmpty())
     FormDialog(
         if (existing == null) "New user" else "Edit ${existing.fullName}", if (existing == null) "Create" else "Save", valid, saving, error,
         onConfirm = {
             if (existing == null) {
-                onCreate(UserCreateRequest(username.trim().ifBlank { null }, phone.trim().ifBlank { null }, email.trim().ifBlank { null }, name.trim(), role, password, active))
+                onCreate(UserCreateRequest(username.trim().ifBlank { null }, phone.trim().ifBlank { null }, email.trim().ifBlank { null }, name.trim(), role, password, active, allProjectsNow))
             }
             else onUpdate(
                 UserPatch(
@@ -208,6 +218,7 @@ private fun UserDialog(existing: AdminUserDto?, saving: Boolean, error: String?,
                     phone = phone.trim().takeIf { differs(phone, existing.phone) },
                     fullName = name.trim().takeIf { it != existing.fullName },
                     role = role.takeIf { it != existing.role },
+                    allProjects = allProjectsNow.takeIf { it != existing.allProjects },
                 ),
             )
         },
@@ -224,10 +235,17 @@ private fun UserDialog(existing: AdminUserDto?, saving: Boolean, error: String?,
         Hint(
             when (role) {
                 "ADMIN" -> "Sets up projects and users, resolves conflicts, and can also work in the field."
-                "EXECUTIVE" -> "Read-only dashboard for the projects they are assigned to."
+                "EXECUTIVE" -> "Read-only dashboard. Teasoo management sees every project; clients and sponsors see only the projects they are assigned to."
                 else -> "Registers and visits trees in the areas they are assigned to."
             },
         )
+        if (role == "EXECUTIVE") {
+            SwitchRow(
+                ALL_PROJECTS_LABEL, allProjects, { allProjects = it },
+                supporting = if (allProjects) "Sees the dashboard of every project, including new ones."
+                else "Off: a client or sponsor. Assign them to their projects under Projects › Officers.",
+            )
+        }
         if (existing != null && role != existing.role) Hint("Changing the role signs them out on every device.")
         if (existing == null) {
             PasswordInput(password, { password = it }, "Initial password")

@@ -33,7 +33,7 @@ const SchemeBody = z.object({
   components: z
     .array(z.object({ type: z.enum(COMPONENT_TYPES), required: z.boolean().default(true), value: z.string().trim().max(16).optional() }))
     .min(1)
-    .max(6),
+    .max(8),
   separator: z.string().max(1),
   serial_width: z.number().int(),
   serial_uniqueness_scope: z.array(z.enum(SCOPE_DIMENSIONS)),
