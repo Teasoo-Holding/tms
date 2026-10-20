@@ -95,6 +95,36 @@ interface TreeDao {
 
     @Query("SELECT count(*) FROM trees WHERE projectId = :projectId AND recordState = 'ACTIVE'") fun count(projectId: String): Flow<Int>
 
+    /** Highest serial used in a uniqueness scope, to suggest the next label in sequence. */
+    @Query("SELECT MAX(CAST(serialNumber AS INTEGER)) FROM trees WHERE serialScopeKey = :scopeKey")
+    suspend fun maxSerial(scopeKey: String): Long?
+
+    @Query("SELECT count(*) FROM trees WHERE createdBy = :userId AND createdAt >= :since")
+    fun countCreatedSince(userId: String, since: String): Flow<Int>
+
+    /**
+     * Trees to visit in the current area, least recently observed first, so overdue trees surface
+     * at the top. [serial] narrows to labels whose serial matches the digits typed.
+     */
+    @Query(
+        """SELECT t.id, t.physicalTreeId, y.yearLabel, s.shortCode AS sectorCode, ss.shortCode AS subSectorCode,
+                  COALESCE(sp.commonName, sp.scientificName) AS speciesName, st.name AS statusName, st.code AS statusCode,
+                  t.lastObservedAt, t.syncState, t.recordState, t.replacesTreeId
+             FROM trees t
+             JOIN planting_years y ON y.id = t.plantingYearId
+             JOIN sectors s ON s.id = t.sectorId
+             JOIN sub_sectors ss ON ss.id = t.subSectorId
+             JOIN species sp ON sp.id = t.speciesId
+             LEFT JOIN statuses st ON st.id = t.currentStatusId
+            WHERE t.projectId = :projectId AND t.plantingYearId = :plantingYearId AND t.sectorId = :sectorId
+              AND (:subSectorId IS NULL OR t.subSectorId = :subSectorId)
+              AND t.recordState <> 'REJECTED'
+              AND (:serial = '' OR CAST(t.serialNumber AS INTEGER) = CAST(:serial AS INTEGER))
+            ORDER BY (t.lastObservedAt IS NOT NULL), t.lastObservedAt, t.physicalTreeId
+            LIMIT 500"""
+    )
+    fun visitList(projectId: String, plantingYearId: String, sectorId: String, subSectorId: String?, serial: String): Flow<List<TreeListRow>>
+
     @Query("UPDATE trees SET syncState = :state, syncMessage = :message WHERE id = :id")
     suspend fun setSyncState(id: String, state: String, message: String?)
 
@@ -130,6 +160,10 @@ interface ObservationDao {
     fun forTree(treeId: String): Flow<List<ObservationEntity>>
     @Query("UPDATE observations SET syncState = :state, syncMessage = :message WHERE id = :id")
     suspend fun setSyncState(id: String, state: String, message: String?)
+    @Query("SELECT count(*) FROM observations WHERE recordedBy = :userId AND recordedAt >= :since AND NOT isInitial")
+    fun countRecordedSince(userId: String, since: String): Flow<Int>
+    @Query("SELECT DISTINCT treeId FROM observations WHERE recordedBy = :userId AND recordedAt >= :since AND NOT isInitial")
+    fun treesObservedSince(userId: String, since: String): Flow<List<String>>
     @Query("UPDATE observations SET syncState = 'SYNCED', syncMessage = NULL WHERE treeId = :treeId AND isInitial")
     suspend fun markInitialSynced(treeId: String)
     @Query("DELETE FROM observations WHERE treeId NOT IN (SELECT id FROM trees)") suspend fun pruneOrphans()

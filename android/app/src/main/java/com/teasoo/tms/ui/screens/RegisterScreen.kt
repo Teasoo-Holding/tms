@@ -19,6 +19,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.teasoo.tms.data.local.*
 import com.teasoo.tms.data.repo.*
+import com.teasoo.tms.data.session.SessionState
 import com.teasoo.tms.data.session.SessionStore
 import com.teasoo.tms.sync.SyncScheduler
 import com.teasoo.tms.ui.AppViewModel
@@ -65,7 +66,10 @@ class RegisterViewModel @Inject constructor(
     private val projectId = MutableStateFlow<String?>(null)
 
     val replacing = flow { emit(replacesTreeId?.let { db.trees().get(it) }) }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val years = projectId.filterNotNull().flatMapLatest { ref.years(it) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val isAdmin = session.state.map { (it as? SessionState.Active)?.user?.role == "ADMIN" }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    // Officers work in open planting years; administrators may back-enter closed ones.
+    val years = projectId.filterNotNull().flatMapLatest { ref.years(it) }.combine(isAdmin) { l, admin -> l.filter { it.active || admin } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val sectors = projectId.filterNotNull().flatMapLatest { ref.sectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val subSectors = projectId.filterNotNull().flatMapLatest { ref.subSectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val species = ref.species().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -186,9 +190,10 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
     var camera by remember { mutableStateOf(false) }
 
     // Only areas the officer is assigned to (the server enforces this too).
-    val grants = assignments.filter { it.projectId == projectId }
-    val mySectors = sectors.filter { s -> grants.any { it.sectorId == null || it.sectorId == s.id } }
-    val mySubs = subSectors.filter { ss -> ss.sectorId == f.sectorId && grants.any { (it.sectorId == null || it.sectorId == ss.sectorId) && (it.subSectorId == null || it.subSectorId == ss.id) } }
+    val isAdmin by vm.isAdmin.collectAsStateWithLifecycle()
+    // Administrators have no assignment rows and may work in any area.
+    val mySectors = sectors.filter { s -> isAdmin || allowed(assignments, s.projectId, s.id, null) }
+    val mySubs = subSectors.filter { ss -> ss.sectorId == f.sectorId && (isAdmin || allowed(assignments, ss.projectId, ss.sectorId, ss.id)) }
     val status = statuses.find { it.id == f.statusId }
     val photoMissing = status?.requiresPhoto == true && f.photos.isEmpty()
 
@@ -201,7 +206,7 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             replacing?.let { Notice("Replacing ${it.physicalTreeId}. The replacement gets its own new ID and planting year; the original keeps its history.") }
 
-            Picker("Planting year", years, years.find { it.id == f.yearId }, { it.yearLabel + if (it.active) "" else " (closed)" }, { y -> vm.update { it.copy(yearId = y.id) } },
+            Picker("Planting year", years, years.find { it.id == f.yearId }, { it.yearLabel + if (it.active) "" else " (closed – back-entry)" }, { y -> vm.update { it.copy(yearId = y.id) } },
                 supportingText = "Choose the cohort on the label, not today’s year")
             Picker("Sector", mySectors, mySectors.find { it.id == f.sectorId }, { "${it.shortCode} · ${it.name}" }, { s -> vm.update { it.copy(sectorId = s.id, subSectorId = null) } })
             Picker("Sub-sector", mySubs, mySubs.find { it.id == f.subSectorId }, { "${it.shortCode} · ${it.name}" }, { s -> vm.update { it.copy(subSectorId = s.id) } }, enabled = f.sectorId != null)

@@ -41,7 +41,9 @@ class SyncEngine @Inject constructor(
     @Named("upload") private val uploadClient: OkHttpClient,
 ) {
     suspend fun run(): SyncOutcome {
-        if (session.current() !is SessionState.Active) return SyncOutcome.Blocked("Sign in to sync.")
+        val current = session.current() as? SessionState.Active ?: return SyncOutcome.Blocked("Sign in to sync.")
+        // Executives have read-only, online reporting; there is no field data to push or download.
+        if (current.user.role == "EXECUTIVE") return SyncOutcome.Success
         val outcome = try {
             push()
             uploadMedia()

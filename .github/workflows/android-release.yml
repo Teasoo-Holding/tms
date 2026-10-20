@@ -13,6 +13,7 @@ name: Android release
 # Repository variables (same page → Variables):
 #   TMS_API_BASE_URL           backend address with a trailing slash, e.g. https://api.example.org/
 #   TMS_MAP_STYLE_URL          optional licensed basemap style URL
+#   TMS_PORTAL_URL             optional web portal address, linked from the administrator screens
 
 on:
   workflow_dispatch:
@@ -43,6 +44,7 @@ jobs:
     env:
       API_BASE_URL: ${{ inputs.api_base_url || vars.TMS_API_BASE_URL }}
       MAP_STYLE_URL: ${{ vars.TMS_MAP_STYLE_URL }}
+      PORTAL_URL: ${{ vars.TMS_PORTAL_URL }}
       VERSION_NAME: ${{ inputs.version_name || github.ref_name }}
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       TMS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -91,6 +93,7 @@ jobs:
           ./gradlew :app:assembleRelease :app:bundleRelease
           -PtmsApiBaseUrl="$API_BASE_URL"
           -PtmsMapStyleUrl="$MAP_STYLE_URL"
+          -PtmsPortalUrl="$PORTAL_URL"
           -PtmsVersionCode="$VERSION_CODE"
           -PtmsVersionName="$VERSION_NAME"
 
