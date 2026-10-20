@@ -25,6 +25,11 @@ export function UsersPage() {
       <Tabs tabs={[['users', 'Users'], ['devices', 'Field devices']]} value={tab} onChange={setTab} />
       <ErrorNotice error={users.error ?? toggle.error ?? revoke.error} />
       {tab === 'users' ? (
+        <>
+        <p className="subtle" style={{ margin: '0 0 12px' }}>
+          Executives are either <strong>Teasoo management</strong>, who see all projects, or <strong>clients and sponsors</strong>, who see only the projects they are assigned to
+          in <Link to="/projects">Projects</Link> → (project) → Officers &amp; assignments.
+        </p>
         <div className="card table-wrap tall">
           <table>
             <thead>
@@ -42,7 +47,10 @@ export function UsersPage() {
                   <td className="mono">{u.username ?? <span className="muted">—</span>}</td>
                   <td className="nowrap">{u.phone ?? <span className="muted">—</span>}</td>
                   <td>{u.email ?? <span className="muted">—</span>}</td>
-                  <td>{ROLE_LABEL[u.role]}</td>
+                  <td>
+                    {ROLE_LABEL[u.role]}
+                    {u.role === 'EXECUTIVE' && <div className="muted">{u.all_projects ? 'Sees all projects' : 'Assigned projects only'}</div>}
+                  </td>
                   <td><ActivePill active={u.active} /></td>
                   <td className="num">{fmtNum(u.trees_registered ?? 0)}</td>
                   <td className="num">{fmtNum(u.observations_recorded ?? 0)}</td>
@@ -65,6 +73,7 @@ export function UsersPage() {
           </table>
           {users.data?.length === 0 && <EmptyState title="No users yet">Add administrators, executives and field officers.</EmptyState>}
         </div>
+        </>
       ) : (
         <div className="card table-wrap tall">
           <table>
@@ -101,6 +110,7 @@ function UserForm({ user, onClose }: { user: any; onClose: () => void }) {
     phone: user.phone ?? '',
     email: user.email ?? '',
     role: user.role ?? 'FIELD_OFFICER',
+    all_projects: user.all_projects ?? false,
     password: '',
     active: user.active ?? true,
   });
@@ -109,6 +119,8 @@ function UserForm({ user, onClose }: { user: any; onClose: () => void }) {
     mutationFn: () => {
       // Blank optional fields are sent as null, which clears them on edit.
       const body: any = clean({ ...f.values, username: f.values.username.trim(), phone: f.values.phone.trim(), email: f.values.email.trim() });
+      // Only executives can see every project; for other roles the flag is always off.
+      body.all_projects = f.values.role === 'EXECUTIVE' && f.values.all_projects;
       if (!body.password) delete body.password;
       return isNew ? api.post('/users', body) : api.patch(`/users/${user.id}`, body);
     },
@@ -144,6 +156,16 @@ function UserForm({ user, onClose }: { user: any; onClose: () => void }) {
             <input type="password" autoComplete="new-password" required={isNew} minLength={10} {...f.bind('password')} />
           </Field>
         </div>
+        {f.values.role === 'EXECUTIVE' && (
+          <div>
+            <label className="check"><input type="checkbox" {...f.bindCheck('all_projects')} /> Teasoo management – sees all projects</label>
+            <p className="muted" style={{ margin: '2px 0 0 22px' }}>
+              {f.values.all_projects
+                ? 'Sees the dashboard and reports for every project, including new ones.'
+                : 'A client or sponsor: sees only the projects they are assigned to, under Projects → (project) → Officers & assignments.'}
+            </p>
+          </div>
+        )}
         <label className="check"><input type="checkbox" {...f.bindCheck('active')} /> Active (can sign in)</label>
         {!isNew && <p className="muted" style={{ margin: 0 }}>Changing the role or password signs the user out of all devices.</p>}
         <div className="form-actions">

@@ -4,12 +4,14 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 
 /** Filter keys shared by the dashboard summary, its exports and the visits table. */
-export const REPORT_FILTER_KEYS = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'from', 'to', 'overdue_days'] as const;
+export const REPORT_FILTER_KEYS = ['project_id', 'planting_year_id', 'vendor_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'from', 'to', 'overdue_days'] as const;
 export type ReportFilterKey = (typeof REPORT_FILTER_KEYS)[number];
 
 /** Keys cleared when a parent filter changes. */
 const DEPENDENTS: Record<string, string[]> = {
-  project_id: ['planting_year_id', 'sector_id', 'sub_sector_id'],
+  project_id: ['planting_year_id', 'vendor_id', 'sector_id', 'sub_sector_id'],
+  // Each planting year has its own survey, so its sectors differ.
+  planting_year_id: ['sector_id', 'sub_sector_id'],
   sector_id: ['sub_sector_id'],
 };
 
@@ -67,12 +69,28 @@ export function ReportFilters({ f, showOverdue = false, dateNote, children }: {
 }) {
   const projectId = f.get('project_id');
   const sectorId = f.get('sector_id');
+  const yearId = f.get('planting_year_id');
+  const vendorId = f.get('vendor_id');
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
   const project = useQuery({ queryKey: ['project', projectId], queryFn: () => api.get(`/projects/${projectId}`), enabled: !!projectId });
   const areas = useQuery({ queryKey: ['areas', projectId], queryFn: () => api.get<any[]>(`/projects/${projectId}/areas`), enabled: !!projectId });
+  // All vendors only when no project is chosen; otherwise those linked to the project (or the chosen year).
+  const vendors = useQuery({ queryKey: ['vendors'], queryFn: () => api.get<any[]>('/vendors'), enabled: !projectId });
   const species = useQuery({ queryKey: ['tree-species'], queryFn: () => api.get<any[]>('/tree-species') });
   const statuses = useQuery({ queryKey: ['tree-statuses'], queryFn: () => api.get<any[]>('/tree-statuses') });
-  const subSectors: any[] = areas.data?.find((s) => s.id === sectorId)?.sub_sectors ?? [];
+  // A year's survey, plus older areas not tied to a year (which serve every year).
+  const sectors = (areas.data ?? []).filter((s) => !yearId || s.planting_year_id === yearId || s.planting_year_id == null);
+  const subSectors: any[] = sectors.find((s) => s.id === sectorId)?.sub_sectors ?? [];
+  const vendorOptions = new Map<string, string>();
+  if (projectId) {
+    (project.data?.planting_year_vendors ?? [])
+      .filter((l: any) => !yearId || l.planting_year_id === yearId)
+      .forEach((l: any) => vendorOptions.set(l.vendor_id, l.vendor_short_code ? `${l.vendor_name} (${l.vendor_short_code})` : l.vendor_name));
+  } else {
+    (vendors.data ?? []).forEach((v) => vendorOptions.set(v.id, `${v.name}${v.short_code ? ` (${v.short_code})` : ''}${v.active === false ? ' (inactive)' : ''}`));
+  }
+  // Keep a vendor chosen earlier visible even when it is not linked to the newly chosen year.
+  if (vendorId && !vendorOptions.has(vendorId)) vendorOptions.set(vendorId, 'Vendor not in this year');
   const from = f.get('from');
   const to = f.get('to');
   const activePreset = PRESETS.find(([k]) => {
@@ -95,7 +113,8 @@ export function ReportFilters({ f, showOverdue = false, dateNote, children }: {
       <div className="filters" style={{ marginBottom: 0 }}>
         {select('project_id', 'Project', (projects.data ?? []).map((p) => [p.id, p.name]), 'All my projects')}
         {select('planting_year_id', 'Planting year', (project.data?.planting_years ?? []).map((y: any) => [y.id, y.year_label]), 'All years', !projectId)}
-        {select('sector_id', 'Sector', (areas.data ?? []).map((s) => [s.id, `${s.short_code} · ${s.name}`]), 'All sectors', !projectId)}
+        {select('vendor_id', 'Vendor', [...vendorOptions.entries()], 'All vendors')}
+        {select('sector_id', 'Sector', sectors.map((s) => [s.id, `${s.short_code} · ${s.name}${yearId && s.planting_year_id == null ? ' (older setup)' : ''}`]), 'All sectors', !projectId)}
         {select('sub_sector_id', 'Sub-sector', subSectors.map((s) => [s.id, `${s.short_code} · ${s.name}`]), 'All sub-sectors', !sectorId)}
         {select('species_id', 'Species', (species.data ?? []).map((s) => [s.id, s.common_name ?? s.scientific_name]), 'All species')}
         {select(
