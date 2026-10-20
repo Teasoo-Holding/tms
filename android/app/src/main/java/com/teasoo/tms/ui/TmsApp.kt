@@ -17,6 +17,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.teasoo.tms.data.session.SessionState
+import com.teasoo.tms.ui.admin.adminGraph
 import com.teasoo.tms.ui.components.Notice
 import com.teasoo.tms.ui.screens.*
 
@@ -78,6 +79,7 @@ private fun MainNav(vm: AppViewModel) {
         }
         composable(Routes.ADMIN_DASHBOARD) { DashboardScreen(vm, onBack = { nav.popBackStack() }) }
         composable(Routes.ADMIN_CONFLICTS) { ConflictsScreen(onOpenTree = { nav.navigate(Routes.tree(it)) }, onBack = { nav.popBackStack() }) }
+        adminGraph(nav, onOpenTree = { nav.navigate(Routes.tree(it)) })
     }
 }
 
