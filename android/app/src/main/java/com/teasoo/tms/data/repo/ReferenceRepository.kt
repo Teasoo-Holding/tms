@@ -29,11 +29,14 @@ class ReferenceRepository @Inject constructor(private val db: TmsDatabase) {
         ref.upsertAssignments(b.assignments.map { it.toEntity() })
         ref.clearAllocations()
         ref.upsertAllocations(b.serialAllocations.map { it.toEntity() })
+        ref.upsertCustomFields(b.customFields.map { it.toEntity() })
+        ref.pruneCustomFields(b.customFields.map { it.id })
     }
 
     suspend fun applyTreesPage(page: MobileTreesResponse) = db.withTransaction {
         page.trees.forEach { applyTree(it) }
         page.observations.forEach { applyObservation(it) }
+        page.media.forEach { applyMedia(it) }
         page.trees.forEach { db.trees().recomputeStatus(it.id) }
     }
 
@@ -56,6 +59,7 @@ class ReferenceRepository @Inject constructor(private val db: TmsDatabase) {
             "vendor" -> ref.upsertVendors(listOf(decode(VendorDto.serializer()).toEntity()))
             "assignment" -> ref.upsertAssignments(listOf(decode(AssignmentDto.serializer()).toEntity()))
             "serial_allocation" -> ref.upsertAllocations(listOf(decode(SerialAllocationDto.serializer()).toEntity()))
+            "custom_field" -> ref.upsertCustomFields(listOf(decode(CustomFieldDto.serializer()).toEntity()))
             "tree" -> applyTree(decode(TreeDto.serializer()))
             "observation" -> {
                 val o = decode(ObservationDto.serializer())
@@ -85,7 +89,22 @@ class ReferenceRepository @Inject constructor(private val db: TmsDatabase) {
 
     /** The feed can confirm a verification whose direct response was lost (e.g. crash after upload). */
     private suspend fun applyMedia(m: MediaStateDto) {
-        val local = db.media().get(m.id) ?: return
+        val local = db.media().get(m.id)
+        if (local == null) {
+            // A photo taken on another device: keep a record so it can be fetched for viewing on demand.
+            if (m.uploadState == "VERIFIED" && db.trees().get(m.treeId) != null) {
+                db.media().upsert(
+                    MediaEntity(
+                        id = m.id, treeId = m.treeId, observationId = m.observationId, localPath = null, checksumSha256 = m.checksumSha256,
+                        byteSize = m.byteSize, mimeType = m.mimeType, capturedAt = m.capturedAt ?: java.time.Instant.now().toString(),
+                        state = MediaState.VERIFIED, serverChecksum = m.checksumSha256, serverByteSize = m.byteSize,
+                        remoteVerifiedAt = m.remoteVerifiedAt, associationVerifiedAt = m.associationVerifiedAt,
+                        ackPersistedAt = java.time.Instant.now().toString(),
+                    ),
+                )
+            }
+            return
+        }
         if (m.uploadState != "VERIFIED" || local.state == MediaState.VERIFIED) return
         if (m.checksumSha256 != local.checksumSha256 || m.byteSize != local.byteSize) return
         db.media().upsert(

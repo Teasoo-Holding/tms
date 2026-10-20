@@ -33,7 +33,7 @@ fun TreeDto.toEntity(serialScopeKey: String?) = TreeEntity(
     projectId = projectId, plantingYearId = plantingYearId, sectorId = sectorId, subSectorId = subSectorId, speciesId = speciesId,
     currentStatusId = currentStatusId, lastObservedAt = lastObservedAt, vendorId = vendorId, replacesTreeId = replacesTreeId,
     plantedOn = plantedOn, notes = notes, createdBy = createdBy, createdAt = createdAt, serverRevision = revision,
-    recordState = recordState,
+    recordState = recordState, customFieldsJson = customFields.toString(), createdByName = createdByName,
     syncState = when (recordState) { "CONFLICT" -> SyncState.CONFLICT; "REJECTED" -> SyncState.REJECTED; else -> SyncState.SYNCED },
     syncMessage = when (recordState) {
         "CONFLICT" -> "Duplicate ID under administrator review."
@@ -44,6 +44,13 @@ fun TreeDto.toEntity(serialScopeKey: String?) = TreeEntity(
 
 fun ObservationDto.toEntity() = ObservationEntity(
     id, treeId, statusId, observedAt, recordedAt, recordedBy, remarks, isInitial, amendsObservationId, amendmentReason, SyncState.SYNCED, null,
+    customFieldsJson = customFields.toString(), heightCm = heightCm, heightMethod = heightMethod,
+    heightMeasurementJson = heightMeasurement?.takeUnless { it is kotlinx.serialization.json.JsonNull }?.toString(), recordedByName = recordedByName,
+)
+
+fun CustomFieldDto.toEntity() = CustomFieldEntity(
+    id, projectId, appliesTo, key, label, fieldType, TmsJson.encodeToString(ListSerializer(String.serializer()), options),
+    required, sticky, helpText, sortOrder, active,
 )
 
 fun IdSchemeEntity.toScheme() = TreeIdAssembler.Scheme(

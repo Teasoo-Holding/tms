@@ -1,15 +1,19 @@
 package com.teasoo.tms.data.local
 
+import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.RoomDatabase
 
 @Database(
-    version = 1,
+    version = 2,
     exportSchema = true,
+    // Additive changes only; field records on the device are kept across upgrades.
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
     entities = [
         ProjectEntity::class, PlantingYearEntity::class, IdSchemeEntity::class, SectorEntity::class, SubSectorEntity::class,
         SpeciesEntity::class, StatusEntity::class, VendorEntity::class, AssignmentEntity::class, SerialAllocationEntity::class,
         TreeEntity::class, ObservationEntity::class, MediaEntity::class, OutboxEntity::class, KeyValueEntity::class,
+        CustomFieldEntity::class,
     ],
 )
 abstract class TmsDatabase : RoomDatabase() {

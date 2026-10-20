@@ -5,6 +5,7 @@ import com.teasoo.tms.data.local.*
 import com.teasoo.tms.data.remote.TmsJson
 import com.teasoo.tms.domain.TreeIdAssembler
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -48,7 +49,24 @@ data class NewTree(
     val remarks: String?,
     val photos: List<CapturedPhoto>,
     val replacesTreeId: String? = null,
+    val treeFields: FieldValues = emptyMap(),
+    val observationFields: FieldValues = emptyMap(),
+    val height: HeightReading? = null,
 )
+
+/** A tree height recorded with an observation. */
+data class HeightReading(
+    val cm: Double,
+    /** MANUAL (typed in) or PHOTO_REFERENCE (measured on the photo against a stick of known length). */
+    val method: String,
+    /** Stick length and marked points, kept so the measurement can be reviewed. */
+    val measurementJson: String? = null,
+)
+
+/** Custom field values keyed by field key. Blank values are left out. */
+typealias FieldValues = Map<String, JsonPrimitive>
+
+fun FieldValues.toJson() = JsonObject(this)
 
 class RegistrationException(message: String) : Exception(message)
 
@@ -164,7 +182,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
             sectorId = t.area.sectorId, subSectorId = t.area.subSectorId, speciesId = t.speciesId, currentStatusId = t.statusId,
             lastObservedAt = t.observedAt.toString(), vendorId = t.area.vendorId, replacesTreeId = t.replacesTreeId,
             plantedOn = t.plantedOn, notes = t.notes, createdBy = userId, createdAt = now, serverRevision = null,
-            recordState = "ACTIVE", syncState = SyncState.PENDING, syncMessage = null,
+            recordState = "ACTIVE", syncState = SyncState.PENDING, syncMessage = null, customFieldsJson = t.treeFields.toJson().toString(),
         )
         val payload = buildJsonObject {
             put("id", treeId)
@@ -181,17 +199,24 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
             t.replacesTreeId?.let { put("replaces_tree_id", it) }
             t.plantedOn?.let { put("planted_on", it) }
             t.notes?.let { put("notes", it) }
+            if (t.treeFields.isNotEmpty()) put("custom_fields", t.treeFields.toJson())
             putJsonObject("initial_observation") {
                 put("id", observationId)
                 put("status_id", t.statusId)
                 put("observed_at", t.observedAt.toString())
                 t.remarks?.let { put("remarks", it) }
+                if (t.observationFields.isNotEmpty()) put("custom_fields", t.observationFields.toJson())
+                putHeight(t.height)
             }
         }
         db.withTransaction {
             db.trees().insert(tree)
             db.observations().insert(
-                ObservationEntity(observationId, treeId, t.statusId, t.observedAt.toString(), now, userId, t.remarks, true, null, null, SyncState.PENDING, null),
+                ObservationEntity(
+                    observationId, treeId, t.statusId, t.observedAt.toString(), now, userId, t.remarks, true, null, null, SyncState.PENDING, null,
+                    customFieldsJson = t.observationFields.toJson().toString(), heightCm = t.height?.cm, heightMethod = t.height?.method,
+                    heightMeasurementJson = t.height?.measurementJson,
+                ),
             )
             t.photos.forEach { db.media().insert(it.toEntity(treeId, observationId, now)) }
             db.outbox().insert(operation("tree", treeId, "create", null, payload, now))
@@ -202,6 +227,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
     suspend fun addObservation(
         treeId: String, statusId: String, observedAt: Instant, remarks: String?, photos: List<CapturedPhoto>, userId: String,
         amendsObservationId: String? = null, amendmentReason: String? = null,
+        height: HeightReading? = null, fields: FieldValues = emptyMap(),
     ): String {
         val status = ref.status(statusId) ?: throw RegistrationException("Choose a status.")
         if (status.requiresPhoto && photos.isEmpty()) throw RegistrationException("Status “${status.name}” requires a photo.")
@@ -217,9 +243,16 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
             remarks?.let { put("remarks", it) }
             amendsObservationId?.let { put("amends_observation_id", it) }
             amendmentReason?.let { put("amendment_reason", it) }
+            if (fields.isNotEmpty()) put("custom_fields", fields.toJson())
+            putHeight(height)
         }
         db.withTransaction {
-            db.observations().insert(ObservationEntity(id, treeId, statusId, observedAt.toString(), now, userId, remarks, false, amendsObservationId, amendmentReason, SyncState.PENDING, null))
+            db.observations().insert(
+                ObservationEntity(
+                    id, treeId, statusId, observedAt.toString(), now, userId, remarks, false, amendsObservationId, amendmentReason, SyncState.PENDING, null,
+                    customFieldsJson = fields.toJson().toString(), heightCm = height?.cm, heightMethod = height?.method, heightMeasurementJson = height?.measurementJson,
+                ),
+            )
             photos.forEach { db.media().insert(it.toEntity(treeId, id, now)) }
             db.outbox().insert(operation("observation", id, if (amendsObservationId != null) "amendment" else "observation", null, payload, now))
             db.trees().recomputeStatus(treeId)
@@ -231,7 +264,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
      * Edits permitted metadata. Unsent edits to the same tree are merged into one operation so the
      * base revision stays the one the officer started from (no self-inflicted revision conflicts).
      */
-    suspend fun updateTree(treeId: String, speciesId: String?, plantedOn: String?, notes: String?) {
+    suspend fun updateTree(treeId: String, speciesId: String?, plantedOn: String?, notes: String?, fields: FieldValues? = null) {
         val now = Instant.now().toString()
         db.withTransaction {
             val tree = db.trees().get(treeId) ?: throw RegistrationException("Tree not found.")
@@ -239,8 +272,14 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
                 speciesId?.let { put("species_id", it) }
                 put("planted_on", plantedOn)
                 put("notes", notes)
+                fields?.let { put("custom_fields", it.toJson()) }
             }
-            db.trees().upsert(tree.copy(speciesId = speciesId ?: tree.speciesId, plantedOn = plantedOn, notes = notes, syncState = SyncState.PENDING))
+            db.trees().upsert(
+                tree.copy(
+                    speciesId = speciesId ?: tree.speciesId, plantedOn = plantedOn, notes = notes, syncState = SyncState.PENDING,
+                    customFieldsJson = fields?.toJson()?.toString() ?: tree.customFieldsJson,
+                ),
+            )
             val unsent = db.outbox().unsentUpdateFor(treeId)
             if (unsent != null) {
                 val previous = TmsJson.parseToJsonElement(unsent.payloadJson) as JsonObject
@@ -270,6 +309,13 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
         db.trees().replacementOf(originalId)?.let {
             throw RegistrationException("This tree has already been replaced by ${it.physicalTreeId}.")
         }
+    }
+
+    private fun kotlinx.serialization.json.JsonObjectBuilder.putHeight(h: HeightReading?) {
+        h ?: return
+        put("height_cm", h.cm)
+        put("height_method", h.method)
+        h.measurementJson?.let { put("height_measurement", TmsJson.parseToJsonElement(it)) }
     }
 
     private fun CapturedPhoto.toEntity(treeId: String, observationId: String, now: String) =

@@ -5,6 +5,7 @@ import { AccessService } from '../common/access.service';
 import { AuditService } from '../common/audit.service';
 import { AuthUser } from '../common/auth.decorators';
 import { Db, isUniqueViolation } from '../database/db.service';
+import { CustomFieldError, CustomValue, validateCustomValues } from '../domain/custom-fields';
 import {
   assemblePhysicalId,
   ComponentType,
@@ -18,6 +19,18 @@ import {
 import { OperationContext, OperationResult, Rejection } from './operation-result';
 
 const COMPONENT_VALUE_KEYS = ['PROJECT_CODE', 'PLANTING_YEAR', 'VENDOR_CODE', 'SECTOR_CODE', 'SUB_SECTOR_CODE'] as const;
+
+const customFields = z.record(z.string(), z.unknown()).refine((v) => JSON.stringify(v).length <= 20_000, 'Too much custom field data');
+
+/** Height typed in, or measured on the photo against a reference stick (points kept for review). */
+const height = {
+  height_cm: z.number().positive().lt(20000).nullish(),
+  height_method: z.enum(['MANUAL', 'PHOTO_REFERENCE']).nullish(),
+  height_measurement: z
+    .record(z.string(), z.unknown())
+    .refine((v) => JSON.stringify(v).length <= 4000, 'Measurement details are too large')
+    .nullish(),
+};
 
 export const CreateTreePayload = z.object({
   id: z.string().uuid(),
@@ -36,12 +49,15 @@ export const CreateTreePayload = z.object({
   replaces_tree_id: z.string().uuid().nullish(),
   planted_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   notes: z.string().max(4000).nullish(),
+  custom_fields: customFields.optional(),
   client_recorded_at: z.string().datetime({ offset: true }).optional(),
   initial_observation: z.object({
     id: z.string().uuid(),
     status_id: z.string().uuid(),
     observed_at: z.string().datetime({ offset: true }),
     remarks: z.string().max(4000).nullish(),
+    custom_fields: customFields.optional(),
+    ...height,
   }),
 });
 export type CreateTree = z.infer<typeof CreateTreePayload>;
@@ -55,6 +71,8 @@ export const UpdateTreePayload = z.object({
       vendor_id: z.string().uuid().nullable(),
       planted_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
       notes: z.string().max(4000).nullable(),
+      /** Replaces the whole map of extra field values. */
+      custom_fields: customFields,
     })
     .partial()
     .refine((c) => Object.keys(c).length > 0, 'No changes supplied'),
@@ -70,6 +88,8 @@ export const ObservationPayload = z.object({
   remarks: z.string().max(4000).nullish(),
   amends_observation_id: z.string().uuid().nullish(),
   amendment_reason: z.string().max(1000).nullish(),
+  custom_fields: customFields.optional(),
+  ...height,
 });
 export type Observation = z.infer<typeof ObservationPayload>;
 
@@ -182,18 +202,19 @@ export class TreesService {
     await this.assertSerialAllocated(tx, actor, serialKey, assembled.serial);
 
     if (p.replaces_tree_id) await this.assertReplaceable(tx, p.replaces_tree_id, p.project_id);
+    const treeFields = await this.customValues(tx, p.project_id, 'TREE', p.custom_fields);
 
     const insertValues = [
       p.id, assembled.physicalId, assembled.normalized, physicalIdScopeKey(project.physical_id_uniqueness, project.id),
       assembled.serial, serialKey, schemeRow.id, schemeRow.version, JSON.stringify(snapshot), p.project_id, p.planting_year_id,
       p.sector_id, p.sub_sector_id, p.species_id, p.vendor_id ?? null, p.replaces_tree_id ?? null, p.planted_on ?? null,
-      p.notes ?? null, actor.id, ctx.deviceId, p.client_recorded_at ?? null,
+      p.notes ?? null, actor.id, ctx.deviceId, p.client_recorded_at ?? null, JSON.stringify(treeFields),
     ];
     const insertSql = (state: string) => `
       INSERT INTO trees (id, physical_tree_id, physical_tree_id_normalized, physical_id_scope_key, serial_number, serial_scope_key,
         id_scheme_id, id_scheme_version, id_components_snapshot, project_id, planting_year_id, sector_id, sub_sector_id, species_id,
-        vendor_id, replaces_tree_id, planted_on, notes, created_by, device_id, client_recorded_at, record_state)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,'${state}') RETURNING *`;
+        vendor_id, replaces_tree_id, planted_on, notes, created_by, device_id, client_recorded_at, custom_fields, record_state)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'${state}') RETURNING *`;
 
     let tree: any;
     let conflict: { type: string; existingId: string | null; message: string } | null = null;
@@ -216,8 +237,21 @@ export class TreesService {
       observed_at: p.initial_observation.observed_at,
       recorded_at: p.client_recorded_at,
       remarks: p.initial_observation.remarks,
+      custom_fields: p.initial_observation.custom_fields,
+      height_cm: p.initial_observation.height_cm,
+      height_method: p.initial_observation.height_method,
+      height_measurement: p.initial_observation.height_measurement,
     }, true);
     tree = await this.recomputeStatus(tx, tree.id);
+    // Every record is attributable to the account that entered it (and the device it came from).
+    await this.audit.record(
+      {
+        actorId: actor.id, action: 'tree.create', entityType: 'tree', entityId: tree.id, projectId: tree.project_id,
+        after: { physical_tree_id: tree.physical_tree_id, record_state: tree.record_state, custom_fields: tree.custom_fields },
+        metadata: { device_id: ctx.deviceId, operation_id: ctx.operationId },
+      },
+      tx,
+    );
 
     if (p.replaces_tree_id && !conflict) {
       await this.audit.record(
@@ -315,6 +349,9 @@ export class TreesService {
         if (!vendor?.active) throw new Rejection('VENDOR_INVALID', 'The vendor is unknown or deactivated.');
       }
     }
+    if (p.changes.custom_fields !== undefined) {
+      p.changes.custom_fields = await this.customValues(tx, tree.project_id, 'TREE', p.changes.custom_fields);
+    }
     if (tree.revision !== p.base_revision) {
       // Concurrent edit: never last-write-wins. Keep the incoming change for review.
       const record = await this.db.one(
@@ -339,9 +376,9 @@ export class TreesService {
     const n = { ...tree, ...changes };
     const after = await this.db.one(
       tx,
-      `UPDATE trees SET species_id = $2, vendor_id = $3, planted_on = $4, notes = $5, revision = revision + 1,
+      `UPDATE trees SET species_id = $2, vendor_id = $3, planted_on = $4, notes = $5, custom_fields = $7, revision = revision + 1,
               updated_at = now(), updated_by = $6 WHERE id = $1 RETURNING *`,
-      [tree.id, n.species_id, n.vendor_id, n.planted_on, n.notes, actor.id],
+      [tree.id, n.species_id, n.vendor_id, n.planted_on, n.notes, actor.id, JSON.stringify(n.custom_fields ?? {})],
     );
     await this.audit.record({ actorId: actor.id, action: 'tree.update', entityType: 'tree', entityId: tree.id, projectId: tree.project_id, before: tree, after }, tx);
     return after;
@@ -374,6 +411,14 @@ export class TreesService {
     }
 
     const obs = await this.insertObservation(tx, actor, ctx, p, false);
+    await this.audit.record(
+      {
+        actorId: actor.id, action: 'observation.create', entityType: 'observation', entityId: obs.id, projectId: tree.project_id,
+        after: { tree_id: tree.id, physical_tree_id: tree.physical_tree_id, observed_status_id: obs.observed_status_id, observed_at: obs.observed_at, height_cm: obs.height_cm },
+        metadata: { device_id: ctx.deviceId, operation_id: ctx.operationId },
+      },
+      tx,
+    );
     if (p.amends_observation_id) {
       await this.audit.record(
         { actorId: actor.id, action: 'observation.amend', entityType: 'observation', entityId: obs.id, projectId: tree.project_id, metadata: { amends: p.amends_observation_id, reason: p.amendment_reason } },
@@ -385,16 +430,37 @@ export class TreesService {
   }
 
   private async insertObservation(tx: PoolClient, actor: AuthUser, ctx: OperationContext, p: Observation, initial: boolean) {
+    const tree = await this.db.one(tx, 'SELECT project_id FROM trees WHERE id = $1', [p.tree_id]);
+    const fields = await this.customValues(tx, tree!.project_id, 'OBSERVATION', p.custom_fields);
+    const heightCm = p.height_cm == null ? null : Math.round(p.height_cm * 10) / 10;
     return (await this.db.one(
       tx,
       `INSERT INTO tree_observations (id, tree_id, observed_status_id, observed_at, recorded_at, recorded_by, device_id, remarks,
-                                      is_initial, is_amendment, amends_observation_id, amendment_reason)
-       VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+                                      is_initial, is_amendment, amends_observation_id, amendment_reason, custom_fields,
+                                      height_cm, height_method, height_measurement)
+       VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
       [
         p.id, p.tree_id, p.observed_status_id, p.observed_at, p.recorded_at ?? null, actor.id, ctx.deviceId, p.remarks ?? null,
-        initial, !!p.amends_observation_id, p.amends_observation_id ?? null, p.amendment_reason ?? null,
+        initial, !!p.amends_observation_id, p.amends_observation_id ?? null, p.amendment_reason ?? null, JSON.stringify(fields),
+        heightCm, heightCm == null ? null : (p.height_method ?? 'MANUAL'),
+        heightCm == null || !p.height_measurement ? null : JSON.stringify(p.height_measurement),
       ],
     ))!;
+  }
+
+  /** Validates extra field values against the project's definitions (including deactivated ones). */
+  private async customValues(tx: PoolClient, projectId: string, appliesTo: 'TREE' | 'OBSERVATION', values: Record<string, unknown> | undefined) {
+    if (!values || Object.keys(values).length === 0) return {} as Record<string, CustomValue>;
+    const { rows } = await tx.query(
+      'SELECT key, label, field_type, options, required, active FROM custom_field_definitions WHERE project_id = $1 AND applies_to = $2',
+      [projectId, appliesTo],
+    );
+    try {
+      return validateCustomValues(rows, values);
+    } catch (e) {
+      if (e instanceof CustomFieldError) throw new Rejection(e.code, e.message);
+      throw e;
+    }
   }
 
   /** current_status_id is a cache; the effective observation history is authoritative. */

@@ -101,6 +101,22 @@ data class SerialAllocationDto(
 )
 
 @Serializable
+data class CustomFieldDto(
+    val id: String,
+    @SerialName("project_id") val projectId: String,
+    @SerialName("applies_to") val appliesTo: String,
+    val key: String,
+    val label: String,
+    @SerialName("field_type") val fieldType: String,
+    val options: List<String> = emptyList(),
+    val required: Boolean = false,
+    val sticky: Boolean = false,
+    @SerialName("help_text") val helpText: String? = null,
+    @SerialName("sort_order") val sortOrder: Int = 0,
+    val active: Boolean = true,
+)
+
+@Serializable
 data class BootstrapResponse(
     val cursor: String,
     @SerialName("assignment_fingerprint") val assignmentFingerprint: String,
@@ -114,6 +130,7 @@ data class BootstrapResponse(
     val vendors: List<VendorDto>,
     val assignments: List<AssignmentDto>,
     @SerialName("serial_allocations") val serialAllocations: List<SerialAllocationDto>,
+    @SerialName("custom_fields") val customFields: List<CustomFieldDto> = emptyList(),
 )
 
 // ---------------------------------------------------------------- field records
@@ -139,9 +156,11 @@ data class TreeDto(
     @SerialName("planted_on") val plantedOn: String? = null,
     val notes: String? = null,
     @SerialName("created_by") val createdBy: String,
+    @SerialName("created_by_name") val createdByName: String? = null,
     @SerialName("created_at") val createdAt: String,
     val revision: Int,
     @SerialName("record_state") val recordState: String,
+    @SerialName("custom_fields") val customFields: JsonObject = JsonObject(emptyMap()),
 )
 
 @Serializable
@@ -156,12 +175,20 @@ data class ObservationDto(
     @SerialName("is_initial") val isInitial: Boolean = false,
     @SerialName("amends_observation_id") val amendsObservationId: String? = null,
     @SerialName("amendment_reason") val amendmentReason: String? = null,
+    @SerialName("custom_fields") val customFields: JsonObject = JsonObject(emptyMap()),
+    @SerialName("height_cm") val heightCm: Double? = null,
+    @SerialName("height_method") val heightMethod: String? = null,
+    @SerialName("height_measurement") val heightMeasurement: JsonElement? = null,
+    @SerialName("recorded_by_name") val recordedByName: String? = null,
 )
 
 @Serializable
 data class MediaStateDto(
     val id: String,
     @SerialName("tree_id") val treeId: String,
+    @SerialName("observation_id") val observationId: String? = null,
+    @SerialName("mime_type") val mimeType: String = "image/jpeg",
+    @SerialName("captured_at") val capturedAt: String? = null,
     @SerialName("upload_state") val uploadState: String,
     @SerialName("checksum_sha256") val checksumSha256: String,
     @SerialName("byte_size") val byteSize: Long,
@@ -170,7 +197,12 @@ data class MediaStateDto(
 )
 
 @Serializable
-data class MobileTreesResponse(val trees: List<TreeDto>, val observations: List<ObservationDto>, @SerialName("next_after_id") val nextAfterId: String? = null)
+data class MobileTreesResponse(
+    val trees: List<TreeDto>,
+    val observations: List<ObservationDto>,
+    val media: List<MediaStateDto> = emptyList(),
+    @SerialName("next_after_id") val nextAfterId: String? = null,
+)
 
 @Serializable data class ChangeDto(val seq: Long, @SerialName("entity_type") val entityType: String, val data: JsonObject)
 
@@ -312,3 +344,5 @@ data class SerialCorrectionRequest(
     @SerialName("serial_input") val serialInput: String,
     val reason: String,
 )
+
+@Serializable data class ViewUrlDto(val url: String, @SerialName("expires_in") val expiresIn: Int = 300)

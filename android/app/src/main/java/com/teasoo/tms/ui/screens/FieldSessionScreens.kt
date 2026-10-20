@@ -200,6 +200,7 @@ class SessionSetupViewModel @Inject constructor(
                 // Keep the running count and remembered choices when only the sub-sector or vendor changed.
                 startedAt = if (sameDay) previous!!.startedAt else java.time.Instant.now().toString(),
                 speciesId = previous?.speciesId.takeIf { sameDay }, statusId = previous?.statusId.takeIf { sameDay },
+                stickyValues = previous?.stickyValues.takeIf { sameDay }.orEmpty(),
             ),
         )
         onStarted()

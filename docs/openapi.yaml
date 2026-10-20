@@ -255,6 +255,16 @@ paths:
       summary: Publish a new ID format version (admin); it becomes current for new registrations.
       requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/IdScheme' } } } }
       responses: { '201': { description: Scheme version }, '400': { $ref: '#/components/responses/Error' } }
+  /projects/{id}/custom-fields:
+    get: { summary: Administrator-defined extra fields for trees and observations (including deactivated), responses: { '200': { description: Field definitions } } }
+    post:
+      summary: >-
+        Add a field (admin). Body {applies_to TREE|OBSERVATION, label, field_type TEXT|NUMBER|DATE|SELECT|BOOLEAN, options, required, sticky,
+        help_text, sort_order, active}. The key is derived from the label; key and type are immutable. Values are stored in custom_fields
+        on trees/observations; sync refuses unknown keys or wrong types but accepts missing required values from older devices.
+      responses: { '201': { description: Field definition }, '400': { $ref: '#/components/responses/Error' } }
+  /custom-fields/{id}:
+    patch: { summary: 'Edit label, options, required, sticky, help text, order, or deactivate (admin)', responses: { '200': { description: Field definition } } }
   /projects/{id}/areas:
     get: { summary: Sectors with sub-sectors (GeoJSON boundaries), responses: { '200': { description: Areas } } }
   /projects/{id}/areas.geojson:
@@ -412,7 +422,12 @@ paths:
   /devices/{id}/revoke:
     post: { summary: Revoke a device and its sessions (admin), responses: { '201': { description: Device } } }
   /audit-logs:
-    get: { summary: Audit log, newest first, keyset-paginated by before_id (admin), responses: { '200': { description: Entries } } }
+    get:
+      summary: >-
+        Audit log, newest first, keyset-paginated by before_id (admin). Filters actor_id, action (prefix, e.g. tree. or observation.create),
+        entity_type, entity_id, project_id, from/to (YYYY-MM-DD). Rows carry actor_name, project_name, entity_label (e.g. tree ID) and tree_id.
+        Every registration (tree.create) and observation (observation.create) is logged with the device ID.
+      responses: { '200': { description: Entries } }
 
   /reports/summary:
     get:

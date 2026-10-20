@@ -214,8 +214,16 @@ class SyncEngine @Inject constructor(
     }
 
     /** Deletes local copies only when every deletion condition holds. Unsynced photos are never purged. */
+    /** Verified photos stay on the phone as a second copy this long, unless storage runs low. */
+    internal var retentionDays = 30L
+    internal var freeBytes: () -> Long = { android.os.StatFs(android.os.Environment.getDataDirectory().path).availableBytes }
+
     internal suspend fun cleanupMedia() {
+        val keepAfter = Instant.now().minus(java.time.Duration.ofDays(retentionDays))
+        val storageLow = freeBytes() < com.teasoo.tms.data.repo.PhotoStore.LOW_STORAGE_BYTES
         for (m in db.media().verifiedWithLocalCopy()) {
+            val captured = runCatching { Instant.parse(m.capturedAt) }.getOrDefault(Instant.EPOCH)
+            if (!storageLow && captured.isAfter(keepAfter)) continue
             val facts = MediaDeletionPolicy.Facts(
                 remoteVerifiedAt = m.remoteVerifiedAt, associationVerifiedAt = m.associationVerifiedAt,
                 serverChecksum = m.serverChecksum, localChecksum = m.checksumSha256,

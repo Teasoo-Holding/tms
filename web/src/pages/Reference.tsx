@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api/client';
-import { ActivePill, clean, ErrorNotice, Field, Modal, Tabs, useForm } from '../components/ui';
+import { ActivePill, clean, EmptyState, ErrorNotice, Field, Modal, PageHeader, Tabs, useForm } from '../components/ui';
 
 type Kind = 'tree-species' | 'tree-statuses' | 'vendors';
 interface Col { key: string; label: string; type?: 'text' | 'number' | 'bool' | 'email'; required?: boolean; immutable?: boolean; hint?: string }
@@ -53,11 +53,11 @@ export function ReferencePage() {
   const toggle = useMutation({ mutationFn: (r: any) => api.patch(`/${kind}/${r.id}`, { active: !r.active }) });
   return (
     <div>
-      <div className="page-header">
-        <h1>Species, statuses & vendors</h1>
-        <span className="spacer" />
-        <button className="primary" onClick={() => setEditing({})}>Add {cfg.singular}</button>
-      </div>
+      <PageHeader
+        title="Species, statuses & vendors"
+        subtitle="Shared lists that field officers choose from on every project. Deactivate entries instead of deleting them so existing records stay valid."
+        actions={<button className="primary" onClick={() => setEditing({})}>Add {cfg.singular}</button>}
+      />
       <Tabs tabs={(Object.keys(CONFIG) as Kind[]).map((k) => [k, CONFIG[k].title])} value={kind} onChange={setKind} />
       <p className="subtle" style={{ marginTop: 0 }}>{cfg.note}</p>
       <ErrorNotice error={rows.error ?? toggle.error} />
@@ -77,6 +77,7 @@ export function ReferencePage() {
             ))}
           </tbody>
         </table>
+        {rows.data?.length === 0 && <EmptyState title={`No ${cfg.title.toLowerCase()} yet`}>Add the first {cfg.singular} to make it available on devices.</EmptyState>}
       </div>
       {editing && <ReferenceForm kind={kind} row={editing} onClose={() => setEditing(null)} />}
     </div>

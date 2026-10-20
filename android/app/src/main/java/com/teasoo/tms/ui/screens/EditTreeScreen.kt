@@ -39,6 +39,9 @@ class EditTreeViewModel @Inject constructor(
     val plantedOn = MutableStateFlow<LocalDate?>(null)
     val notes = MutableStateFlow("")
     val physicalId = MutableStateFlow("")
+    val fieldDefs = MutableStateFlow<List<com.teasoo.tms.data.local.CustomFieldEntity>>(emptyList())
+    val fieldValues = MutableStateFlow<Map<String, String>>(emptyMap())
+    private var originalFields = "{}"
     val error = MutableStateFlow<String?>(null)
 
     init {
@@ -48,13 +51,22 @@ class EditTreeViewModel @Inject constructor(
                 plantedOn.value = t.plantedOn?.let(LocalDate::parse)
                 notes.value = t.notes.orEmpty()
                 physicalId.value = t.physicalTreeId
+                fieldDefs.value = db.reference().customFields(t.projectId, "TREE").first()
+                fieldValues.value = storedFieldText(t.customFieldsJson)
+                originalFields = t.customFieldsJson
             }
         }
     }
 
     fun save(onDone: () -> Unit) = viewModelScope.launch {
         try {
-            trees.updateTree(treeId, speciesId.value, plantedOn.value?.toString(), notes.value.ifBlank { null })
+            // Values of deactivated fields are kept; only the editable ones are replaced.
+            val edited = toFieldValues(fieldDefs.value, fieldValues.value)
+            val keep = (com.teasoo.tms.data.remote.TmsJson.parseToJsonElement(originalFields) as kotlinx.serialization.json.JsonObject)
+                .filterKeys { k -> fieldDefs.value.none { it.key == k } }
+                .mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.let { k to it } }.toMap()
+            val fields = keep + edited
+            trees.updateTree(treeId, speciesId.value, plantedOn.value?.toString(), notes.value.ifBlank { null }, fields)
             SyncScheduler.syncNow(context)
             onDone()
         } catch (e: RegistrationException) {
@@ -81,6 +93,9 @@ fun EditTreeScreen(app: AppViewModel, onDone: () -> Unit, vm: EditTreeViewModel 
             Picker("Species", species, species.find { it.id == speciesId }, { it.commonName ?: it.scientificName }, { vm.speciesId.value = it.id })
             DateField("Planted on", plantedOn, { vm.plantedOn.value = it })
             OutlinedTextField(notes, { vm.notes.value = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+            val fieldDefs by vm.fieldDefs.collectAsStateWithLifecycle()
+            val fieldValues by vm.fieldValues.collectAsStateWithLifecycle()
+            CustomFieldsForm(fieldDefs, fieldValues, { k, v -> vm.fieldValues.value = vm.fieldValues.value + (k to v) })
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(onClick = { vm.save(onDone) }, modifier = Modifier.fillMaxWidth()) { Text("Save on this device") }
         }

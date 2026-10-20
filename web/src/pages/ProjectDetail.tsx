@@ -1,19 +1,28 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { api, qs } from '../api/client';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import { api, ApiError, qs } from '../api/client';
 import { useIsAdmin } from '../auth';
 import { AreaMap, MapArea } from '../components/AreaMap';
-import { ActivePill, clean, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, Tabs, useForm } from '../components/ui';
+import { ActivePill, CardHeader, clean, EmptyState, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, Tabs, useForm } from '../components/ui';
 import { COMPONENTS, previewId, SCOPES, scopeLabel } from '../idscheme';
 import { ProjectForm } from './Projects';
 
-type Tab = 'areas' | 'years' | 'schemes' | 'assignments' | 'serials';
+type Tab = 'areas' | 'years' | 'schemes' | 'fields' | 'assignments' | 'serials';
+const TABS: Tab[] = ['areas', 'years', 'schemes', 'fields', 'assignments', 'serials'];
 
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const isAdmin = useIsAdmin();
-  const [tab, setTab] = useState<Tab>('areas');
+  const location = useLocation();
+  const [params, setParams] = useSearchParams();
+  const tabParam = params.get('tab') as Tab | null;
+  const tab: Tab = tabParam && TABS.includes(tabParam) ? tabParam : 'areas';
+  const setTab = (t: Tab) => {
+    const next = new URLSearchParams(params);
+    next.set('tab', t);
+    setParams(next, { replace: true, state: location.state });
+  };
   const [editing, setEditing] = useState(false);
   const project = useQuery({ queryKey: ['project', id], queryFn: () => api.get(`/projects/${id}`) });
   const p = project.data;
@@ -23,29 +32,258 @@ export function ProjectDetailPage() {
     ['areas', 'Sectors & sub-sectors'],
     ['years', 'Planting years'],
     ['schemes', 'Tree ID format'],
+    ['fields', 'Custom fields'],
   ];
   if (isAdmin) tabs.push(['assignments', 'Assignments'], ['serials', 'Serial ranges']);
+  const justCreated = !!(location.state as { created?: boolean } | null)?.created;
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <h1>{p.name}</h1>
-          <div className="subtle">
-            <span className="mono">{p.short_code}</span> · {p.status.toLowerCase()} · {p.location ?? 'no location'} · IDs unique{' '}
+    <div className="stack" style={{ gap: 0 }}>
+      <PageHeader
+        crumbs={<><Link to="/projects">Projects</Link> /</>}
+        title={p.name}
+        subtitle={
+          <>
+            <span className="mono">{p.short_code}</span> · <span className="pill">{p.status.toLowerCase()}</span> · {p.location ?? 'no location'} · IDs unique{' '}
             {p.physical_id_uniqueness === 'GLOBAL' ? 'across all projects' : 'within project'}
-          </div>
-        </div>
-        <span className="spacer" />
-        {isAdmin && <button onClick={() => setEditing(true)}>Edit project</button>}
-      </div>
+          </>
+        }
+        actions={isAdmin && <button onClick={() => setEditing(true)}>Edit project</button>}
+      />
+      {isAdmin && <SetupChecklist project={p} justCreated={justCreated} onTab={setTab} onEditProject={() => setEditing(true)} />}
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'areas' && <AreasTab projectId={p.id} />}
       {tab === 'years' && <YearsTab project={p} />}
       {tab === 'schemes' && <SchemesTab project={p} />}
+      {tab === 'fields' && <CustomFieldsTab projectId={p.id} />}
       {tab === 'assignments' && <AssignmentsTab projectId={p.id} />}
       {tab === 'serials' && <SerialsTab project={p} />}
       {editing && <ProjectForm project={p} onClose={() => setEditing(false)} />}
     </div>
+  );
+}
+
+// ------------------------------------------------------------------ setup checklist
+function SetupChecklist({ project, justCreated, onTab, onEditProject }: { project: any; justCreated: boolean; onTab: (t: Tab) => void; onEditProject: () => void }) {
+  // Same query keys as the tabs, so these are shared with (and refreshed by) the tab views.
+  const areas = useQuery({ queryKey: ['areas', project.id], queryFn: () => api.get<any[]>(`/projects/${project.id}/areas`) });
+  const assignments = useQuery({ queryKey: ['assignments', project.id], queryFn: () => api.get<any[]>(`/assignments${qs({ project_id: project.id })}`) });
+  const fields = useQuery({ queryKey: ['custom-fields', project.id], queryFn: () => api.get<CustomField[]>(`/projects/${project.id}/custom-fields`) });
+  const [dismissed, setDismissed] = useState(false);
+  if (!areas.data || !assignments.data || !fields.data) return null;
+  const hasSubSectors = areas.data.some((s) => s.sub_sectors?.some((ss: any) => ss.active));
+  const items: { done: boolean; title: string; detail: string; action: string; go: () => void; optional?: boolean }[] = [
+    { done: project.planting_years.length > 0, title: 'Planting years added', detail: 'Officers pick the year or cohort for each tree.', action: 'Add planting years', go: () => onTab('years') },
+    { done: project.tree_id_schemes.some((s: any) => s.active), title: 'Tree ID format defined', detail: 'Required before trees can be registered.', action: 'Define the ID format', go: () => onTab('schemes') },
+    { done: hasSubSectors, title: 'Sectors and sub-sectors added', detail: 'Trees are located by sub-sector.', action: 'Add areas', go: () => onTab('areas') },
+    { done: assignments.data.some((a) => a.user_role === 'FIELD_OFFICER'), title: 'Field officers assigned', detail: 'Unassigned officers cannot see the project.', action: 'Assign officers', go: () => onTab('assignments') },
+    { done: fields.data.length > 0, optional: true, title: 'Custom fields (optional)', detail: 'Extra data to record, e.g. nursery batch number.', action: 'Add custom fields', go: () => onTab('fields') },
+    { done: project.status === 'ACTIVE', title: 'Project status ACTIVE', detail: 'Draft projects are not offered on devices.', action: 'Set status', go: onEditProject },
+  ];
+  const required = items.filter((i) => !i.optional);
+  const doneCount = required.filter((i) => i.done).length;
+  const complete = doneCount === required.length;
+  if (dismissed || (complete && !justCreated)) return null;
+  return (
+    <section className="card" style={{ marginBottom: 16 }} aria-label="Project setup checklist">
+      <CardHeader
+        title={complete ? 'Project is ready for field work' : 'Finish setting up this project'}
+        description={`${doneCount} of ${required.length} required steps done. Devices pick up changes on their next sync.`}
+        actions={<button className="link" onClick={() => setDismissed(true)}>Hide</button>}
+      />
+      <div className="progress" style={{ marginBottom: 12 }} role="progressbar" aria-valuemin={0} aria-valuemax={required.length} aria-valuenow={doneCount}>
+        <span style={{ width: `${(doneCount / required.length) * 100}%` }} />
+      </div>
+      <ol className="checklist">
+        {items.map((i) => (
+          <li key={i.title} className={i.done ? 'done' : ''}>
+            <span className="tick" aria-hidden>{i.done ? '✓' : ''}</span>
+            <div>
+              <div className="title">
+                {i.title}
+                <span className="visually-hidden">{i.done ? ' (done)' : ' (to do)'}</span>
+              </div>
+              <div className="muted">{i.detail}</div>
+              <button className="link" style={{ marginTop: 2 }} onClick={i.go}>{i.done ? 'Review' : i.action}</button>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ custom fields
+export interface CustomField {
+  id: string;
+  project_id: string;
+  applies_to: 'TREE' | 'OBSERVATION';
+  key: string;
+  label: string;
+  field_type: 'TEXT' | 'NUMBER' | 'DATE' | 'SELECT' | 'BOOLEAN';
+  options: string[];
+  required: boolean;
+  sticky: boolean;
+  help_text: string | null;
+  sort_order: number;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+export const FIELD_TYPE_LABEL: Record<CustomField['field_type'], string> = { TEXT: 'Text', NUMBER: 'Number', DATE: 'Date', SELECT: 'Choice list', BOOLEAN: 'Yes / no' };
+const APPLIES_TO: [CustomField['applies_to'], string, string][] = [
+  ['TREE', 'Recorded once per tree (at registration)', 'e.g. Nursery batch number, Seedling source, Spacing (m)'],
+  ['OBSERVATION', 'Recorded at every visit/observation', 'e.g. Stem diameter (mm), Weeded, Pest signs'],
+];
+
+function CustomFieldsTab({ projectId }: { projectId: string }) {
+  const isAdmin = useIsAdmin();
+  const fields = useQuery({ queryKey: ['custom-fields', projectId], queryFn: () => api.get<CustomField[]>(`/projects/${projectId}/custom-fields`) });
+  const [form, setForm] = useState<{ field?: CustomField; appliesTo: CustomField['applies_to'] } | null>(null);
+  return (
+    <div className="stack">
+      <p className="subtle" style={{ margin: 0 }}>
+        Extra questions the Android app asks for this project, beyond species, status and height. Fields can be deactivated but not deleted, so values already recorded are kept.
+      </p>
+      <ErrorNotice error={fields.error} />
+      {APPLIES_TO.map(([appliesTo, title, example]) => {
+        const rows = (fields.data ?? []).filter((f) => f.applies_to === appliesTo);
+        return (
+          <section className="card flush" key={appliesTo}>
+            <CardHeader
+              title={title}
+              description={example}
+              actions={isAdmin && <button onClick={() => setForm({ appliesTo })}>Add field</button>}
+            />
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table>
+                <thead>
+                  <tr><th>Field</th><th>Type</th><th>Required</th><th>Remembered</th><th className="num">Order</th><th>State</th><th /></tr>
+                </thead>
+                <tbody>
+                  {rows.map((f) => (
+                    <tr key={f.id}>
+                      <td>
+                        {f.label} <span className="muted mono" style={{ fontSize: 11 }}>{f.key}</span>
+                        {f.help_text && <div className="muted">{f.help_text}</div>}
+                      </td>
+                      <td>
+                        {FIELD_TYPE_LABEL[f.field_type]}
+                        {f.field_type === 'SELECT' && <div className="muted">{f.options.join(', ')}</div>}
+                      </td>
+                      <td>{f.required ? 'Required' : 'Optional'}</td>
+                      <td>{f.sticky ? 'During session' : '—'}</td>
+                      <td className="num">{f.sort_order}</td>
+                      <td><ActivePill active={f.active} /></td>
+                      <td>{isAdmin && <button className="link" onClick={() => setForm({ field: f, appliesTo })}>Edit</button>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {fields.data && rows.length === 0 && (
+                <EmptyState title="No fields yet">{isAdmin ? `Add one to collect extra data, ${example}.` : 'None defined for this project.'}</EmptyState>
+              )}
+            </div>
+          </section>
+        );
+      })}
+      {form && <CustomFieldForm projectId={projectId} field={form.field} appliesTo={form.appliesTo} nextOrder={(fields.data ?? []).filter((f) => f.applies_to === form.appliesTo).reduce((m, f) => Math.max(m, f.sort_order), 0) + 10} onClose={() => setForm(null)} />}
+    </div>
+  );
+}
+
+function CustomFieldForm({ projectId, field, appliesTo, nextOrder, onClose }: { projectId: string; field?: CustomField; appliesTo: CustomField['applies_to']; nextOrder: number; onClose: () => void }) {
+  const f = useForm({
+    applies_to: field?.applies_to ?? appliesTo,
+    label: field?.label ?? '',
+    field_type: field?.field_type ?? ('TEXT' as CustomField['field_type']),
+    options: (field?.options ?? []).join('\n'),
+    required: field?.required ?? false,
+    sticky: field?.sticky ?? false,
+    help_text: field?.help_text ?? '',
+    sort_order: String(field?.sort_order ?? nextOrder),
+    active: field?.active ?? true,
+  });
+  const [localError, setLocalError] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: () => {
+      const v = f.values;
+      const options = v.options.split('\n').map((o) => o.trim()).filter(Boolean);
+      const common = {
+        label: v.label.trim(),
+        options: v.field_type === 'SELECT' ? options : [],
+        required: v.required,
+        sticky: v.sticky,
+        help_text: v.help_text.trim() || null,
+        sort_order: Number(v.sort_order) || 0,
+        active: v.active,
+      };
+      if (field) return api.patch(`/custom-fields/${field.id}`, common);
+      return api.post(`/projects/${projectId}/custom-fields`, { ...common, applies_to: v.applies_to, field_type: v.field_type });
+    },
+    onSuccess: onClose,
+  });
+  const submit = () => {
+    if (f.values.field_type === 'SELECT' && f.values.options.split('\n').filter((o) => o.trim()).length < 2) {
+      setLocalError('A choice list needs at least two options, one per line.');
+      return;
+    }
+    setLocalError(null);
+    save.mutate();
+  };
+  const apiError = save.error as ApiError | null;
+  const example = APPLIES_TO.find(([k]) => k === f.values.applies_to)![2];
+  return (
+    <Modal title={field ? `Edit “${field.label}”` : 'New custom field'} onClose={onClose}>
+      <form className="stack" onSubmit={(e) => (e.preventDefault(), submit())}>
+        {localError ? (
+          <div className="notice error">{localError}</div>
+        ) : apiError?.code === 'FIELD_EXISTS' ? (
+          <div className="notice error" role="alert">A field with this name already exists in this project. Choose a different label, or edit (or reactivate) the existing field.</div>
+        ) : (
+          <ErrorNotice error={save.error} />
+        )}
+        <Field label="Recorded">
+          <select disabled={!!field} {...f.bind('applies_to')}>
+            {APPLIES_TO.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </Field>
+        <div className="form-grid">
+          <Field label="Label" hint={example}>
+            <input required maxLength={80} placeholder="Nursery batch number" {...f.bind('label')} />
+          </Field>
+          <Field label="Type" hint={field ? 'fixed once created' : undefined}>
+            <select disabled={!!field} {...f.bind('field_type')}>
+              {(Object.keys(FIELD_TYPE_LABEL) as CustomField['field_type'][]).map((k) => <option key={k} value={k}>{FIELD_TYPE_LABEL[k]}</option>)}
+            </select>
+          </Field>
+        </div>
+        {field && <p className="muted" style={{ margin: '-6px 0 0' }}>Stored as <span className="mono">{field.key}</span>; the key and type cannot change, so existing values stay valid.</p>}
+        {f.values.field_type === 'SELECT' && (
+          <Field label="Options" hint="one per line">
+            <textarea required placeholder={'Nursery A\nNursery B\nWildling'} {...f.bind('options')} />
+          </Field>
+        )}
+        <Field label="Help text" hint="shown under the field on the phone">
+          <input maxLength={200} {...f.bind('help_text')} />
+        </Field>
+        <div className="form-grid">
+          <Field label="Order" hint="lower comes first"><input type="number" step={1} {...f.bind('sort_order')} /></Field>
+        </div>
+        <label className="check"><input type="checkbox" {...f.bindCheck('required')} /> Required</label>
+        <div>
+          <label className="check"><input type="checkbox" {...f.bindCheck('sticky')} /> Remember during a field session</label>
+          <p className="muted" style={{ margin: '2px 0 0 22px' }}>The phone pre-fills the last value entered, for values that repeat across many trees, e.g. a nursery batch number.</p>
+        </div>
+        <div>
+          <label className="check"><input type="checkbox" {...f.bindCheck('active')} /> Active</label>
+          <p className="muted" style={{ margin: '2px 0 0 22px' }}>Inactive fields are no longer asked on devices; values already recorded are kept.</p>
+        </div>
+        <div className="form-actions">
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button className="primary" disabled={save.isPending}>{field ? 'Save' : 'Add field'}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

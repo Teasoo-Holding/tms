@@ -7,6 +7,7 @@ import { badRequest, notFound } from '../common/errors';
 import { isoDate, parse, shortCode } from '../common/validation';
 import { Db, isUniqueViolation } from '../database/db.service';
 import { IdScheme, validateScheme, COMPONENT_TYPES, SCOPE_DIMENSIONS } from '../domain/tree-id';
+import { FIELD_TYPES } from '../domain/custom-fields';
 
 const ProjectBody = z.object({
   name: z.string().trim().min(1).max(200),
@@ -38,6 +39,37 @@ const SchemeBody = z.object({
   serial_uniqueness_scope: z.array(z.enum(SCOPE_DIMENSIONS)),
   active_from: z.string().datetime({ offset: true }).optional(),
 });
+
+const CustomFieldBody = z
+  .object({
+    applies_to: z.enum(['TREE', 'OBSERVATION']),
+    key: z.string().trim().regex(/^[a-z][a-z0-9_]{0,39}$/, 'Use lower-case letters, digits and underscores, starting with a letter').optional(),
+    label: z.string().trim().min(1).max(100),
+    field_type: z.enum(FIELD_TYPES),
+    options: z.array(z.string().trim().min(1).max(200)).max(100).default([]),
+    required: z.boolean().default(false),
+    sticky: z.boolean().default(false),
+    help_text: z.string().trim().max(300).nullish(),
+    sort_order: z.number().int().default(0),
+    active: z.boolean().default(true),
+  })
+  .refine((b) => b.field_type !== 'SELECT' || b.options.length > 0, { message: 'A choice field needs at least one option', path: ['options'] });
+// The key and type are fixed once created: stored values are keyed and typed by them.
+const CustomFieldPatch = z.object({
+  label: z.string().trim().min(1).max(100),
+  options: z.array(z.string().trim().min(1).max(200)).max(100),
+  required: z.boolean(),
+  sticky: z.boolean(),
+  help_text: z.string().trim().max(300).nullable(),
+  sort_order: z.number().int(),
+  active: z.boolean(),
+}).partial();
+
+/** "Nursery batch no." → "nursery_batch_no" */
+function keyFromLabel(label: string) {
+  const k = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/^(\d)/, 'f_$1').slice(0, 40);
+  return k || 'field';
+}
 
 @Controller()
 export class ProjectsController {
@@ -177,6 +209,60 @@ export class ProjectsController {
       );
       await this.audit.record({ actorId: user.id, action: 'tree_id_scheme.create', entityType: 'tree_id_scheme', entityId: created!.id, projectId, after: created }, tx);
       return created;
+    });
+  }
+
+  // ------------------------------------------------------------------ custom fields
+  @Get('projects/:id/custom-fields')
+  async customFields(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) projectId: string) {
+    await this.access.assertProject(user, projectId);
+    const { rows } = await this.db.query(
+      'SELECT * FROM custom_field_definitions WHERE project_id = $1 ORDER BY applies_to, sort_order, label',
+      [projectId],
+    );
+    return rows;
+  }
+
+  @Roles('ADMIN')
+  @Post('projects/:id/custom-fields')
+  async createCustomField(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) projectId: string, @Body() body: unknown) {
+    const b = parse(CustomFieldBody, body);
+    return this.db.tx(async (tx) => {
+      if (!(await this.db.one(tx, 'SELECT id FROM projects WHERE id = $1', [projectId]))) throw notFound('Project');
+      const created = await this.db
+        .one(
+          tx,
+          `INSERT INTO custom_field_definitions (project_id, applies_to, key, label, field_type, options, required, sticky, help_text, sort_order, active, created_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+          [projectId, b.applies_to, b.key ?? keyFromLabel(b.label), b.label, b.field_type, JSON.stringify(b.options), b.required, b.sticky,
+            b.help_text ?? null, b.sort_order, b.active, user.id],
+        )
+        .catch((e) => {
+          if (isUniqueViolation(e)) throw badRequest('FIELD_EXISTS', 'A field with this name already exists. Choose a different name.');
+          throw e;
+        });
+      await this.audit.record({ actorId: user.id, action: 'custom_field.create', entityType: 'custom_field', entityId: created!.id, projectId, after: created }, tx);
+      return created;
+    });
+  }
+
+  @Roles('ADMIN')
+  @Patch('custom-fields/:id')
+  async updateCustomField(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const b = parse(CustomFieldPatch, body);
+    return this.db.tx(async (tx) => {
+      const before = await this.db.one(tx, 'SELECT * FROM custom_field_definitions WHERE id = $1 FOR UPDATE', [id]);
+      if (!before) throw notFound('Field');
+      const n = { ...before, ...b };
+      if (n.field_type === 'SELECT' && n.options.length === 0) throw badRequest('OPTIONS_REQUIRED', 'A choice field needs at least one option.');
+      const after = await this.db.one(
+        tx,
+        `UPDATE custom_field_definitions SET label = $2, options = $3, required = $4, sticky = $5, help_text = $6, sort_order = $7,
+                active = $8, updated_at = now() WHERE id = $1 RETURNING *`,
+        [id, n.label, JSON.stringify(n.options), n.required, n.sticky, n.help_text, n.sort_order, n.active],
+      );
+      await this.audit.record({ actorId: user.id, action: 'custom_field.update', entityType: 'custom_field', entityId: id, projectId: before.project_id, before, after }, tx);
+      return after;
     });
   }
 }

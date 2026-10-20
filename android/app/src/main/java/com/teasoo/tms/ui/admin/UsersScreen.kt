@@ -1,0 +1,231 @@
+package com.teasoo.tms.ui.admin
+
+import android.content.Context
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.teasoo.tms.data.remote.*
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import javax.inject.Inject
+
+@HiltViewModel
+class UsersViewModel @Inject constructor(@ApplicationContext context: Context, private val api: AdminApi) : AdminBaseViewModel(context) {
+    val users = MutableStateFlow<List<AdminUserDto>?>(null)
+
+    init { refresh() }
+
+    fun refresh() = load { users.value = api.users() }
+
+    fun create(r: UserCreateRequest, onDone: () -> Unit) = save("Account created for ${r.fullName}", onDone, ::refresh) { api.createUser(r) }
+
+    fun update(user: AdminUserDto, patch: UserPatch, message: String, onDone: () -> Unit = {}) =
+        save(message, onDone, ::refresh) { api.updateUser(user.id, patch.toPatchBody(keepNulls = false)) }
+}
+
+private val ROLES = listOf("FIELD_OFFICER", "ADMIN", "EXECUTIVE")
+private const val PASSWORD_HINT = "At least 10 characters. The person signs in with it and can be asked to change it."
+
+private sealed interface UserAction {
+    data object Create : UserAction
+    data class Edit(val user: AdminUserDto) : UserAction
+    data class Password(val user: AdminUserDto) : UserAction
+    data class Toggle(val user: AdminUserDto) : UserAction
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun UsersScreen(onBack: () -> Unit, onViewActivity: (String) -> Unit, vm: UsersViewModel = hiltViewModel()) {
+    val users = collect(vm.users)
+    val loading = collect(vm.loading)
+    val error = collect(vm.error)
+    val saving = collect(vm.saving)
+    val formError = collect(vm.formError)
+    val snackbar = remember { SnackbarHostState() }
+    var query by rememberSaveable { mutableStateOf("") }
+    var role by rememberSaveable { mutableStateOf<String?>(null) }
+    var action by remember { mutableStateOf<UserAction?>(null) }
+    fun open(a: UserAction) { vm.clearFormError(); action = a }
+    CollectMessages(vm, snackbar)
+
+    AdminScaffold(
+        title = "Users",
+        subtitle = users?.let { list -> "${list.count { it.active }} active · ${list.count { !it.active }} inactive" },
+        onBack = onBack,
+        snackbar = snackbar,
+        actions = { IconButton(onClick = { vm.refresh() }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh") } },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(onClick = { open(UserAction.Create) }, icon = { Icon(Icons.Default.PersonAdd, null) }, text = { Text("New user") })
+        },
+    ) { padding ->
+        AdminLoadState(loading, error, users != null, onRetry = { vm.refresh() }, modifier = Modifier.padding(padding)) {
+            val filtered = users.orEmpty()
+                .filter { role == null || it.role == role }
+                .filter { query.isBlank() || it.fullName.contains(query, true) || it.email.contains(query, true) }
+                .sortedWith(compareBy({ !it.active }, { it.fullName.lowercase() }))
+            LazyColumn(contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    OutlinedTextField(
+                        query, { query = it }, placeholder = { Text("Search by name or email") }, singleLine = true,
+                        leadingIcon = { Icon(Icons.Default.Search, null) }, modifier = Modifier.fillMaxWidth(),
+                    )
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        FilterChip(role == null, { role = null }, { Text("Everyone") })
+                        ROLES.forEach { r -> FilterChip(role == r, { role = if (role == r) null else r }, { Text(roleLabel(r)) }) }
+                    }
+                }
+                if (users.orEmpty().isEmpty()) item {
+                    EmptyState(Icons.Default.PersonAdd, "No users yet", "Create accounts for field officers, administrators and executives.", "New user", { open(UserAction.Create) })
+                } else if (filtered.isEmpty()) item { Hint("No one matches the search.") }
+                items(filtered, key = { it.id }) { u ->
+                    UserCard(
+                        u,
+                        onEdit = { open(UserAction.Edit(u)) },
+                        onPassword = { open(UserAction.Password(u)) },
+                        onToggle = { open(UserAction.Toggle(u)) },
+                        onActivity = { onViewActivity(u.id) },
+                    )
+                }
+            }
+        }
+    }
+
+    val close = { action = null }
+    when (val a = action) {
+        UserAction.Create -> UserDialog(null, saving, formError, onCreate = { vm.create(it, close) }, onUpdate = {}, onDismiss = close)
+        is UserAction.Edit -> UserDialog(a.user, saving, formError, onCreate = {}, onUpdate = { vm.update(a.user, it, "${a.user.fullName} saved", close) }, onDismiss = close)
+        is UserAction.Password -> PasswordDialog(a.user, saving, formError, onSave = { vm.update(a.user, UserPatch(password = it), "Password reset for ${a.user.fullName}", close) }, onDismiss = close)
+        is UserAction.Toggle -> ConfirmDialog(
+            if (a.user.active) "Deactivate ${a.user.fullName}?" else "Reactivate ${a.user.fullName}?",
+            if (a.user.active) "They are signed out on every device and cannot sign in. Records they made stay. Unsynced records on their phone are kept until someone signs in and syncs."
+            else "They can sign in again with their existing password.",
+            if (a.user.active) "Deactivate" else "Reactivate", saving, formError, destructive = a.user.active,
+            onConfirm = { vm.update(a.user, UserPatch(active = !a.user.active), if (a.user.active) "${a.user.fullName} deactivated" else "${a.user.fullName} reactivated", close) },
+            onDismiss = close,
+        )
+        null -> Unit
+    }
+}
+
+@Composable
+private fun UserCard(u: AdminUserDto, onEdit: () -> Unit, onPassword: () -> Unit, onToggle: () -> Unit, onActivity: () -> Unit) {
+    var menu by remember { mutableStateOf(false) }
+    val stale = u.active && u.role == "FIELD_OFFICER" && isStale(u.lastSyncAt)
+    OutlinedCard(onClick = onEdit, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(start = 16.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.Top) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(u.fullName, style = MaterialTheme.typography.titleSmall)
+                    if (!u.active) InactiveTag()
+                }
+                Text(u.email, style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Tag(roleLabel(u.role))
+                    Text("${"%,d".format(u.treesRegistered)} trees · ${"%,d".format(u.observationsRecorded)} observations", style = MaterialTheme.typography.bodySmall)
+                }
+                Text(
+                    "Last sync ${relativeTime(u.lastSyncAt)}" + if (stale) " – over 7 days" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (stale) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Actions for ${u.fullName}") }
+                DropdownMenu(menu, { menu = false }) {
+                    DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
+                    DropdownMenuItem(text = { Text("Reset password") }, onClick = { menu = false; onPassword() })
+                    DropdownMenuItem(text = { Text(if (u.active) "Deactivate" else "Reactivate") }, onClick = { menu = false; onToggle() })
+                    DropdownMenuItem(text = { Text("View activity") }, onClick = { menu = false; onActivity() })
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PasswordInput(value: String, onChange: (String) -> Unit, label: String) {
+    var visible by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value, onChange, label = { Text(label) }, singleLine = true,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+        trailingIcon = {
+            IconButton(onClick = { visible = !visible }) {
+                Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (visible) "Hide password" else "Show password")
+            }
+        },
+        supportingText = { Text(PASSWORD_HINT) },
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+@Composable
+private fun UserDialog(existing: AdminUserDto?, saving: Boolean, error: String?, onCreate: (UserCreateRequest) -> Unit, onUpdate: (UserPatch) -> Unit, onDismiss: () -> Unit) {
+    var name by remember { mutableStateOf(existing?.fullName.orEmpty()) }
+    var email by remember { mutableStateOf(existing?.email.orEmpty()) }
+    var role by remember { mutableStateOf(existing?.role ?: "FIELD_OFFICER") }
+    var password by remember { mutableStateOf("") }
+    var active by remember { mutableStateOf(existing?.active ?: true) }
+    val emailOk = android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
+    val changed = existing == null || name.trim() != existing.fullName || email.trim() != existing.email || role != existing.role
+    val valid = name.isNotBlank() && emailOk && changed && (existing != null || password.isNotEmpty())
+    FormDialog(
+        if (existing == null) "New user" else "Edit ${existing.fullName}", if (existing == null) "Create" else "Save", valid, saving, error,
+        onConfirm = {
+            if (existing == null) onCreate(UserCreateRequest(email.trim(), name.trim(), role, password, active))
+            else onUpdate(
+                UserPatch(
+                    email = email.trim().takeIf { it != existing.email },
+                    fullName = name.trim().takeIf { it != existing.fullName },
+                    role = role.takeIf { it != existing.role },
+                ),
+            )
+        },
+        onDismiss = onDismiss,
+    ) {
+        TextInput(name, { name = it }, "Full name")
+        TextInput(email, { email = it }, "Email", isError = email.isNotBlank() && !emailOk,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false))
+        ChoiceChips("Role", ROLES, role, ::roleLabel, { role = it })
+        Hint(
+            when (role) {
+                "ADMIN" -> "Sets up projects and users, resolves conflicts, and can also work in the field."
+                "EXECUTIVE" -> "Read-only dashboard for the projects they are assigned to."
+                else -> "Registers and visits trees in the areas they are assigned to."
+            },
+        )
+        if (existing != null && role != existing.role) Hint("Changing the role signs them out on every device.")
+        if (existing == null) {
+            PasswordInput(password, { password = it }, "Initial password")
+            SwitchRow("Active", active, { active = it })
+        }
+    }
+}
+
+@Composable
+private fun PasswordDialog(user: AdminUserDto, saving: Boolean, error: String?, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var password by remember { mutableStateOf("") }
+    FormDialog("Reset password", "Reset", password.isNotEmpty(), saving, error, onConfirm = { onSave(password) }, onDismiss = onDismiss) {
+        Text("Set a new password for ${user.fullName}. They are signed out on every device and must sign in again with it.")
+        PasswordInput(password, { password = it }, "New password")
+    }
+}

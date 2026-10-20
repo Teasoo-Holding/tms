@@ -2,7 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, qs } from '../api/client';
-import { ErrorNotice, Field, fmtDateTime, Modal, Tabs } from '../components/ui';
+import { EmptyState, ErrorNotice, Field, fmtDateTime, Modal, PageHeader, Tabs } from '../components/ui';
 
 const TYPE_LABEL: Record<string, string> = {
   DUPLICATE_PHYSICAL_ID: 'Duplicate tree ID',
@@ -33,10 +33,10 @@ export function ConflictsPage() {
   const conflicts = useQuery({ queryKey: ['conflicts', status], queryFn: () => api.get<any[]>(`/conflicts${qs({ status })}`) });
   return (
     <div>
-      <div className="page-header"><h1>Sync conflicts</h1></div>
-      <p className="subtle" style={{ marginTop: -8 }}>
-        Submissions that collided at sync are never overwritten. Both records stay intact until you decide; every resolution is audited and reaches devices on their next sync.
-      </p>
+      <PageHeader
+        title="Sync conflicts"
+        subtitle="Submissions that collided at sync are never overwritten. Both records stay intact until you decide; every resolution is audited and reaches devices on their next sync."
+      />
       <Tabs tabs={[['OPEN', 'Open'], ['RESOLVED', 'Resolved']]} value={status} onChange={setStatus} />
       <ErrorNotice error={conflicts.error} />
       <div className="card table-wrap">
@@ -56,7 +56,7 @@ export function ConflictsPage() {
             ))}
           </tbody>
         </table>
-        {conflicts.data?.length === 0 && <div className="empty">{status === 'OPEN' ? 'No open conflicts.' : 'Nothing resolved yet.'}</div>}
+        {conflicts.data?.length === 0 && <EmptyState title={status === 'OPEN' ? 'No open conflicts' : 'Nothing resolved yet'}>{status === 'OPEN' ? 'All synced records are consistent.' : undefined}</EmptyState>}
       </div>
       {selected && <ConflictReview id={selected} onClose={() => setSelected(null)} />}
     </div>

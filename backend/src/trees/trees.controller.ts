@@ -38,7 +38,7 @@ export const TREE_LIST_SQL = `
          t.species_id, sp.scientific_name AS species_name, sp.common_name AS species_common_name,
          t.current_status_id, st.code AS status_code, st.name AS status_name, t.last_observed_at,
          t.vendor_id, v.name AS vendor_name, t.replaces_tree_id, rt.physical_tree_id AS replaces_physical_id,
-         t.planted_on, t.notes, t.record_state, t.revision, t.created_at, t.updated_at, t.synced_at,
+         t.planted_on, t.notes, t.custom_fields, t.record_state, t.revision, t.created_at, t.updated_at, t.synced_at,
          t.created_by, u.full_name AS created_by_name
     FROM trees t
     JOIN projects p ON p.id = t.project_id
@@ -91,7 +91,7 @@ export class TreesController {
     await this.access.assertArea(user, tree.project_id, tree.sector_id, tree.sub_sector_id);
     const [observations, media, lineage, idHistory, snapshot] = await Promise.all([
       this.db.query(
-        `SELECT o.*, s.code AS status_code, s.name AS status_name, u.full_name AS recorded_by_name,
+        `SELECT o.*, o.height_cm::float8 AS height_cm, s.code AS status_code, s.name AS status_name, u.full_name AS recorded_by_name,
                 EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id) AS superseded
            FROM tree_observations o JOIN tree_statuses s ON s.id = o.observed_status_id JOIN users u ON u.id = o.recorded_by
           WHERE o.tree_id = $1 ORDER BY o.observed_at DESC, o.recorded_at DESC`,

@@ -19,6 +19,8 @@ import com.teasoo.tms.BuildConfig
 import com.teasoo.tms.data.session.SessionState
 import com.teasoo.tms.ui.AppViewModel
 import com.teasoo.tms.ui.Routes
+import com.teasoo.tms.ui.admin.ADMIN_ENTRIES
+import com.teasoo.tms.ui.admin.AnalyticsDashboardScreen
 import com.teasoo.tms.ui.components.Notice
 import com.teasoo.tms.ui.components.formatInstant
 
@@ -36,7 +38,7 @@ private fun roleLabel(role: String) = when (role) {
 fun HomeScreen(vm: AppViewModel, nav: NavController) {
     val session = vm.sessionState.collectAsStateWithLifecycle().value as? SessionState.Active ?: return
     if (session.user.role == "EXECUTIVE") {
-        DashboardScreen(vm, onBack = null, actions = { AccountMenu(session, vm) })
+        AnalyticsDashboardScreen(onBack = null, actions = { AccountMenu(session, vm) })
     } else {
         FieldHome(vm, nav, session)
     }
@@ -45,10 +47,26 @@ fun HomeScreen(vm: AppViewModel, nav: NavController) {
 @Composable
 private fun AccountMenu(session: SessionState.Active, vm: AppViewModel) {
     var menu by remember { mutableStateOf(false) }
+    var blocked by remember { mutableStateOf(false) }
+    val sync by vm.sync.collectAsStateWithLifecycle()
+    val unsent = sync.pendingOperations + sync.unsentPhotos
     IconButton(onClick = { menu = true }) { Icon(Icons.Default.AccountCircle, contentDescription = "Account") }
     DropdownMenu(menu, { menu = false }) {
         DropdownMenuItem(text = { Text("${session.user.fullName}\n${roleLabel(session.user.role)}") }, onClick = {}, enabled = false)
-        DropdownMenuItem(text = { Text("Sign out") }, onClick = { menu = false; vm.signOut() })
+        DropdownMenuItem(text = { Text("Sign out") }, onClick = { menu = false; if (unsent > 0) blocked = true else vm.signOut() })
+    }
+    // Every record must reach the server under the account that entered it before anyone signs out.
+    if (blocked) {
+        AlertDialog(
+            onDismissRequest = { blocked = false },
+            title = { Text("Sync before signing out") },
+            text = {
+                Text("${sync.pendingOperations} records and ${sync.unsentPhotos} photos on this phone have not reached the server yet. " +
+                    "Connect to the internet and sync; you can sign out once everything is sent.")
+            },
+            confirmButton = { Button(onClick = { vm.syncNow(); blocked = false }, enabled = !sync.running) { Text("Sync now") } },
+            dismissButton = { TextButton(onClick = { blocked = false }) { Text("Cancel") } },
+        )
     }
 }
 
@@ -89,7 +107,7 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
             when {
                 projects.isEmpty() -> Notice(
                     if (sync.lastSuccess == null) "Downloading your projects… Stay connected for the first sync."
-                    else if (isAdmin) "No projects yet. Create one in the web portal, then sync."
+                    else if (isAdmin) "No projects yet. Create one under Administration → Projects below."
                     else "You are not assigned to any project yet. Ask an administrator.",
                 )
                 c == null -> ElevatedCard(Modifier.fillMaxWidth()) {
@@ -126,9 +144,9 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
 
             if (isAdmin) {
                 Text("Administration", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-                Text("These need a connection. Projects, ID formats, areas, users and assignments are set up in the web portal.",
+                Text("Set up projects, ID formats, areas, custom fields, users and assignments here or in the web portal. These need a connection.",
                     style = MaterialTheme.typography.bodySmall)
-                HomeAction(Icons.Default.Dashboard, "Dashboard", "Progress, survival by status, data completeness") { nav.navigate(Routes.ADMIN_DASHBOARD) }
+                ADMIN_ENTRIES.forEach { e -> HomeAction(e.icon, e.title, e.subtitle) { nav.navigate(e.route) } }
                 HomeAction(Icons.Default.Warning, "Conflicts", "Resolve duplicate tree IDs reported by sync") { nav.navigate(Routes.ADMIN_CONFLICTS) }
                 if (BuildConfig.PORTAL_URL.isNotBlank()) {
                     HomeAction(Icons.Default.OpenInBrowser, "Open web portal", "Configuration, users, reports and exports") { openPortal(context) }

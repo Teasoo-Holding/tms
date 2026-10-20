@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useIsAdmin } from '../auth';
-import { clean, ErrorNotice, Field, fmtDate, fmtNum, Modal, useForm } from '../components/ui';
+import { clean, EmptyState, ErrorNotice, Field, fmtDate, fmtNum, Modal, PageHeader, useForm } from '../components/ui';
 
 export function ProjectsPage() {
   const isAdmin = useIsAdmin();
@@ -12,15 +12,17 @@ export function ProjectsPage() {
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
   return (
     <div>
-      <div className="page-header">
-        <h1>Projects & areas</h1>
-        <span className="spacer" />
-        {isAdmin && (
-          <button className="primary" onClick={() => setCreating(true)}>
-            New project
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Projects & areas"
+        subtitle="Each project has its own planting years, tree ID format, sectors, officers and custom fields. Open a project to set these up."
+        actions={
+          isAdmin && (
+            <button className="primary" onClick={() => setCreating(true)}>
+              + New project
+            </button>
+          )
+        }
+      />
       <ErrorNotice error={projects.error} />
       <div className="card table-wrap">
         <table>
@@ -47,9 +49,16 @@ export function ProjectsPage() {
             ))}
           </tbody>
         </table>
-        {projects.data?.length === 0 && <div className="empty">No projects yet.</div>}
+        {projects.data?.length === 0 && (
+          <EmptyState
+            title="No projects yet"
+            action={isAdmin && <button className="primary" onClick={() => setCreating(true)}>Create your first project</button>}
+          >
+            {isAdmin ? 'Create a project, then follow the setup checklist: planting years, ID format, areas, officers.' : 'Ask an administrator to assign you to a project.'}
+          </EmptyState>
+        )}
       </div>
-      {creating && <ProjectForm onClose={() => setCreating(false)} onSaved={(p) => navigate(`/projects/${p.id}`)} />}
+      {creating && <ProjectForm onClose={() => setCreating(false)} onSaved={(p) => navigate(`/projects/${p.id}`, { state: { created: true } })} />}
     </div>
   );
 }
@@ -108,6 +117,7 @@ export function ProjectForm({ project, onClose, onSaved }: { project?: any; onCl
         ) : (
           <p className="muted">Physical IDs are unique {project.physical_id_uniqueness === 'GLOBAL' ? 'across all projects' : 'within this project'}.</p>
         )}
+        {!project && <p className="muted" style={{ margin: 0 }}>New projects start as drafts. After saving, a checklist guides you through planting years, the tree ID format, areas, officers and optional custom fields.</p>}
         {codeChanged && <div className="notice warning">Changing the short code affects new registrations only. Existing tree IDs keep the code they were registered with.</div>}
         <div className="form-actions">
           <button type="button" onClick={onClose}>Cancel</button>

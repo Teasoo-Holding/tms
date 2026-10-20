@@ -76,6 +76,39 @@ export class ReportsService {
         GROUP BY 1, 2, 3, st.sort_order ORDER BY 1, st.sort_order`,
     );
 
+    // Average height of measured trees per month (latest effective measurement per tree in that month).
+    const growth = await q(
+      `SELECT to_char(m.month, 'YYYY-MM') AS month, m.species_id, sp.scientific_name AS species_name, sp.common_name AS species_common_name,
+              ROUND(avg(m.height_cm)::numeric, 1)::float8 AS avg_height_cm, count(*)::int AS measured_trees
+         FROM (SELECT DISTINCT ON (o.tree_id, date_trunc('month', o.observed_at))
+                      date_trunc('month', o.observed_at) AS month, o.tree_id, t.species_id, o.height_cm
+                 FROM tree_observations o JOIN trees t ON t.id = o.tree_id
+                WHERE ${where} AND o.height_cm IS NOT NULL AND o.observed_at >= date_trunc('month', now()) - interval '23 months'
+                  AND NOT EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id)
+                ORDER BY o.tree_id, date_trunc('month', o.observed_at), o.observed_at DESC) m
+         JOIN tree_species sp ON sp.id = m.species_id
+        GROUP BY 1, 2, 3, 4 ORDER BY 1, 3`,
+    );
+
+    // Registrations and observations per week for the last 12 weeks (field activity).
+    const activity = await q(
+      `WITH weeks AS (SELECT generate_series(date_trunc('week', now()) - interval '11 weeks', date_trunc('week', now()), interval '1 week') AS week)
+       SELECT to_char(w.week, 'YYYY-MM-DD') AS week,
+              (SELECT count(*) FROM trees t WHERE ${where} AND date_trunc('week', t.created_at) = w.week)::int AS registrations,
+              (SELECT count(*) FROM tree_observations o JOIN trees t ON t.id = o.tree_id
+                WHERE ${where} AND NOT o.is_initial AND date_trunc('week', o.observed_at) = w.week)::int AS observations
+         FROM weeks w ORDER BY w.week`,
+    );
+
+    const statusBy = (dim: string, join: string, groupBy: string) =>
+      q(`SELECT ${dim}, COALESCE(st.code, 'UNKNOWN') AS code, COALESCE(st.name, 'Not observed') AS status_name, count(*)::int AS count
+           FROM trees t ${join} LEFT JOIN tree_statuses st ON st.id = t.current_status_id
+          WHERE ${where} GROUP BY ${groupBy}, st.code, st.name, st.sort_order ORDER BY ${groupBy}, st.sort_order NULLS LAST`);
+    const [statusBySector, statusBySpecies] = await Promise.all([
+      statusBy(`s.short_code AS group_code, s.name AS group_name`, 'JOIN sectors s ON s.id = t.sector_id', 's.short_code, s.name'),
+      statusBy(`sp.scientific_name AS group_code, COALESCE(sp.common_name, sp.scientific_name) AS group_name`, 'JOIN tree_species sp ON sp.id = t.species_id', 'sp.scientific_name, sp.common_name'),
+    ]);
+
     const coverage = await q(
       `SELECT ss.id, ss.name, ss.short_code, s.short_code AS sector_code,
               ROUND((ST_Area(ss.boundary_geometry::geography) / 10000)::numeric, 2) AS area_hectares,
@@ -129,6 +162,10 @@ export class ReportsService {
       by_species: bySpecies,
       by_vendor: byVendor,
       observation_trend: trend,
+      growth,
+      activity_by_week: activity,
+      status_by_sector: statusBySector,
+      status_by_species: statusBySpecies,
       area_coverage: coverage,
       data_completeness: { ...completeness, open_conflicts: ops.open_conflicts, devices_not_synced_7_days: ops.devices_not_synced_7_days },
       officer_activity: officers,

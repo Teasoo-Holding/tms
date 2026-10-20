@@ -28,13 +28,15 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import javax.inject.Inject
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ObservationViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    db: TmsDatabase,
+    private val db: TmsDatabase,
     private val trees: TreeRepository,
     private val session: SessionStore,
     val photoStore: PhotoStore,
+    private val fieldSessions: FieldSessionRepository,
     saved: SavedStateHandle,
 ) : ViewModel() {
     val treeId: String = checkNotNull(saved["treeId"])
@@ -47,22 +49,46 @@ class ObservationViewModel @Inject constructor(
     val remarks = MutableStateFlow("")
     val reason = MutableStateFlow("")
     val photos = MutableStateFlow<List<CapturedPhoto>>(emptyList())
+    val height = MutableStateFlow<HeightReading?>(null)
+    val referenceCm = MutableStateFlow(100.0)
+    val fieldDefs = tree.filterNotNull().flatMapLatest { db.reference().customFields(it.projectId, "OBSERVATION") }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val fieldValues = MutableStateFlow<Map<String, String>>(emptyMap())
+    val showFieldErrors = MutableStateFlow(false)
     val error = MutableStateFlow<String?>(null)
     private var saved = false
 
     init {
+        viewModelScope.launch { referenceCm.value = fieldSessions.referenceCm() }
+        viewModelScope.launch {
+            // Sticky values from today's field session pre-fill the form.
+            fieldSessions.current()?.stickyValues?.let { sticky ->
+                val defs = db.reference().customFields(tree.filterNotNull().first().projectId, "OBSERVATION").first()
+                fieldValues.value = defs.filter { it.sticky }.mapNotNull { d -> sticky[d.key]?.let { d.key to it } }.toMap() + fieldValues.value
+            }
+        }
         viewModelScope.launch {
             amended.filterNotNull().first().let { o ->
                 statusId.value = o.statusId
                 date.value = java.time.Instant.parse(o.observedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
                 remarks.value = o.remarks.orEmpty()
+                height.value = o.heightCm?.let { HeightReading(it, o.heightMethod ?: "MANUAL", o.heightMeasurementJson) }
+                fieldValues.value = storedFieldText(o.customFieldsJson)
             }
         }
     }
 
+    fun setField(key: String, value: String) = fieldValues.update { it + (key to value) }
+    fun setReferenceCm(cm: Double) = viewModelScope.launch { referenceCm.value = cm; fieldSessions.setReferenceCm(cm) }
+
     fun save(onDone: () -> Unit) = viewModelScope.launch {
         error.value = null
         try {
+            val missing = missingRequired(fieldDefs.value, fieldValues.value)
+            if (missing.isNotEmpty()) {
+                showFieldErrors.value = true
+                throw RegistrationException("Fill in: ${missing.joinToString()}.")
+            }
             trees.addObservation(
                 treeId = treeId,
                 statusId = statusId.value ?: throw RegistrationException("Choose a status."),
@@ -72,13 +98,21 @@ class ObservationViewModel @Inject constructor(
                 userId = session.userId() ?: throw RegistrationException("Sign in again to save."),
                 amendsObservationId = amends,
                 amendmentReason = reason.value.ifBlank { null },
+                height = height.value,
+                fields = toFieldValues(fieldDefs.value, fieldValues.value),
             )
+            rememberSticky(fieldDefs.value, fieldValues.value)
             saved = true
             SyncScheduler.syncNow(context)
             onDone()
         } catch (e: RegistrationException) {
             error.value = e.message
         }
+    }
+
+    private suspend fun rememberSticky(defs: List<com.teasoo.tms.data.local.CustomFieldEntity>, values: Map<String, String>) {
+        val sticky = defs.filter { it.sticky }.associate { it.key to values[it.key].orEmpty() }
+        if (sticky.isNotEmpty()) fieldSessions.update { it.copy(stickyValues = it.stickyValues + sticky) }
     }
 
     override fun onCleared() {
@@ -97,6 +131,11 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
     val reason by vm.reason.collectAsStateWithLifecycle()
     val photos by vm.photos.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
+    val height by vm.height.collectAsStateWithLifecycle()
+    val referenceCm by vm.referenceCm.collectAsStateWithLifecycle()
+    val fieldDefs by vm.fieldDefs.collectAsStateWithLifecycle()
+    val fieldValues by vm.fieldValues.collectAsStateWithLifecycle()
+    val showFieldErrors by vm.showFieldErrors.collectAsStateWithLifecycle()
     var camera by remember { mutableStateOf(false) }
     val status = statuses.find { it.id == statusId }
     val photoMissing = status?.requiresPhoto == true && photos.isEmpty()
@@ -121,6 +160,8 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
             OutlinedTextField(remarks, { vm.remarks.value = it }, label = { Text("Remarks") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
             if (amending) OutlinedTextField(reason, { vm.reason.value = it }, label = { Text("Reason for correction") }, modifier = Modifier.fillMaxWidth())
             PhotoRow(photos, onAdd = { camera = true }, onRemove = { p -> vm.photoStore.discard(p); vm.photos.value = vm.photos.value - p }, required = photoMissing)
+            HeightSection(height, { vm.height.value = it }, photos, referenceCm, vm::setReferenceCm)
+            CustomFieldsForm(fieldDefs, fieldValues, vm::setField, showFieldErrors)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(
                 onClick = { vm.save(onDone) },
