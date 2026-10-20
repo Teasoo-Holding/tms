@@ -13,8 +13,8 @@ export interface MapArea {
 }
 
 // A licensed basemap is configured per deployment; without one the map shows boundaries only.
-const STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL as string | undefined;
-const BLANK_STYLE: StyleSpecification = {
+export const STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL as string | undefined;
+export const BLANK_STYLE: StyleSpecification = {
   version: 8,
   sources: {},
   layers: [{ id: 'bg', type: 'background', paint: { 'background-color': getComputedStyle(document.documentElement).getPropertyValue('--map-bg').trim() || '#e9ede6' } }],

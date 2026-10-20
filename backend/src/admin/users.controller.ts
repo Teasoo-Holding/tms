@@ -7,15 +7,36 @@ import { parse } from '../common/validation';
 import { Db, isUniqueViolation, Queryable } from '../database/db.service';
 import { assertPasswordPolicy, hashPassword } from '../auth/passwords';
 import { AuthService } from '../auth/auth.service';
+import { normalizePhone, USERNAME_RE } from '../domain/login-id';
 
-const UserBody = z.object({
-  email: z.string().email(),
+const blankToNull = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? null : v);
+const UserFields = {
+  /** Any of username, email or phone can be used to sign in; at least one is required. */
+  username: z.preprocess(blankToNull, z.string().trim().regex(USERNAME_RE, 'Use 3–40 letters, digits, dots, dashes or underscores, including a letter').nullable()),
+  email: z.preprocess(blankToNull, z.string().trim().email().nullable()),
+  phone: z.preprocess(blankToNull, z.string().nullable().transform((v, ctx) => {
+    if (v === null) return null;
+    const p = normalizePhone(v);
+    if (!p) ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Enter a phone number of 7–16 digits, optionally starting with +' });
+    return p;
+  })),
   full_name: z.string().trim().min(1).max(200),
   role: z.enum(['ADMIN', 'FIELD_OFFICER', 'EXECUTIVE']),
   password: z.string().max(200),
   active: z.boolean().default(true),
-});
-const UserPatch = UserBody.partial();
+};
+const UserBody = z
+  .object({ ...UserFields, username: UserFields.username.optional(), email: UserFields.email.optional(), phone: UserFields.phone.optional() })
+  .refine((b) => !!(b.username || b.email || b.phone), { message: 'Give the user a username, email or phone number to sign in with', path: ['username'] });
+const UserPatch = z.object(UserFields).partial();
+
+/** Which sign-in identifier collided, from the unique index name. */
+function takenMessage(e: any) {
+  const c = String(e?.constraint ?? '');
+  if (c.includes('username')) return badRequest('USERNAME_TAKEN', 'Another user already has this username.');
+  if (c.includes('phone')) return badRequest('PHONE_TAKEN', 'Another user already has this phone number.');
+  return badRequest('EMAIL_TAKEN', 'A user with this email already exists.');
+}
 
 const AssignmentBody = z.object({
   user_id: z.string().uuid(),
@@ -33,7 +54,7 @@ const AllocationBody = z.object({
   notes: z.string().max(1000).nullish(),
 });
 
-const USER_COLUMNS = 'id, email, full_name, role, active, created_at, updated_at';
+const USER_COLUMNS = 'id, email, username, phone, full_name, role, active, created_at, updated_at';
 
 @Roles('ADMIN')
 @Controller()
@@ -62,15 +83,13 @@ export class UsersController {
     const hash = await hashPassword(b.password);
     return this.db.tx(async (tx) => {
       const user = await this.db
-        .one(tx, `INSERT INTO users (email, full_name, role, password_hash, active) VALUES ($1, $2, $3, $4, $5) RETURNING ${USER_COLUMNS}`, [
-          b.email.toLowerCase(),
-          b.full_name,
-          b.role,
-          hash,
-          b.active,
-        ])
+        .one(
+          tx,
+          `INSERT INTO users (email, username, phone, full_name, role, password_hash, active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${USER_COLUMNS}`,
+          [b.email?.toLowerCase() ?? null, b.username ?? null, b.phone ?? null, b.full_name, b.role, hash, b.active],
+        )
         .catch((e) => {
-          if (isUniqueViolation(e)) throw badRequest('EMAIL_TAKEN', 'A user with this email already exists.');
+          if (isUniqueViolation(e)) throw takenMessage(e);
           throw e;
         });
       await this.audit.record({ actorId: actor.id, action: 'user.create', entityType: 'user', entityId: user!.id, after: user }, tx);
@@ -96,12 +115,13 @@ export class UsersController {
       const after = await this.db
         .one(
           tx,
-          `UPDATE users SET email = $2, full_name = $3, role = $4, active = $5, password_hash = COALESCE($6, password_hash), updated_at = now()
+          `UPDATE users SET email = $2, full_name = $3, role = $4, active = $5, password_hash = COALESCE($6, password_hash),
+                  username = $7, phone = $8, updated_at = now()
             WHERE id = $1 RETURNING ${USER_COLUMNS}`,
-          [id, n.email.toLowerCase(), n.full_name, n.role, n.active, hash],
+          [id, n.email?.toLowerCase() ?? null, n.full_name, n.role, n.active, hash, n.username ?? null, n.phone ?? null],
         )
         .catch((e) => {
-          if (isUniqueViolation(e)) throw badRequest('EMAIL_TAKEN', 'A user with this email already exists.');
+          if (isUniqueViolation(e)) throw takenMessage(e);
           throw e;
         });
       // Deactivation, role or password changes end existing sessions; offline devices lock on next revalidation.

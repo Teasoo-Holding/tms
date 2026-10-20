@@ -1,20 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api, qs } from '../api/client';
 import { ChartCard, Donut, GroupedColumns, HBarChart, Legend, LineChart, LineSeries, SERIES, StackedBars, StackedColumns, StatTile } from '../charts/charts';
+import { ReportFilters, useReportFilters } from '../components/ReportFilters';
+import { deadShare, ShareArea, ShareLegend, ShareMap } from '../components/ShareMap';
 import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime } from '../components/ui';
 
+export const DATE_NOTE = 'Dates: tree counts cover trees registered in the period; visit charts (observations, growth, weekly activity) cover visits in the period.';
+
 export function DashboardPage() {
-  const [projectId, setProjectId] = useState('');
-  const [yearId, setYearId] = useState('');
-  const [overdueDays, setOverdueDays] = useState(90);
-  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
-  const project = useQuery({ queryKey: ['project', projectId], queryFn: () => api.get(`/projects/${projectId}`), enabled: !!projectId });
+  const f = useReportFilters();
+  const projectId = f.get('project_id');
   const statuses = useQuery({ queryKey: ['tree-statuses'], queryFn: () => api.get<any[]>('/tree-statuses') });
   const species = useQuery({ queryKey: ['tree-species'], queryFn: () => api.get<any[]>('/tree-species') });
-  const filter = qs({ project_id: projectId, planting_year_id: yearId, overdue_days: overdueDays });
+  const filter = qs({ ...f.values, overdue_days: f.get('overdue_days') || 90 });
   const summary = useQuery({ queryKey: ['summary', filter], queryFn: () => api.get(`/reports/summary${filter}`) });
   const s = summary.data;
+  const hasRange = !!(f.get('from') || f.get('to'));
 
   // Colour follows the status entity (its configured order), not its rank in this result.
   const statusColor = new Map<string, string>((statuses.data ?? []).map((st, i) => [st.code, SERIES[i % SERIES.length]]));
@@ -81,34 +83,7 @@ export function DashboardPage() {
         }
       />
 
-      <div className="filters" style={{ marginBottom: 0 }}>
-        <label className="field">
-          Project
-          <select value={projectId} onChange={(e) => (setProjectId(e.target.value), setYearId(''))}>
-            <option value="">All my projects</option>
-            {projects.data?.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Planting year
-          <select value={yearId} onChange={(e) => setYearId(e.target.value)} disabled={!projectId}>
-            <option value="">All years</option>
-            {project.data?.planting_years.map((y: any) => (
-              <option key={y.id} value={y.id}>{y.year_label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Overdue after
-          <select value={overdueDays} onChange={(e) => setOverdueDays(Number(e.target.value))}>
-            {[30, 60, 90, 180, 365].map((d) => (
-              <option key={d} value={d}>{d} days without observation</option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <ReportFilters f={f} showOverdue dateNote={DATE_NOTE} />
 
       <ErrorNotice error={summary.error} />
       {summary.isLoading && <div className="card empty">Loading the dashboard…</div>}
@@ -159,8 +134,8 @@ export function DashboardPage() {
             </ChartCard>
             <ChartCard
               title="Weekly field activity"
-              subtitle="Trees registered and follow-up observations per week, last 12 weeks."
-              empty={activityEmpty && 'No registrations or observations in the last 12 weeks.'}
+              subtitle={`Trees registered and follow-up observations per week, ${hasRange ? 'in the selected period (up to 52 weeks)' : 'last 12 weeks'}.`}
+              empty={activityEmpty && `No registrations or observations ${hasRange ? 'in the selected period' : 'in the last 12 weeks'}.`}
               legend={<Legend items={activitySeries} />}
               table={<SimpleTable head={['Week of', 'Registered', 'Observations']} rows={activity.map((w) => [fmtWeek(w.week), fmtNum(w.registrations), fmtNum(w.observations)])} />}
             >
@@ -200,8 +175,8 @@ export function DashboardPage() {
 
           <ChartCard
             title="Observations by month and recorded status"
-            subtitle="Effective observations in the last 12 months (corrected entries replace the originals)."
-            empty={months.length === 0 && 'No observations in the last 12 months.'}
+            subtitle={`Effective observations ${f.get('from') ? 'in the selected period' : 'in the last 12 months'} (corrected entries replace the originals).`}
+            empty={months.length === 0 && `No observations ${f.get('from') ? 'in the selected period' : 'in the last 12 months'}.`}
             legend={<Legend items={trendStatuses.map((st) => ({ label: st.name, color: colorOf(st.code) }))} />}
             table={
               <SimpleTable
@@ -216,6 +191,8 @@ export function DashboardPage() {
               values={trendValue}
             />
           </ChartCard>
+
+          {projectId && <AreaShareCard projectId={projectId} rows={s.area_coverage} sectors={s.sector_share ?? []} />}
 
           <div className="grid charts">
             <ChartCard title="Registered trees by sector" empty={s.by_sector.length === 0 && 'No trees registered yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [`${r.short_code} · ${r.name}`, fmtNum(r.count)])} />}>
@@ -273,6 +250,80 @@ export function DashboardPage() {
         </div>
       )}
     </div>
+  );
+}
+
+const SHARE_SERIES = [
+  { key: 'alive_trees', label: 'Alive', color: 'var(--status-good)' },
+  { key: 'dead_trees', label: 'Dead', color: 'var(--status-critical)' },
+  { key: 'unknown_trees', label: 'Not yet observed', color: 'var(--border-strong)' },
+];
+const pctDead = (r: { alive_trees: number; dead_trees: number }) => {
+  const share = deadShare(r);
+  return share == null ? '—' : `${Math.round(share * 100)}%`;
+};
+
+/** Map and table of alive/dead share per sub-sector and sector, for one project. */
+function AreaShareCard({ projectId, rows, sectors }: { projectId: string; rows: ShareArea[]; sectors: any[] }) {
+  const [mapFailed, setMapFailed] = useState(false);
+  const areas = useQuery({ queryKey: ['areas', projectId], queryFn: () => api.get<any[]>(`/projects/${projectId}/areas`) });
+  const boundaries = useMemo(() => {
+    const m = new Map<string, GeoJSON.Polygon>();
+    (areas.data ?? []).forEach((s) => s.sub_sectors?.forEach((ss: any) => ss.boundary && m.set(ss.id, ss.boundary)));
+    return m;
+  }, [areas.data]);
+  const located = rows.some((r) => (r.latitude != null && r.longitude != null) || boundaries.has(r.id));
+  const sectorLabel = (r: any) => `${r.short_code} · ${r.name}`;
+  return (
+    <section className="card">
+      <CardHeader
+        title="Alive and dead by area"
+        description="Each sub-sector at its reference point, sized by registered trees and coloured by the share of observed trees whose latest visit recorded them dead. Hover or click for figures."
+      />
+      {rows.length === 0 ? (
+        <div className="empty">This project has no sub-sectors yet.</div>
+      ) : (
+        <div className="stack">
+          {mapFailed || !located ? (
+            <div className="notice">
+              {mapFailed ? 'The map cannot be shown in this browser.' : 'No sub-sector has a reference point or boundary yet.'} The figures below show the same alive/dead share.
+            </div>
+          ) : (
+            <div>
+              <ShareMap areas={rows} boundaries={boundaries} onUnavailable={() => setMapFailed(true)} />
+              <ShareLegend />
+            </div>
+          )}
+          <div className="grid charts">
+            <div>
+              <h3>By sector</h3>
+              <Legend items={SHARE_SERIES} />
+              <StackedBars
+                categories={sectors.map(sectorLabel)}
+                series={SHARE_SERIES}
+                values={(c, k) => sectors.find((x) => sectorLabel(x) === c)?.[k] ?? 0}
+              />
+            </div>
+            <div>
+              <h3>By sub-sector</h3>
+              <div className="table-wrap tall" style={{ maxHeight: 320 }}>
+                <SimpleTable
+                  head={['Sub-sector', 'Trees', 'Alive', 'Dead', 'Not observed', '% dead']}
+                  rows={rows.map((r) => [
+                    `${r.sector_code}/${r.short_code} · ${r.name}`,
+                    fmtNum(r.registered_trees),
+                    fmtNum(r.alive_trees),
+                    fmtNum(r.dead_trees),
+                    fmtNum(r.unknown_trees),
+                    pctDead(r),
+                  ])}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

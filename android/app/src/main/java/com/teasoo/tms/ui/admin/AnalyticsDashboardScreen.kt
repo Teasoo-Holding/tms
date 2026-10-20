@@ -2,6 +2,7 @@ package com.teasoo.tms.ui.admin
 
 import android.content.Context
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -15,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.teasoo.tms.data.remote.AdminApi
+import com.teasoo.tms.data.remote.areas
 import com.teasoo.tms.data.remote.AdminProjectDto
 import com.teasoo.tms.data.remote.AnalyticsStatusByGroup
 import com.teasoo.tms.data.remote.AnalyticsSummary
@@ -30,26 +32,65 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
+/** Date presets for the dashboard; tree counts cover trees registered in the period, visit charts visits in it. */
+enum class Period(val label: String, val days: Long?) {
+    ALL("All time", null), D7("Last 7 days", 7), D30("Last 30 days", 30), D90("Last 90 days", 90), YEAR("This year", null);
+
+    fun from(): String? = when (this) {
+        ALL -> null
+        YEAR -> LocalDate.now().withDayOfYear(1).toString()
+        else -> LocalDate.now().minusDays(days!! - 1).toString()
+    }
+}
+
+data class DashboardFilter(
+    val projectId: String? = null,
+    val sectorId: String? = null,
+    val subSectorId: String? = null,
+    val speciesId: String? = null,
+    val statusId: String? = null,
+    val period: Period = Period.ALL,
+) {
+    val active get() = listOfNotNull(sectorId, subSectorId, speciesId, statusId).size + if (period != Period.ALL) 1 else 0
+}
+
 @HiltViewModel
 class AnalyticsViewModel @Inject constructor(@ApplicationContext context: Context, private val api: AdminApi) : AdminBaseViewModel(context) {
     val summary = MutableStateFlow<AnalyticsSummary?>(null)
     val projects = MutableStateFlow<List<AdminProjectDto>>(emptyList())
-    val projectId = MutableStateFlow<String?>(null)
+    val filter = MutableStateFlow(DashboardFilter())
+    val sectors = MutableStateFlow<List<com.teasoo.tms.data.remote.AdminSectorDto>>(emptyList())
+    val species = MutableStateFlow<List<com.teasoo.tms.data.remote.AdminSpeciesDto>>(emptyList())
+    val statuses = MutableStateFlow<List<com.teasoo.tms.data.remote.AdminStatusDto>>(emptyList())
 
     init { refresh() }
 
     fun select(id: String?) {
-        if (id == projectId.value) return
-        projectId.value = id
+        if (id == filter.value.projectId) return
+        // Areas belong to a project: changing it clears the area filters.
+        apply(filter.value.copy(projectId = id, sectorId = null, subSectorId = null))
+    }
+
+    fun apply(f: DashboardFilter) {
+        val projectChanged = f.projectId != filter.value.projectId
+        filter.value = f
         summary.value = null
+        if (projectChanged) sectors.value = emptyList()
         refresh()
     }
 
     fun refresh() = load {
         coroutineScope {
+            val f = filter.value
             val p = async { runCatching { api.projects() }.getOrNull() }
-            summary.value = api.summary(projectId.value)
+            val sp = async { if (species.value.isEmpty()) runCatching { api.species() }.getOrNull() else null }
+            val st = async { if (statuses.value.isEmpty()) runCatching { api.statuses() }.getOrNull() else null }
+            val ar = async { f.projectId?.takeIf { sectors.value.isEmpty() }?.let { runCatching { api.areas(it) }.getOrNull() } }
+            summary.value = api.summary(f.projectId, f.sectorId, f.subSectorId, f.speciesId, f.statusId, f.period.from(), null)
             p.await()?.let { projects.value = it }
+            sp.await()?.let { species.value = it }
+            st.await()?.let { statuses.value = it }
+            ar.await()?.let { sectors.value = it }
         }
     }
 }
@@ -66,7 +107,9 @@ private val MONTH_LABEL = DateTimeFormatter.ofPattern("MMM yy")
 fun AnalyticsDashboardScreen(onBack: (() -> Unit)?, actions: @Composable RowScope.() -> Unit = {}, vm: AnalyticsViewModel = hiltViewModel()) {
     val summary = collect(vm.summary)
     val projects = collect(vm.projects)
-    val projectId = collect(vm.projectId)
+    val filter = collect(vm.filter)
+    val projectId = filter.projectId
+    var showFilters by remember { mutableStateOf(false) }
     val loading = collect(vm.loading)
     val error = collect(vm.error)
 
@@ -95,6 +138,13 @@ fun AnalyticsDashboardScreen(onBack: (() -> Unit)?, actions: @Composable RowScop
                             onSelect = { vm.select(it.first) },
                         )
                     }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                        Period.entries.forEach { p -> FilterChip(filter.period == p, { vm.apply(filter.copy(period = p)) }, { Text(p.label) }) }
+                    }
+                    TextButton(onClick = { showFilters = !showFilters }) {
+                        Text(if (showFilters) "Hide filters" else "More filters" + if (filter.active > (if (filter.period != Period.ALL) 1 else 0)) " (on)" else "")
+                    }
+                    if (showFilters) FilterPanel(vm, filter)
                     summary?.let { DashboardBody(it) }
                 }
             }
@@ -132,7 +182,7 @@ private fun DashboardBody(s: AnalyticsSummary) {
     }
 
     // Weekly activity
-    ChartCard("Field activity by week", "Last 12 weeks: trees registered and visits recorded.") {
+    ChartCard("Field activity by week", "Trees registered and visits recorded per week (last 12 weeks, or the chosen period).") {
         val weeks = s.activityByWeek
         if (weeks.isEmpty() || weeks.all { it.registrations == 0 && it.observations == 0 }) EmptyChart("No field activity in the last 12 weeks.")
         else ColumnChart(
@@ -274,4 +324,31 @@ private fun EmptyChart(text: String) {
 @Composable
 private fun CompletenessRow(label: String, value: Int) {
     BoldValue(label, "%,d".format(value), valueColor = if (value > 0) MaterialTheme.colorScheme.error else StatusColors.good)
+}
+
+/** Area, species and current-status filters (the period is set with the chips above). */
+@Composable
+private fun FilterPanel(vm: AnalyticsViewModel, f: DashboardFilter) {
+    val sectors = collect(vm.sectors)
+    val species = collect(vm.species)
+    val statuses = collect(vm.statuses)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (f.projectId == null) {
+            Text("Choose a project to filter by sector and sub-sector.", style = MaterialTheme.typography.bodySmall)
+        } else {
+            val sectorOptions = listOf<Pair<String?, String>>(null to "All sectors") + sectors.map { it.id to "${it.shortCode} · ${it.name}" }
+            Picker("Sector", sectorOptions, sectorOptions.find { it.first == f.sectorId }, { it.second }, { vm.apply(f.copy(sectorId = it.first, subSectorId = null)) })
+            val subs = sectors.find { it.id == f.sectorId }?.subSectors.orEmpty()
+            if (f.sectorId != null) {
+                val subOptions = listOf<Pair<String?, String>>(null to "All sub-sectors") + subs.map { it.id to "${it.shortCode} · ${it.name}" }
+                Picker("Sub-sector", subOptions, subOptions.find { it.first == f.subSectorId }, { it.second }, { vm.apply(f.copy(subSectorId = it.first)) })
+            }
+        }
+        val speciesOptions = listOf<Pair<String?, String>>(null to "All species") + species.map { it.id to (it.commonName ?: it.scientificName) }
+        Picker("Species", speciesOptions, speciesOptions.find { it.first == f.speciesId }, { it.second }, { vm.apply(f.copy(speciesId = it.first)) })
+        val statusOptions = listOf<Pair<String?, String>>(null to "Any status") + statuses.map { it.id to it.name + if (it.active) "" else " (old)" }
+        Picker("Current status", statusOptions, statusOptions.find { it.first == f.statusId }, { it.second }, { vm.apply(f.copy(statusId = it.first)) })
+        if (f.active > 0) TextButton(onClick = { vm.apply(DashboardFilter(projectId = f.projectId)) }) { Text("Reset filters") }
+        Text("Dates: tree counts cover trees registered in the period; visit charts cover visits in the period.", style = MaterialTheme.typography.bodySmall)
+    }
 }

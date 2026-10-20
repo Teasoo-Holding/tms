@@ -38,7 +38,7 @@ describe('offline registration and idempotent sync', () => {
     expect(r.entity.physical_tree_id).toBe('T4L-2024-000001');
     expect(r.entity.id_scheme_version).toBe(1);
     expect(r.entity.id_components_snapshot.components.map((c: any) => c.value)).toEqual(['T4L', '2024', '000001']);
-    expect(r.entity.current_status_id).toBe(f.status.PLANTED);
+    expect(r.entity.current_status_id).toBe(f.status.ALIVE);
   });
 
   it('replaying the same batch does not create duplicate trees or observations', async () => {
@@ -111,21 +111,21 @@ describe('observations', () => {
     const p = treePayload(f, '100');
     treeId = p.id;
     await sync(officer, [createOp(p)]);
-    const healthy = observationOp(treeId, f.status.HEALTHY, { observed_at: '2024-09-01T10:00:00Z' });
-    const damaged = observationOp(treeId, f.status.DAMAGED, { observed_at: '2025-01-15T10:00:00Z' });
+    const healthy = observationOp(treeId, f.status.ALIVE, { observed_at: '2024-09-01T10:00:00Z' });
+    const damaged = observationOp(treeId, f.status.DEAD, { observed_at: '2025-01-15T10:00:00Z' });
     const res = await sync(officer, [healthy, damaged]);
     expect(res.body.results.map((r: any) => r.status)).toEqual(['ACCEPTED', 'ACCEPTED']);
     let [tree] = await sql(`SELECT current_status_id FROM trees WHERE id = $1`, [treeId]);
-    expect(tree.current_status_id).toBe(f.status.DAMAGED);
+    expect(tree.current_status_id).toBe(f.status.DEAD);
 
-    const amendment = observationOp(treeId, f.status.HEALTHY, {
+    const amendment = observationOp(treeId, f.status.ALIVE, {
       observed_at: '2025-01-15T10:00:00Z',
       amends_observation_id: damaged.entity_id,
       amendment_reason: 'Wrong tree selected',
     });
     expect((await sync(officer, [amendment])).body.results[0].status).toBe('ACCEPTED');
     [tree] = await sql(`SELECT current_status_id FROM trees WHERE id = $1`, [treeId]);
-    expect(tree.current_status_id).toBe(f.status.HEALTHY);
+    expect(tree.current_status_id).toBe(f.status.ALIVE);
     const detail = await officer.get(`/trees/${treeId}`).expect(200);
     expect(detail.body.observations).toHaveLength(4);
     expect(detail.body.observations.find((o: any) => o.id === damaged.entity_id).superseded).toBe(true);
@@ -134,7 +134,7 @@ describe('observations', () => {
   it('rejects amendments by a different officer', async () => {
     const [obs] = await sql(`SELECT id FROM tree_observations WHERE tree_id = $1 AND is_initial`, [treeId]);
     const other = await new Session(app, 'officer2@tms.local').login();
-    const res = await sync(other, [observationOp(treeId, f.status.HEALTHY, { amends_observation_id: obs.id, amendment_reason: 'x' })]);
+    const res = await sync(other, [observationOp(treeId, f.status.ALIVE, { amends_observation_id: obs.id, amendment_reason: 'x' })]);
     expect(res.body.results[0]).toMatchObject({ status: 'REJECTED', code: 'AMENDMENT_NOT_ALLOWED' });
   });
 });
@@ -378,7 +378,7 @@ describe('custom fields, tree height and attribution', () => {
     const payload = treePayload(f, '7001', {
       custom_fields: { nursery_batch_no: 'B-17' },
       initial_observation: {
-        id: randomUUID(), status_id: f.status.PLANTED, observed_at: '2024-06-01T09:00:00Z',
+        id: randomUUID(), status_id: f.status.ALIVE, observed_at: '2024-06-01T09:00:00Z',
         height_cm: 42.25, height_method: 'PHOTO_REFERENCE', height_measurement: { reference_cm: 100, points: { ref_top: [0.4, 0.1] } },
         custom_fields: { pests: 'Termites' },
       },
@@ -392,7 +392,7 @@ describe('custom fields, tree height and attribution', () => {
     expect(tree.body.observations[0].height_method).toBe('PHOTO_REFERENCE');
     expect(tree.body.observations[0].custom_fields).toEqual({ pests: 'Termites' });
 
-    const growth = await sync(officer, [observationOp(payload.id, f.status.HEALTHY, { height_cm: 80 })]);
+    const growth = await sync(officer, [observationOp(payload.id, f.status.ALIVE, { height_cm: 80 })]);
     expect(growth.body.results[0].status).toBe('ACCEPTED');
     expect(growth.body.results[0].entity.height_method).toBe('MANUAL');
 
@@ -428,5 +428,52 @@ describe('custom fields, tree height and attribution', () => {
     expect(s.activity_by_week).toHaveLength(12);
     expect(s.status_by_sector.length).toBeGreaterThan(0);
     expect(s.status_by_species.length).toBeGreaterThan(0);
+  });
+});
+
+describe('spec alignment: statuses, sign-in identifiers, filters, visits', () => {
+  it('uses the spec statuses, both needing a photo', async () => {
+    const statuses = (await admin.get('/tree-statuses').expect(200)).body;
+    const active = statuses.filter((s: any) => s.active).map((s: any) => [s.code, s.is_terminal, s.requires_photo]);
+    expect(active).toEqual([['ALIVE', false, true], ['DEAD', true, true]]);
+  });
+
+  it('lets an administrator create users without an email and keeps identifiers unique', async () => {
+    const created = await admin
+      .post('/users', { username: 'kola.ade', phone: '0805-111-2222', full_name: 'Kola Ade', role: 'FIELD_OFFICER', password: 'Str0ng!Passw0rd' })
+      .expect(201);
+    expect(created.body).toMatchObject({ username: 'kola.ade', phone: '08051112222', email: null });
+    await admin.post('/users', { full_name: 'No Login', role: 'FIELD_OFFICER', password: 'Str0ng!Passw0rd' }).expect(400);
+    const dup = await admin.post('/users', { username: 'Kola.Ade', full_name: 'Twin', role: 'FIELD_OFFICER', password: 'Str0ng!Passw0rd' }).expect(400);
+    expect(dup.body.code).toBe('USERNAME_TAKEN');
+    const phoneDup = await admin.post('/users', { username: 'other1', phone: '+2348051112222', full_name: 'X', role: 'FIELD_OFFICER', password: 'Str0ng!Passw0rd' }).expect(400);
+    expect(phoneDup.body.code).toBe('PHONE_TAKEN');
+    await admin.post('/users', { username: '12345', full_name: 'Digits', role: 'FIELD_OFFICER', password: 'Str0ng!Passw0rd' }).expect(400);
+  });
+
+  it('filters the dashboard by area, species, status and date, and reports alive/dead per area', async () => {
+    const all = (await admin.get(`/reports/summary?project_id=${f.projectId}`).expect(200)).body;
+    const dead = (await admin.get(`/reports/summary?project_id=${f.projectId}&status_id=${f.status.DEAD}`).expect(200)).body;
+    expect(Number(dead.totals.planting_events)).toBeGreaterThan(0);
+    expect(Number(dead.totals.planting_events)).toBeLessThan(Number(all.totals.planting_events));
+    const subB = (await admin.get(`/reports/summary?project_id=${f.projectId}&sub_sector_id=${f.subB}`).expect(200)).body;
+    expect(Number(subB.totals.planting_events)).toBeLessThan(Number(all.totals.planting_events));
+    const future = (await admin.get(`/reports/summary?project_id=${f.projectId}&from=2099-01-01`).expect(200)).body;
+    expect(Number(future.totals.planting_events)).toBe(0);
+    const area = all.area_coverage.find((a: any) => a.dead_trees > 0);
+    expect(area.alive_trees + area.dead_trees + area.unknown_trees).toBe(area.registered_trees);
+    expect(all.sector_share.reduce((n: number, s: any) => n + s.registered_trees, 0)).toBe(Number(all.totals.planting_events));
+  });
+
+  it('lists every visit newest first, filterable, with a CSV export', async () => {
+    const page = (await exec.get(`/reports/visits?project_id=${f.projectId}&limit=5`).expect(200)).body;
+    expect(page.items.length).toBe(5);
+    expect(page.total).toBeGreaterThan(5);
+    const times = page.items.map((v: any) => new Date(v.observed_at).getTime());
+    expect([...times].sort((a, b) => b - a)).toEqual(times);
+    const mine = (await admin.get(`/reports/visits?recorded_by=${f.officerId}&q=007001`).expect(200)).body;
+    expect(mine.items.every((v: any) => v.recorded_by && v.physical_tree_id.includes('007001'))).toBe(true);
+    const csv = await admin.get(`/reports/visits.csv?project_id=${f.projectId}`).expect(200);
+    expect(csv.text.split('\n')[0]).toContain('observed_at,physical_tree_id');
   });
 });

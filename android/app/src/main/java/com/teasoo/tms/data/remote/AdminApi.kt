@@ -75,7 +75,16 @@ interface AdminApi {
     ): List<AuditEntryDto>
 
     // ---------------------------------------------------------------- analytics
-    @GET("api/v1/reports/summary") suspend fun summary(@Query("project_id") projectId: String?): AnalyticsSummary
+    @GET("api/v1/reports/summary")
+    suspend fun summary(
+        @Query("project_id") projectId: String?,
+        @Query("sector_id") sectorId: String? = null,
+        @Query("sub_sector_id") subSectorId: String? = null,
+        @Query("species_id") speciesId: String? = null,
+        @Query("status_id") statusId: String? = null,
+        @Query("from") from: String? = null,
+        @Query("to") to: String? = null,
+    ): AnalyticsSummary
 }
 
 suspend fun AdminApi.areas(projectId: String): List<AdminSectorDto> = decodeAreas(areasRaw(projectId))

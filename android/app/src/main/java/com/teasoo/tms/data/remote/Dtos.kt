@@ -15,7 +15,8 @@ val TmsJson = Json {
 
 @Serializable
 data class LoginRequest(
-    val email: String,
+    /** Username, email or phone number. */
+    val login: String,
     val password: String,
     @SerialName("device_id") val deviceId: String,
     @SerialName("device_name") val deviceName: String,
@@ -25,7 +26,17 @@ data class LoginRequest(
 @Serializable data class RefreshRequest(@SerialName("refresh_token") val refreshToken: String)
 
 @Serializable
-data class UserDto(val id: String, val email: String, @SerialName("full_name") val fullName: String, val role: String)
+data class UserDto(
+    val id: String,
+    val email: String? = null,
+    val username: String? = null,
+    val phone: String? = null,
+    @SerialName("full_name") val fullName: String,
+    val role: String,
+) {
+    /** What this person types to sign in. */
+    val loginName get() = username ?: email ?: phone ?: ""
+}
 
 @Serializable
 data class TokenResponse(

@@ -36,7 +36,12 @@ export function TreeDetailPage() {
         title={t.physical_tree_id}
         mono
         subtitle="Registration details, custom data, growth and every observation recorded for this tree."
-        actions={isAdmin && <button onClick={() => setCorrecting(true)}>Correct serial</button>}
+        actions={
+          <>
+            <Link className="btn" to={`/visits?q=${encodeURIComponent(t.physical_tree_id)}`}>All visits for this tree</Link>
+            {isAdmin && <button onClick={() => setCorrecting(true)}>Correct serial</button>}
+          </>
+        }
       >
         <StatusPill code={t.status_code} name={t.status_name} />
         <RecordStatePill state={t.record_state} />

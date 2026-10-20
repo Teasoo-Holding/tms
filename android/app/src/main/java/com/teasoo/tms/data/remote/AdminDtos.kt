@@ -339,7 +339,9 @@ data class VendorRequest(
 @Serializable
 data class AdminUserDto(
     val id: String,
-    val email: String,
+    val email: String? = null,
+    val username: String? = null,
+    val phone: String? = null,
     @SerialName("full_name") val fullName: String,
     val role: String,
     val active: Boolean = true,
@@ -351,7 +353,10 @@ data class AdminUserDto(
 
 @Serializable
 data class UserCreateRequest(
-    val email: String,
+    /** People sign in with any of these; at least one is required. */
+    val username: String?,
+    val phone: String?,
+    val email: String?,
     @SerialName("full_name") val fullName: String,
     val role: String,
     val password: String,
@@ -361,6 +366,9 @@ data class UserCreateRequest(
 /** Sent with keepNulls = false: only the non-null fields change. A password resets it. */
 @Serializable
 data class UserPatch(
+    /** An empty string clears the identifier; null leaves it unchanged. */
+    val username: String? = null,
+    val phone: String? = null,
     val email: String? = null,
     @SerialName("full_name") val fullName: String? = null,
     val role: String? = null,

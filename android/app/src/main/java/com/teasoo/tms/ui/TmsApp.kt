@@ -35,6 +35,7 @@ object Routes {
     const val SESSION_VISIT = "session/visit"
     const val ADMIN_DASHBOARD = "admin/dashboard"
     const val ADMIN_CONFLICTS = "admin/conflicts"
+    const val MY_VISITS = "my-visits"
     fun register(replaces: String? = null) = if (replaces == null) "register" else "register?replaces=$replaces"
     fun tree(id: String) = "tree/$id"
     fun observe(treeId: String, amends: String? = null) = if (amends == null) "observe/$treeId" else "observe/$treeId?amends=$amends"
@@ -46,7 +47,7 @@ fun TmsApp(vm: AppViewModel = hiltViewModel()) {
     when (val s = vm.sessionState.collectAsStateWithLifecycle().value) {
         null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         is SessionState.SignedOut -> LoginScreen(vm, prefillEmail = "", reason = null)
-        is SessionState.RevalidationRequired -> LoginScreen(vm, prefillEmail = s.user.email, reason = s.reason)
+        is SessionState.RevalidationRequired -> LoginScreen(vm, prefillEmail = s.user.loginName, reason = s.reason)
         is SessionState.Active -> MainNav(vm)
     }
 }
@@ -79,6 +80,7 @@ private fun MainNav(vm: AppViewModel) {
         }
         composable(Routes.ADMIN_DASHBOARD) { DashboardScreen(vm, onBack = { nav.popBackStack() }) }
         composable(Routes.ADMIN_CONFLICTS) { ConflictsScreen(onOpenTree = { nav.navigate(Routes.tree(it)) }, onBack = { nav.popBackStack() }) }
+        composable(Routes.MY_VISITS) { MyVisitsScreen(onOpenTree = { nav.navigate(Routes.tree(it)) }, onBack = { nav.popBackStack() }) }
         adminGraph(nav, onOpenTree = { nav.navigate(Routes.tree(it)) })
     }
 }
@@ -97,8 +99,8 @@ private fun LoginScreen(vm: AppViewModel, prefillEmail: String, reason: String?)
             Text("TMS Field", style = MaterialTheme.typography.headlineMedium)
             Text("Sign in while connected. After that you can work offline.", style = MaterialTheme.typography.bodyMedium)
             reason?.let { Notice("$it Records on this device are kept and will sync after you sign in.") }
-            OutlinedTextField(email, { email = it }, label = { Text("Email") }, singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(email, { email = it }, label = { Text("Username, email or phone") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, autoCorrectEnabled = false), modifier = Modifier.fillMaxWidth())
             OutlinedTextField(password, { password = it }, label = { Text("Password") }, singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth())

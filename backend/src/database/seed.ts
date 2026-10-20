@@ -20,27 +20,18 @@ export async function seed(databaseUrl = config.migrationDatabaseUrl, log = cons
     await db.query('BEGIN');
     const password = process.env.SEED_PASSWORD ?? 'ChangeMe!2026';
     const hash = await hashPassword(password);
-    const user = async (email: string, name: string, role: string) =>
-      (await db.query(`INSERT INTO users (email, full_name, role, password_hash) VALUES ($1, $2, $3, $4) RETURNING id`, [email, name, role, hash])).rows[0].id;
-    const admin = await user('admin@tms.local', 'Ada Administrator', 'ADMIN');
-    const officer = await user('officer@tms.local', 'Femi Field Officer', 'FIELD_OFFICER');
-    const officer2 = await user('officer2@tms.local', 'Grace Field Officer', 'FIELD_OFFICER');
-    const exec = await user('exec@tms.local', 'Eli Executive', 'EXECUTIVE');
+    const user = async (email: string, username: string, phone: string | null, name: string, role: string) =>
+      (
+        await db.query(`INSERT INTO users (email, username, phone, full_name, role, password_hash) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`, [
+          email, username, phone, name, role, hash,
+        ])
+      ).rows[0].id;
+    const admin = await user('admin@tms.local', 'admin', null, 'Ada Administrator', 'ADMIN');
+    const officer = await user('officer@tms.local', 'femi', '+2348030000001', 'Femi Field Officer', 'FIELD_OFFICER');
+    const officer2 = await user('officer2@tms.local', 'grace', null, 'Grace Field Officer', 'FIELD_OFFICER');
+    const exec = await user('exec@tms.local', 'eli', null, 'Eli Executive', 'EXECUTIVE');
 
-    const statuses = [
-      ['PLANTED', 'Planted', false, false, 10],
-      ['HEALTHY', 'Healthy', false, false, 20],
-      ['NEEDS_INSPECTION', 'Needs inspection', false, false, 30],
-      ['DAMAGED', 'Damaged', false, false, 40],
-      ['DEAD', 'Dead', true, true, 50],
-      ['MISSING', 'Missing', true, true, 60],
-    ];
-    for (const [code, name, terminal, replaceable, order] of statuses) {
-      await db.query(
-        `INSERT INTO tree_statuses (code, name, is_terminal, allows_replacement, requires_photo, sort_order) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [code, name, terminal, replaceable, code === 'DEAD' || code === 'DAMAGED', order],
-      );
-    }
+    // Alive and Dead (the spec's statuses) are created by migration 003; administrators may add more.
     for (const [sci, common, code] of [
       ['Khaya senegalensis', 'African mahogany', 'KS'],
       ['Milicia excelsa', 'Iroko', 'ME'],

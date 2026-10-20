@@ -112,6 +112,7 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: [T, st
 }
 
 const STATUS_TONE: Record<string, string> = {
+  ALIVE: 'good',
   HEALTHY: 'good',
   PLANTED: 'good',
   NEEDS_INSPECTION: 'warning',

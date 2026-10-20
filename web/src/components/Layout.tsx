@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { api, auth } from '../api/client';
+import { api, auth, signInName } from '../api/client';
 import { useAuth } from '../auth';
 
 function Brand() {
@@ -32,6 +32,7 @@ export function Layout() {
   const links: [string, string, boolean][] = [
     ['/', 'Dashboard', true],
     ['/trees', 'Trees', true],
+    ['/visits', 'Visits', true],
     ['/projects', 'Projects & areas', true],
     ['/conflicts', 'Conflicts', isAdmin],
     ['/reference', 'Species, statuses & vendors', isAdmin],
@@ -67,6 +68,7 @@ export function Layout() {
         </nav>
         <div className="sidebar-footer">
           <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{user.full_name}</div>
+          {signInName(user) && <div style={{ overflowWrap: 'anywhere' }}>{signInName(user)}</div>}
           <div>{user.role === 'ADMIN' ? 'Administrator' : user.role === 'EXECUTIVE' ? 'Executive (read-only)' : 'Field officer'}</div>
           <button className="link" style={{ marginTop: 6 }} onClick={() => auth.logout()}>
             Sign out

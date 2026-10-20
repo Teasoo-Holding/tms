@@ -7,7 +7,10 @@ import { Db } from '../database/db.service';
 import { AuthService } from './auth.service';
 
 const LoginBody = z.object({
-  email: z.string().email(),
+  /** Username, email or phone number. */
+  login: z.string().trim().min(1).max(200).optional(),
+  /** Older app versions send the email here. */
+  email: z.string().trim().min(1).max(200).optional(),
   password: z.string().min(1).max(200),
   device_id: z.string().uuid().optional(),
   device_name: z.string().max(100).optional(),
@@ -25,7 +28,7 @@ export class AuthController {
   @HttpCode(200)
   login(@Body() body: unknown) {
     const b = parse(LoginBody, body);
-    return this.auth.login(b.email, b.password, { deviceId: b.device_id, deviceName: b.device_name, appVersion: b.app_version });
+    return this.auth.login(b.login ?? b.email ?? '', b.password, { deviceId: b.device_id, deviceName: b.device_name, appVersion: b.app_version });
   }
 
   @Public()
@@ -45,6 +48,6 @@ export class AuthController {
 
   @Get('me')
   async me(@CurrentUser() user: AuthUser) {
-    return this.db.one(this.db, 'SELECT id, email, full_name, role, active FROM users WHERE id = $1', [user.id]);
+    return this.db.one(this.db, 'SELECT id, email, username, phone, full_name, role, active FROM users WHERE id = $1', [user.id]);
   }
 }

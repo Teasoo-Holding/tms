@@ -56,6 +56,10 @@ class ObservationViewModel @Inject constructor(
     val fieldValues = MutableStateFlow<Map<String, String>>(emptyMap())
     val showFieldErrors = MutableStateFlow(false)
     val error = MutableStateFlow<String?>(null)
+    /** Set when today's field session is in a different area than where this tree was registered. */
+    val areaWarning: StateFlow<String?> = combine(tree.filterNotNull(), fieldSessions.session) { t, s -> t to s }
+        .mapLatest { (t, s) -> areaMismatch(db, t, s) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private var saved = false
 
     init {
@@ -136,9 +140,10 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
     val fieldDefs by vm.fieldDefs.collectAsStateWithLifecycle()
     val fieldValues by vm.fieldValues.collectAsStateWithLifecycle()
     val showFieldErrors by vm.showFieldErrors.collectAsStateWithLifecycle()
+    val areaWarning by vm.areaWarning.collectAsStateWithLifecycle()
     var camera by remember { mutableStateOf(false) }
     val status = statuses.find { it.id == statusId }
-    val photoMissing = status?.requiresPhoto == true && photos.isEmpty()
+    val photoMissing = vm.amends == null && photos.isEmpty()
     val amending = vm.amends != null
 
     Scaffold(topBar = {
@@ -149,13 +154,13 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
     }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             tree?.let { TreeIdText(it.physicalTreeId, "") }
+            areaWarning?.let { Notice(it, MaterialTheme.colorScheme.errorContainer) }
             if (amending) Notice("The original observation is kept and marked as superseded. Your correction is recorded with its reason.")
             Text("What do you see?", style = MaterialTheme.typography.titleSmall)
             // One tap per tree: statuses as chips rather than a dropdown.
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 statuses.forEach { st -> FilterChip(selected = st.id == statusId, onClick = { vm.statusId.value = st.id }, label = { Text(st.name) }) }
             }
-            status?.takeIf { it.requiresPhoto }?.let { Text("“${it.name}” needs a photo.", style = MaterialTheme.typography.bodySmall) }
             DateField("Observed on", date, { vm.date.value = it ?: LocalDate.now() }, allowClear = false)
             OutlinedTextField(remarks, { vm.remarks.value = it }, label = { Text("Remarks") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
             if (amending) OutlinedTextField(reason, { vm.reason.value = it }, label = { Text("Reason for correction") }, modifier = Modifier.fillMaxWidth())
@@ -171,4 +176,27 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
         }
     }
     if (camera) CameraCaptureDialog(vm.photoStore, onCaptured = { vm.photos.value = vm.photos.value + it; camera = false }, onDismiss = { camera = false })
+}
+
+/**
+ * A tree is expected where it was registered. If the officer's session is in another sector (or
+ * sub-sector), the label may be misread or the tree record may be in the wrong area: say so before saving.
+ */
+internal suspend fun areaMismatch(db: TmsDatabase, t: com.teasoo.tms.data.local.TreeEntity, s: FieldSession?): String? {
+    if (s == null || s.projectId != t.projectId) return null
+    val ref = db.reference()
+    fun name(code: String?, n: String?) = listOfNotNull(code, n).joinToString(" · ")
+    return when {
+        s.sectorId != t.sectorId -> {
+            val registered = ref.sector(t.sectorId)
+            val working = ref.sector(s.sectorId)
+            "This tree was registered in sector ${name(registered?.shortCode, registered?.name)}, but you are working in sector " +
+                "${name(working?.shortCode, working?.name)}. Check the label before saving."
+        }
+        s.subSectorId != t.subSectorId -> {
+            val registered = ref.subSector(t.subSectorId)
+            "This tree was registered in sub-sector ${name(registered?.shortCode, registered?.name)}, not the one you selected. Check the label."
+        }
+        else -> null
+    }
 }
