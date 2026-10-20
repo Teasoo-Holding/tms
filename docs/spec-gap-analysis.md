@@ -13,11 +13,11 @@ Legend: ✅ in the build · 🟡 partly, or done differently · ❌ not built ·
 | Tree ID | Free text; a known ID simply adds a visit | Configurable structured ID (project/year/vendor/sector codes plus a typed serial), versioned, with serial ranges | ❓ Keep the PRD's structured ID; it prevents typos and duplicates offline. The app now treats a known ID as a visit (see 2.1). |
 | Editing visits | Edit any field at any time; every change logged field by field (`visit_edits`) | Observations are append-only; a correction is a new, audited record that supersedes the old one | ❓ Keep corrections: same outcome (nothing is silently overwritten) and a clearer history. |
 | Concurrent edits | Latest edit wins, both kept, flagged | No blind last-write-wins: the later edit is held for administrator review | ❓ Keep the PRD rule; it never loses either edit. |
-| Photo per visit | Required on every visit | Required only for statuses marked "requires photo" | ❓ To match the spec, tick "requires photo" on every status (no code change). |
-| Statuses | Alive / Dead | Planted, Healthy, Needs inspection, Damaged, Dead, Missing (configurable) | Configurable either way. |
+| Photo per visit | Required on every visit | ✅ Now required on every visit (registration and observation); corrections may reuse the earlier photos | Aligned with the spec. |
+| Statuses | Alive / Dead | ✅ Alive and Dead (migration 003); older statuses deactivated but kept on historic records | Aligned with the spec. |
 | Stack | Supabase, Next.js, Recharts, Leaflet | NestJS + Postgres/PostGIS (Neon), React (Vite), MapLibre, Render/Vercel | Built to the architecture document; the spec's stack would be a rewrite. |
 | Minimum Android | API 24 (Android 7.0) | API 26 (Android 8.0) | ❓ API 26 covers about 97% of active devices. Lower it only if field phones run Android 7. |
-| Login identifier | Phone or email | Email | ❌ Add phone-number login if collectors lack email. |
+| Login identifier | Phone or email | ✅ Username, phone or email; administrators set usernames and email is optional | Aligned (and extended) with the spec. |
 
 ## 2. Spec requirements and their status
 
@@ -28,13 +28,13 @@ Legend: ✅ in the build · 🟡 partly, or done differently · ❌ not built ·
 | Photo with in-app camera | ✅ |
 | Sector → subsector cascading, last area pre-selected | ✅ Field session: project, planting year and sector chosen once; one-tap sub-sector switch |
 | Entering an existing tree ID adds a visit and shows last species/status | ✅ The register screen offers "Record a visit to this tree" and shows its species, status and last-seen date |
-| Own visits list, newest first, with sync badge | 🟡 Visit list and tree search with sync badges; no dedicated "my visits today" list yet |
+| Own visits list, newest first, with sync badge | ✅ "My visits" (today, last 7 days, all) |
 | Edit own visits; admins edit any | 🟡 Corrections (see 1). Admins can correct any observation. |
 | Sync banner ("12 records, 9 photos waiting"), Sync now, last synced | ✅ |
 | Photos ≤1600 px, ~300 KB JPEG, app-private | ✅ Added in this release (resized and orientation fixed on capture) |
 | Logout blocked while anything is unsynced | ✅ Added in this release |
 | Synced photos kept on the phone ≥30 days | ✅ Added in this release (released early only if storage runs low) |
-| "Export backup" file of unsynced records and photos | ❌ Not built yet |
+| "Export backup" file of unsynced records and photos | ✅ Sync details → Export backup (one zip: queued operations, records, photos) |
 
 ### 2.2 Web dashboard
 | Requirement | Status |
@@ -45,10 +45,10 @@ Legend: ✅ in the build · 🟡 partly, or done differently · ❌ not built ·
 | Totals, alive vs dead (overall, per sector), by species | ✅ Charts added in this release |
 | Visits per week and per month | ✅ Weekly activity added; monthly trend existing |
 | Records per collector | ✅ |
-| Map of areas with tree counts and alive/dead share | 🟡 Map and per-sub-sector counts; alive/dead share on the map not yet |
-| Filters: date range, sector, subsector, species, status | 🟡 Project and planting year on the dashboard; full filters on the Trees list |
+| Map of areas with tree counts and alive/dead share | ✅ Web dashboard map and phone area map, coloured by dead share, with per-area counts |
+| Filters: date range, sector, subsector, species, status | ✅ Web dashboard, visits table and exports; phone dashboard |
 | Tree search with full history and photos | ✅ Photos, heights and growth chart added in this release |
-| Browse/filter all visits in a table; CSV export | 🟡 Trees table and CSV/Excel export; no visit-level table yet |
+| Browse/filter all visits in a table; CSV export | ✅ Web "Visits" page with the same filters and CSV export |
 | Edit log per visit | ✅ Audit log, filterable by person, activity, project and date |
 
 ### 2.3 Data, sync and security
@@ -69,7 +69,7 @@ Operational items to confirm before launch:
 
 ## 4. Spec open questions, answered by the build
 - **ID format:** configurable (numbers plus prefix codes); a QR code is not supported yet.
-- **Different sector than last visit:** not warned yet; worth adding.
+- **Different sector than last visit:** the phone warns before saving a visit to a tree registered in another sector or sub-sector.
 - **Photos per visit:** several are allowed.
 - **Shared phones:** supported. A phone holding another user's unsent records refuses a different sign-in until those records are synced.
 - **Distribution:** signed APK from GitHub Actions; an AAB for Google Play is built too.

@@ -15,6 +15,7 @@ import { ReferencePage } from './pages/Reference';
 import { TreeDetailPage } from './pages/TreeDetail';
 import { TreesPage } from './pages/Trees';
 import { UsersPage } from './pages/Users';
+import { VisitsPage } from './pages/Visits';
 import './styles.css';
 
 const queryClient: QueryClient = new QueryClient({
@@ -43,6 +44,7 @@ function App() {
         <Route index element={<DashboardPage />} />
         <Route path="trees" element={<TreesPage />} />
         <Route path="trees/:id" element={<TreeDetailPage />} />
+        <Route path="visits" element={<VisitsPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:id" element={<ProjectDetailPage />} />
         {admin && <Route path="conflicts" element={<ConflictsPage />} />}

@@ -6,6 +6,14 @@ import { Db } from '../database/db.service';
 export interface ReportFilter {
   project_id?: string;
   planting_year_id?: string;
+  sector_id?: string;
+  sub_sector_id?: string;
+  species_id?: string;
+  /** Current status (from each tree's latest visit). */
+  status_id?: string;
+  /** Date range (YYYY-MM-DD, inclusive): trees registered and visits recorded in the period. */
+  from?: string;
+  to?: string;
   overdue_days: number;
 }
 
@@ -26,18 +34,30 @@ export class ReportsService {
       params.push(f.project_id);
       where.push(`t.project_id = $${params.length}`);
     }
-    if (f.planting_year_id) {
-      params.push(f.planting_year_id);
-      where.push(`t.planting_year_id = $${params.length}`);
-    }
+    const eq = (col: string, v?: string) => {
+      if (!v) return;
+      params.push(v);
+      where.push(`${col} = $${params.length}`);
+    };
+    eq('t.planting_year_id', f.planting_year_id);
+    eq('t.sector_id', f.sector_id);
+    eq('t.sub_sector_id', f.sub_sector_id);
+    eq('t.species_id', f.species_id);
+    eq('t.current_status_id', f.status_id);
     const s = this.access.treeFilter(grants, 't', params.length + 1);
     params.push(...s.params);
     where.push(s.sql);
-    return { where: where.join(' AND '), params, grants };
+    params.push(f.from ?? null, f.to ?? null);
+    const from = `$${params.length - 1}::date`;
+    const to = `$${params.length}::date`;
+    const inRange = (col: string) => `(${from} IS NULL OR ${col} >= ${from}) AND (${to} IS NULL OR ${col} < ${to} + 1)`;
+    // Tree counts: trees registered in the period. Visit metrics use [visitWhere] (any tree, visit in the period).
+    const treeWhere = [...where, inRange('t.created_at')].join(' AND ');
+    return { where: treeWhere, baseWhere: where.join(' AND '), inRange, from, to, params, grants };
   }
 
   async summary(user: AuthUser, f: ReportFilter) {
-    const { where, params } = await this.scope(user, f);
+    const { where, baseWhere, inRange, from, to, params } = await this.scope(user, f);
     const q = (sql: string, extra: unknown[] = []) => this.db.query(sql, [...params, ...extra]).then((r) => r.rows);
     const n = params.length;
     const overdueParam = `$${n + 1}`;
@@ -71,7 +91,8 @@ export class ReportsService {
     const trend = await q(
       `SELECT to_char(date_trunc('month', o.observed_at), 'YYYY-MM') AS month, st.code, st.name, count(*)::int AS count
          FROM tree_observations o JOIN trees t ON t.id = o.tree_id JOIN tree_statuses st ON st.id = o.observed_status_id
-        WHERE ${where} AND o.observed_at >= date_trunc('month', now()) - interval '11 months'
+        WHERE ${baseWhere} AND ${inRange('o.observed_at')}
+          AND o.observed_at >= COALESCE(${from}, date_trunc('month', now()) - interval '11 months')
           AND NOT EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id)
         GROUP BY 1, 2, 3, st.sort_order ORDER BY 1, st.sort_order`,
     );
@@ -83,7 +104,8 @@ export class ReportsService {
          FROM (SELECT DISTINCT ON (o.tree_id, date_trunc('month', o.observed_at))
                       date_trunc('month', o.observed_at) AS month, o.tree_id, t.species_id, o.height_cm
                  FROM tree_observations o JOIN trees t ON t.id = o.tree_id
-                WHERE ${where} AND o.height_cm IS NOT NULL AND o.observed_at >= date_trunc('month', now()) - interval '23 months'
+                WHERE ${baseWhere} AND o.height_cm IS NOT NULL AND ${inRange('o.observed_at')}
+                  AND o.observed_at >= COALESCE(${from}, date_trunc('month', now()) - interval '23 months')
                   AND NOT EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id)
                 ORDER BY o.tree_id, date_trunc('month', o.observed_at), o.observed_at DESC) m
          JOIN tree_species sp ON sp.id = m.species_id
@@ -92,11 +114,14 @@ export class ReportsService {
 
     // Registrations and observations per week for the last 12 weeks (field activity).
     const activity = await q(
-      `WITH weeks AS (SELECT generate_series(date_trunc('week', now()) - interval '11 weeks', date_trunc('week', now()), interval '1 week') AS week)
+      // At most 52 weeks: the last 12 by default, or the weeks of the chosen period.
+      `WITH bounds AS (SELECT date_trunc('week', COALESCE(${to}::timestamptz, now())) AS last_week),
+            weeks AS (SELECT generate_series(GREATEST(date_trunc('week', COALESCE(${from}::timestamptz, b.last_week - interval '11 weeks')), b.last_week - interval '51 weeks'),
+                                             b.last_week, interval '1 week') AS week FROM bounds b)
        SELECT to_char(w.week, 'YYYY-MM-DD') AS week,
-              (SELECT count(*) FROM trees t WHERE ${where} AND date_trunc('week', t.created_at) = w.week)::int AS registrations,
+              (SELECT count(*) FROM trees t WHERE ${baseWhere} AND date_trunc('week', t.created_at) = w.week)::int AS registrations,
               (SELECT count(*) FROM tree_observations o JOIN trees t ON t.id = o.tree_id
-                WHERE ${where} AND NOT o.is_initial AND date_trunc('week', o.observed_at) = w.week)::int AS observations
+                WHERE ${baseWhere} AND NOT o.is_initial AND date_trunc('week', o.observed_at) = w.week)::int AS observations
          FROM weeks w ORDER BY w.week`,
     );
 
@@ -110,15 +135,26 @@ export class ReportsService {
     ]);
 
     const coverage = await q(
-      `SELECT ss.id, ss.name, ss.short_code, s.short_code AS sector_code,
+      `SELECT ss.id, ss.name, ss.short_code, s.id AS sector_id, s.short_code AS sector_code, s.name AS sector_name,
+              ss.reference_latitude::float8 AS latitude, ss.reference_longitude::float8 AS longitude,
               ROUND((ST_Area(ss.boundary_geometry::geography) / 10000)::numeric, 2) AS area_hectares,
-              count(t.id)::int AS registered_trees
+              count(t.id)::int AS registered_trees,
+              count(t.id) FILTER (WHERE st.id IS NOT NULL AND NOT st.is_terminal)::int AS alive_trees,
+              count(t.id) FILTER (WHERE st.is_terminal)::int AS dead_trees,
+              count(t.id) FILTER (WHERE st.id IS NULL)::int AS unknown_trees
          FROM sub_sectors ss JOIN sectors s ON s.id = ss.sector_id
          LEFT JOIN trees t ON t.sub_sector_id = ss.id AND ${where}
+         LEFT JOIN tree_statuses st ON st.id = t.current_status_id
         WHERE ss.project_id IN (SELECT DISTINCT t.project_id FROM trees t WHERE ${where}) OR ss.project_id = $${n + 1}::uuid
-        GROUP BY ss.id, ss.name, ss.short_code, s.short_code ORDER BY s.short_code, ss.short_code`,
+        GROUP BY ss.id, ss.name, ss.short_code, s.id, s.short_code, s.name ORDER BY s.short_code, ss.short_code`,
       [f.project_id ?? null],
     );
+    // Alive/dead share per sector, for the map.
+    const sectorShare = [...coverage.reduce((m: Map<string, any>, r: any) => {
+      const x = m.get(r.sector_id) ?? { id: r.sector_id, short_code: r.sector_code, name: r.sector_name, registered_trees: 0, alive_trees: 0, dead_trees: 0, unknown_trees: 0 };
+      for (const k of ['registered_trees', 'alive_trees', 'dead_trees', 'unknown_trees']) x[k] += r[k];
+      return m.set(r.sector_id, x);
+    }, new Map()).values()];
 
     const [completeness] = await q(
       `SELECT count(*) FILTER (WHERE t.planted_on IS NULL)::int AS missing_planted_on,
@@ -167,6 +203,8 @@ export class ReportsService {
       status_by_sector: statusBySector,
       status_by_species: statusBySpecies,
       area_coverage: coverage,
+      sector_share: sectorShare,
+      filters: { ...f },
       data_completeness: { ...completeness, open_conflicts: ops.open_conflicts, devices_not_synced_7_days: ops.devices_not_synced_7_days },
       officer_activity: officers,
       notes: [
@@ -176,6 +214,44 @@ export class ReportsService {
         'Area coverage uses administrator-defined sub-sector boundaries; trees have no individual GPS positions.',
       ],
     };
+  }
+
+  /**
+   * Every visit (observation) in scope, newest first, for the visits table and its CSV export.
+   * Tree filters apply to the tree; the date range applies to the visit date.
+   */
+  async visitRows(user: AuthUser, f: ReportFilter & { recorded_by?: string; q?: string }, limit: number, offset: number) {
+    const { baseWhere, inRange, params } = await this.scope(user, f);
+    const p = [...params];
+    const extra: string[] = [inRange('o.observed_at')];
+    if (f.recorded_by) {
+      p.push(f.recorded_by);
+      extra.push(`o.recorded_by = $${p.length}`);
+    }
+    if (f.q) {
+      p.push(f.q.replace(/\s+/g, '').toUpperCase());
+      extra.push(`t.physical_tree_id_normalized LIKE '%' || $${p.length} || '%'`);
+    }
+    const whereSql = `${baseWhere} AND ${extra.join(' AND ')}`;
+    const [rows, count] = await Promise.all([
+      this.db.query(
+        `SELECT o.id, o.observed_at, o.recorded_at, o.synced_at, o.tree_id, t.physical_tree_id, p.short_code AS project,
+                py.year_label AS planting_year, s.short_code AS sector, ss.short_code AS sub_sector,
+                COALESCE(sp.common_name, sp.scientific_name) AS species, st.code AS status_code, st.name AS status,
+                o.height_cm::float8 AS height_cm, o.height_method, o.remarks, o.custom_fields, u.full_name AS recorded_by,
+                o.is_initial, o.is_amendment, o.amendment_reason,
+                EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id) AS superseded,
+                (SELECT count(*) FROM tree_media m WHERE m.observation_id = o.id)::int AS photos
+           FROM tree_observations o JOIN trees t ON t.id = o.tree_id JOIN projects p ON p.id = t.project_id
+           JOIN planting_years py ON py.id = t.planting_year_id JOIN sectors s ON s.id = t.sector_id
+           JOIN sub_sectors ss ON ss.id = t.sub_sector_id JOIN tree_species sp ON sp.id = t.species_id
+           JOIN tree_statuses st ON st.id = o.observed_status_id JOIN users u ON u.id = o.recorded_by
+          WHERE ${whereSql} ORDER BY o.observed_at DESC, o.recorded_at DESC LIMIT ${limit} OFFSET ${offset}`,
+        p,
+      ),
+      this.db.query(`SELECT count(*)::int AS total FROM tree_observations o JOIN trees t ON t.id = o.tree_id WHERE ${whereSql}`, p),
+    ]);
+    return { items: rows.rows, total: count.rows[0].total, limit, offset };
   }
 
   /** Rows for CSV/Excel export, scoped to the user's grants. */

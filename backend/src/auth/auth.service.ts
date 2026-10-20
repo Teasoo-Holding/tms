@@ -6,6 +6,7 @@ import { Db, Queryable } from '../database/db.service';
 import { AppError } from '../common/errors';
 import { AuditService } from '../common/audit.service';
 import { verifyPassword } from './passwords';
+import { normalizePhone } from '../domain/login-id';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 // Verifying against a dummy hash keeps response time similar for unknown accounts.
@@ -21,10 +22,20 @@ export interface DeviceInfo {
 export class AuthService {
   constructor(private readonly db: Db, private readonly jwt: JwtService, private readonly audit: AuditService) {}
 
-  async login(email: string, password: string, device: DeviceInfo) {
-    const user = await this.db.one(this.db, 'SELECT * FROM users WHERE lower(email) = lower($1)', [email]);
+  /** [login] is a username, an email address or a phone number (matched on its last ten digits). */
+  async login(login: string, password: string, device: DeviceInfo) {
+    const phone = normalizePhone(login);
+    const user = login
+      ? await this.db.one(
+          this.db,
+          `SELECT * FROM users
+            WHERE lower(username) = lower($1) OR lower(email) = lower($1) OR ($2::text IS NOT NULL AND right(phone, 10) = right($2, 10))
+            LIMIT 1`,
+          [login, phone],
+        )
+      : null;
     const ok = await verifyPassword(user?.password_hash ?? DUMMY_HASH, password);
-    if (!user || !ok) throw new AppError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect.');
+    if (!user || !ok) throw new AppError(401, 'INVALID_CREDENTIALS', 'The username, email or phone number, or the password, is incorrect.');
     if (!user.active) throw new AppError(401, 'ACCOUNT_DISABLED', 'This account has been deactivated.');
 
     return this.db.tx(async (tx) => {
@@ -107,7 +118,7 @@ export class AuthService {
       refresh_token_expires_at: refreshExpires.toISOString(),
       // The device may keep working offline until this time; then it must revalidate online.
       offline_valid_until: new Date(Date.now() + config.offlineSessionDays * 86400_000).toISOString(),
-      user: { id: user.id, email: user.email, full_name: user.full_name, role: user.role },
+      user: { id: user.id, email: user.email, username: user.username, phone: user.phone, full_name: user.full_name, role: user.role },
     };
   }
 }

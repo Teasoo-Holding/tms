@@ -95,7 +95,7 @@ class RapidRegisterViewModel @Inject constructor(
                 refreshCheck()
                 suggestion.value = trees.suggestNextSerial(s.area(), auth.userId().orEmpty())
                 if (s.statusId == null) {
-                    ref.statuses().first().firstOrNull { it.code == "PLANTED" }?.let { p -> sessions.update { it.copy(statusId = p.id) } }
+                    ref.statuses().first().let { l -> l.firstOrNull { it.code == "ALIVE" && it.active } ?: l.firstOrNull { it.code == "PLANTED" && it.active } ?: l.firstOrNull { it.active && !it.isTerminal } }?.let { p -> sessions.update { it.copy(statusId = p.id) } }
                 }
             }
         }
@@ -117,7 +117,8 @@ class RapidRegisterViewModel @Inject constructor(
         val t = db.trees().get(treeId) ?: return null
         val species = ref.species().first().find { it.id == t.speciesId }?.let { it.commonName ?: it.scientificName }
         val status = t.currentStatusId?.let { ref.status(it)?.name }
-        return listOfNotNull(species, status, t.lastObservedAt?.let { "last seen ${formatInstant(it)}" }).joinToString(" · ")
+        val about = listOfNotNull(species, status, t.lastObservedAt?.let { "last seen ${formatInstant(it)}" }).joinToString(" · ")
+        return listOfNotNull(about, areaMismatch(db, t, session.value)?.let { "⚠ $it" }).joinToString("\n")
     }
 
     /** Remembered for the rest of the session. */
@@ -223,7 +224,7 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
     val scope = rememberCoroutineScope()
 
     val status = statuses.find { it.id == s?.statusId }
-    val photoMissing = status?.requiresPhoto == true && e.photos.isEmpty()
+    val photoMissing = e.photos.isEmpty()
     LaunchedEffect(Unit) { runCatching { serialFocus.requestFocus() } }
 
     Scaffold(topBar = {

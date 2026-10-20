@@ -49,7 +49,7 @@ export function treePayload(f: Fixtures, serial: string, overrides: Record<strin
     serial_input: serial,
     id_component_values: { PROJECT_CODE: 'T4L', PLANTING_YEAR: '2024' },
     planted_on: '2024-06-01',
-    initial_observation: { id: randomUUID(), status_id: f.status.PLANTED, observed_at: '2024-06-01T09:00:00Z', remarks: null },
+    initial_observation: { id: randomUUID(), status_id: f.status.ALIVE, observed_at: '2024-06-01T09:00:00Z', remarks: null },
     ...overrides,
   };
 }

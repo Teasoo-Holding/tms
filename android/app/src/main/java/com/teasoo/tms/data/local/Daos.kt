@@ -158,6 +158,19 @@ interface TreeDao {
              AND id NOT IN (SELECT treeId FROM observations WHERE syncState <> 'SYNCED')"""
     )
     suspend fun pruneSynced(before: String): Int
+    @Query("SELECT * FROM trees WHERE syncState <> 'SYNCED' ORDER BY createdAt") suspend fun unsynced(): List<TreeEntity>
+
+    /** Alive/dead share per sub-sector from each tree's latest status (trees on this device). */
+    @Query(
+        """SELECT t.subSectorId, count(*) AS total,
+                  sum(CASE WHEN st.id IS NOT NULL AND NOT st.isTerminal THEN 1 ELSE 0 END) AS alive,
+                  sum(CASE WHEN st.isTerminal THEN 1 ELSE 0 END) AS dead,
+                  sum(CASE WHEN st.id IS NULL THEN 1 ELSE 0 END) AS unknown
+             FROM trees t LEFT JOIN statuses st ON st.id = t.currentStatusId
+            WHERE t.projectId = :projectId AND t.recordState <> 'REJECTED'
+            GROUP BY t.subSectorId""",
+    )
+    fun shareBySubSector(projectId: String): Flow<List<AreaShare>>
 }
 
 @Dao
@@ -176,7 +189,46 @@ interface ObservationDao {
     @Query("UPDATE observations SET syncState = 'SYNCED', syncMessage = NULL WHERE treeId = :treeId AND isInitial")
     suspend fun markInitialSynced(treeId: String)
     @Query("DELETE FROM observations WHERE treeId NOT IN (SELECT id FROM trees)") suspend fun pruneOrphans()
+    @Query("SELECT * FROM observations WHERE syncState <> 'SYNCED' ORDER BY recordedAt") suspend fun unsynced(): List<ObservationEntity>
+
+    /** This person's own visits (registrations included), newest first. */
+    @Query(
+        """SELECT o.id, o.treeId, t.physicalTreeId, o.observedAt, o.recordedAt, o.isInitial, o.amendsObservationId IS NOT NULL AS isCorrection,
+                  st.name AS statusName, st.code AS statusCode, o.heightCm, o.remarks, o.syncState, o.syncMessage,
+                  s.shortCode AS sectorCode, ss.shortCode AS subSectorCode,
+                  (SELECT count(*) FROM media m WHERE m.observationId = o.id) AS photoCount
+             FROM observations o JOIN trees t ON t.id = o.treeId
+             LEFT JOIN statuses st ON st.id = o.statusId
+             LEFT JOIN sectors s ON s.id = t.sectorId LEFT JOIN sub_sectors ss ON ss.id = t.subSectorId
+            WHERE o.recordedBy = :userId AND o.recordedAt >= :since
+            ORDER BY o.recordedAt DESC LIMIT 1000""",
+    )
+    fun mine(userId: String, since: String): Flow<List<MyVisitRow>>
 }
+
+data class AreaShare(val subSectorId: String, val total: Int, val alive: Int, val dead: Int, val unknown: Int) {
+    /** Dead out of observed trees; null when none has been observed. */
+    val deadShare: Double? get() = (alive + dead).takeIf { it > 0 }?.let { dead.toDouble() / it }
+}
+
+data class MyVisitRow(
+    val id: String,
+    val treeId: String,
+    val physicalTreeId: String,
+    val observedAt: String,
+    val recordedAt: String,
+    val isInitial: Boolean,
+    val isCorrection: Boolean,
+    val statusName: String?,
+    val statusCode: String?,
+    val heightCm: Double?,
+    val remarks: String?,
+    val syncState: String,
+    val syncMessage: String?,
+    val sectorCode: String?,
+    val subSectorCode: String?,
+    val photoCount: Int,
+)
 
 @Dao
 interface MediaDao {
@@ -187,6 +239,7 @@ interface MediaDao {
     @Query("SELECT * FROM media WHERE state <> 'VERIFIED' AND localPath IS NOT NULL AND nextAttemptAt <= :now ORDER BY capturedAt")
     suspend fun dueForUpload(now: Long): List<MediaEntity>
     @Query("SELECT * FROM media WHERE state = 'VERIFIED' AND localPath IS NOT NULL") suspend fun verifiedWithLocalCopy(): List<MediaEntity>
+    @Query("SELECT * FROM media WHERE state <> 'VERIFIED' AND localPath IS NOT NULL ORDER BY capturedAt") suspend fun unsent(): List<MediaEntity>
     @Query("SELECT count(*) FROM media WHERE state <> 'VERIFIED' AND localPath IS NOT NULL") fun pendingCount(): Flow<Int>
     @Query("SELECT count(*) FROM media WHERE state = 'FAILED'") fun failedCount(): Flow<Int>
     @Query("UPDATE media SET localPath = NULL, localDeletedAt = :at WHERE id = :id") suspend fun markOffloaded(id: String, at: String)
@@ -208,6 +261,7 @@ interface OutboxDao {
     suspend fun retryLater(operationId: String, next: Long, error: String)
     @Query("UPDATE outbox SET nextAttemptAt = 0 WHERE state = 'PENDING'") suspend fun retryAllNow()
     @Query("SELECT * FROM outbox ORDER BY seq") fun all(): Flow<List<OutboxEntity>>
+    @Query("SELECT * FROM outbox WHERE state = 'PENDING' ORDER BY seq") suspend fun pendingList(): List<OutboxEntity>
     @Query("SELECT count(*) FROM outbox WHERE state = 'PENDING'") fun pendingCount(): Flow<Int>
     @Query("SELECT count(*) FROM outbox WHERE state <> 'PENDING'") fun attentionCount(): Flow<Int>
     @Query("SELECT min(clientRecordedAt) FROM outbox WHERE state = 'PENDING'") fun oldestPending(): Flow<String?>

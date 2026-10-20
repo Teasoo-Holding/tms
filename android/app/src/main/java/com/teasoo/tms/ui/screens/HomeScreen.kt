@@ -138,6 +138,7 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
             SyncCard(vm, session, onDetails = { nav.navigate(Routes.SYNC) })
 
             if (projects.isNotEmpty()) {
+                HomeAction(Icons.Default.History, "My visits", "Everything you recorded, newest first, with sync status") { nav.navigate(Routes.MY_VISITS) }
                 HomeAction(Icons.Default.Search, "Find any tree", "Search across the project: observe, edit, or plant a replacement") { nav.navigate(Routes.TREES) }
                 HomeAction(Icons.Default.Map, "Area map", "Sector and sub-sector boundaries") { nav.navigate(Routes.MAP) }
             }

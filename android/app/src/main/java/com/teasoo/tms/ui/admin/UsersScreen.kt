@@ -80,12 +80,12 @@ fun UsersScreen(onBack: () -> Unit, onViewActivity: (String) -> Unit, vm: UsersV
         AdminLoadState(loading, error, users != null, onRetry = { vm.refresh() }, modifier = Modifier.padding(padding)) {
             val filtered = users.orEmpty()
                 .filter { role == null || it.role == role }
-                .filter { query.isBlank() || it.fullName.contains(query, true) || it.email.contains(query, true) }
+                .filter { u -> query.isBlank() || listOfNotNull(u.fullName, u.username, u.email, u.phone).any { it.contains(query, true) } }
                 .sortedWith(compareBy({ !it.active }, { it.fullName.lowercase() }))
             LazyColumn(contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     OutlinedTextField(
-                        query, { query = it }, placeholder = { Text("Search by name or email") }, singleLine = true,
+                        query, { query = it }, placeholder = { Text("Search by name, username, phone or email") }, singleLine = true,
                         leadingIcon = { Icon(Icons.Default.Search, null) }, modifier = Modifier.fillMaxWidth(),
                     )
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
@@ -137,7 +137,7 @@ private fun UserCard(u: AdminUserDto, onEdit: () -> Unit, onPassword: () -> Unit
                     Text(u.fullName, style = MaterialTheme.typography.titleSmall)
                     if (!u.active) InactiveTag()
                 }
-                Text(u.email, style = MaterialTheme.typography.bodySmall)
+                Text(listOfNotNull(u.username?.let { "@$it" }, u.phone, u.email).joinToString(" · ").ifBlank { "No sign-in name" }, style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Tag(roleLabel(u.role))
                     Text("${"%,d".format(u.treesRegistered)} trees · ${"%,d".format(u.observationsRecorded)} observations", style = MaterialTheme.typography.bodySmall)
@@ -182,19 +182,30 @@ private fun PasswordInput(value: String, onChange: (String) -> Unit, label: Stri
 private fun UserDialog(existing: AdminUserDto?, saving: Boolean, error: String?, onCreate: (UserCreateRequest) -> Unit, onUpdate: (UserPatch) -> Unit, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf(existing?.fullName.orEmpty()) }
     var email by remember { mutableStateOf(existing?.email.orEmpty()) }
+    var username by remember { mutableStateOf(existing?.username.orEmpty()) }
+    var phone by remember { mutableStateOf(existing?.phone.orEmpty()) }
     var role by remember { mutableStateOf(existing?.role ?: "FIELD_OFFICER") }
     var password by remember { mutableStateOf("") }
     var active by remember { mutableStateOf(existing?.active ?: true) }
-    val emailOk = android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
-    val changed = existing == null || name.trim() != existing.fullName || email.trim() != existing.email || role != existing.role
-    val valid = name.isNotBlank() && emailOk && changed && (existing != null || password.isNotEmpty())
+    val emailOk = email.isBlank() || android.util.Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()
+    val usernameOk = username.isBlank() || Regex("^(?=.*[A-Za-z])[A-Za-z0-9._-]{3,40}$").matches(username.trim())
+    val phoneOk = phone.isBlank() || Regex("^\\+?[0-9]{7,16}$").matches(phone.replace(Regex("[\\s().-]"), ""))
+    val hasLogin = listOf(username, phone, email).any { it.isNotBlank() }
+    fun differs(now: String, before: String?) = now.trim() != before.orEmpty()
+    val changed = existing == null || name.trim() != existing.fullName || differs(email, existing.email) || differs(username, existing.username) ||
+        differs(phone, existing.phone) || role != existing.role
+    val valid = name.isNotBlank() && emailOk && usernameOk && phoneOk && hasLogin && changed && (existing != null || password.isNotEmpty())
     FormDialog(
         if (existing == null) "New user" else "Edit ${existing.fullName}", if (existing == null) "Create" else "Save", valid, saving, error,
         onConfirm = {
-            if (existing == null) onCreate(UserCreateRequest(email.trim(), name.trim(), role, password, active))
+            if (existing == null) {
+                onCreate(UserCreateRequest(username.trim().ifBlank { null }, phone.trim().ifBlank { null }, email.trim().ifBlank { null }, name.trim(), role, password, active))
+            }
             else onUpdate(
                 UserPatch(
-                    email = email.trim().takeIf { it != existing.email },
+                    email = email.trim().takeIf { differs(email, existing.email) },
+                    username = username.trim().takeIf { differs(username, existing.username) },
+                    phone = phone.trim().takeIf { differs(phone, existing.phone) },
                     fullName = name.trim().takeIf { it != existing.fullName },
                     role = role.takeIf { it != existing.role },
                 ),
@@ -203,8 +214,12 @@ private fun UserDialog(existing: AdminUserDto?, saving: Boolean, error: String?,
         onDismiss = onDismiss,
     ) {
         TextInput(name, { name = it }, "Full name")
-        TextInput(email, { email = it }, "Email", isError = email.isNotBlank() && !emailOk,
+        TextInput(username, { username = it }, "Username", isError = !usernameOk,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, autoCorrectEnabled = false))
+        TextInput(phone, { phone = it }, "Phone number", isError = !phoneOk, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
+        TextInput(email, { email = it }, "Email (optional)", isError = !emailOk,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false))
+        Hint(if (hasLogin) "They can sign in with any of username, phone or email." else "Give at least a username, phone or email to sign in with.")
         ChoiceChips("Role", ROLES, role, ::roleLabel, { role = it })
         Hint(
             when (role) {

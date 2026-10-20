@@ -9,7 +9,9 @@ const STORAGE_KEY = 'tms.session';
 
 export interface SessionUser {
   id: string;
-  email: string;
+  email: string | null;
+  username: string | null;
+  phone: string | null;
   full_name: string;
   role: 'ADMIN' | 'FIELD_OFFICER' | 'EXECUTIVE';
 }
@@ -24,6 +26,9 @@ export class ApiError extends Error {
     super(message);
   }
 }
+
+/** How a user signs in, for display: username, else email, else phone. */
+export const signInName = (u: { username?: string | null; email?: string | null; phone?: string | null }) => u.username ?? u.email ?? u.phone ?? '';
 
 let session: StoredSession | null = (() => {
   try {
@@ -53,8 +58,9 @@ export const auth = {
     listeners.add(fn);
     return () => listeners.delete(fn);
   },
-  async login(email: string, password: string) {
-    const res = await raw('POST', '/auth/login', { email, password }, false);
+  /** `login` is a username, email or phone number. */
+  async login(login: string, password: string) {
+    const res = await raw('POST', '/auth/login', { login, password }, false);
     setSession(res);
   },
   async logout() {

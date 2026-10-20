@@ -96,7 +96,7 @@ class RegisterViewModel @Inject constructor(
             replacing.first { replacesTreeId == null || it != null }?.let { t ->
                 form.update { it.copy(sectorId = t.sectorId, subSectorId = t.subSectorId) }
             }
-            val default = ref.statuses().first().firstOrNull { it.code == "PLANTED" }
+            val default = ref.statuses().first().let { l -> l.firstOrNull { it.code == "ALIVE" && it.active } ?: l.firstOrNull { it.active && !it.isTerminal } }
             form.update { it.copy(statusId = it.statusId ?: default?.id) }
             refresh()
         }
@@ -209,7 +209,7 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
     val mySectors = sectors.filter { s -> isAdmin || allowed(assignments, s.projectId, s.id, null) }
     val mySubs = subSectors.filter { ss -> ss.sectorId == f.sectorId && (isAdmin || allowed(assignments, ss.projectId, ss.sectorId, ss.id)) }
     val status = statuses.find { it.id == f.statusId }
-    val photoMissing = status?.requiresPhoto == true && f.photos.isEmpty()
+    val photoMissing = f.photos.isEmpty()
 
     Scaffold(topBar = {
         TopAppBar(
@@ -303,7 +303,7 @@ fun PhotoRow(photos: List<CapturedPhoto>, onAdd: () -> Unit, onRemove: (Captured
                 TextButton(onClick = { onRemove(p) }) { Text("Remove") }
             }
         }
-        if (required) Text("This status requires a photo.", color = MaterialTheme.colorScheme.error)
+        if (required) Text("A photo of the tree is required.", color = MaterialTheme.colorScheme.error)
         OutlinedButton(onClick = onAdd) { Text("Take photo") }
     }
 }

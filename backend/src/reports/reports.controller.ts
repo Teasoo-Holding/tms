@@ -7,10 +7,23 @@ import { AuditService } from '../common/audit.service';
 import { parse } from '../common/validation';
 import { ReportsService } from './reports.service';
 
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const Filter = z.object({
   project_id: z.string().uuid().optional(),
   planting_year_id: z.string().uuid().optional(),
+  sector_id: z.string().uuid().optional(),
+  sub_sector_id: z.string().uuid().optional(),
+  species_id: z.string().uuid().optional(),
+  status_id: z.string().uuid().optional(),
+  from: day.optional(),
+  to: day.optional(),
   overdue_days: z.coerce.number().int().min(1).max(3650).default(90),
+});
+const VisitFilter = Filter.extend({
+  recorded_by: z.string().uuid().optional(),
+  q: z.string().max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+  offset: z.coerce.number().int().min(0).default(0),
 });
 
 function csvCell(v: unknown): string {
@@ -28,6 +41,26 @@ export class ReportsController {
   @Get('summary')
   summary(@CurrentUser() user: AuthUser, @Query() query: unknown) {
     return this.reports.summary(user, parse(Filter, query));
+  }
+
+  @Get('visits')
+  visits(@CurrentUser() user: AuthUser, @Query() query: unknown) {
+    const f = parse(VisitFilter, query);
+    return this.reports.visitRows(user, f, f.limit, f.offset);
+  }
+
+  @Get('visits.csv')
+  async visitsCsv(@CurrentUser() user: AuthUser, @Query() query: unknown, @Res() res: Response) {
+    const f = parse(VisitFilter, query);
+    const { items } = await this.reports.visitRows(user, f, 100_000, 0);
+    await this.audit.record({ actorId: user.id, action: 'export.csv', entityType: 'report', projectId: f.project_id, metadata: { rows: items.length, kind: 'visits' } });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="visits-${new Date().toISOString().slice(0, 10)}.csv"`);
+    const header = ['observed_at', 'physical_tree_id', 'project', 'planting_year', 'sector', 'sub_sector', 'species', 'status', 'height_cm', 'height_method',
+      'remarks', 'custom_fields', 'recorded_by', 'recorded_at', 'synced_at', 'photos', 'is_initial', 'is_amendment', 'superseded', 'amendment_reason', 'id', 'tree_id'];
+    res.write('\uFEFF' + header.join(',') + '\n');
+    for (const r of items) res.write(header.map((h) => csvCell(h === 'custom_fields' ? JSON.stringify(r[h] ?? {}) : r[h])).join(',') + '\n');
+    res.end();
   }
 
   @Get('trees.csv')

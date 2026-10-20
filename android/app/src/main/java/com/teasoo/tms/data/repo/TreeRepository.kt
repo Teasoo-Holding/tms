@@ -164,7 +164,8 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
             throw RegistrationException("The confirmed ID does not match the assembled ID. Check the serial.")
         }
         val status = ref.status(t.statusId) ?: throw RegistrationException("Choose a status.")
-        if (status.requiresPhoto && t.photos.isEmpty()) throw RegistrationException("Status “${status.name}” requires a photo.")
+        // Every visit is documented with a photo (project spec).
+        if (t.photos.isEmpty()) throw RegistrationException("Take a photo of the tree before saving.")
         if (t.replacesTreeId != null) assertReplaceable(t.replacesTreeId)
 
         val treeId = UUID.randomUUID().toString()
@@ -230,7 +231,8 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
         height: HeightReading? = null, fields: FieldValues = emptyMap(),
     ): String {
         val status = ref.status(statusId) ?: throw RegistrationException("Choose a status.")
-        if (status.requiresPhoto && photos.isEmpty()) throw RegistrationException("Status “${status.name}” requires a photo.")
+        // Every visit needs a photo; a correction of an earlier visit may reuse that visit's photos.
+        if (amendsObservationId == null && photos.isEmpty()) throw RegistrationException("Take a photo of the tree before saving.")
         if (observedAt.isAfter(Instant.now().plusSeconds(300))) throw RegistrationException("The observation date cannot be in the future.")
         if (amendsObservationId != null && amendmentReason.isNullOrBlank()) throw RegistrationException("Give a reason for the correction.")
         val id = UUID.randomUUID().toString()

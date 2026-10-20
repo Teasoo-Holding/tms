@@ -65,7 +65,7 @@ class LocalStoreTest {
 
     @After fun tearDown() = db.close()
 
-    private fun newTree(serial: String, photos: List<CapturedPhoto> = emptyList(), replaces: String? = null, a: AreaSelection = area) = NewTree(
+    private fun newTree(serial: String, photos: List<CapturedPhoto> = listOf(photo()), replaces: String? = null, a: AreaSelection = area) = NewTree(
         area = a, speciesId = "sp1", serialInput = serial,
         confirmedPhysicalId = "T4L-${if (a.plantingYearId == "y2025") "2025" else "2024"}-${serial.padStart(6, '0')}",
         statusId = "st-planted", observedAt = Instant.parse("2026-01-01T10:00:00Z"), plantedOn = "2026-01-01", notes = null, remarks = null,
@@ -149,7 +149,7 @@ class LocalStoreTest {
         assertEquals(100, initial["height_measurement"]!!.jsonObject["reference_cm"]!!.jsonPrimitive.int)
         assertEquals("None", initial["custom_fields"]!!.jsonObject["pests"]!!.jsonPrimitive.content)
 
-        trees.addObservation(id, "st-healthy", Instant.parse("2026-03-01T10:00:00Z"), null, emptyList(), user, height = HeightReading(80.0, "MANUAL"))
+        trees.addObservation(id, "st-healthy", Instant.parse("2026-03-01T10:00:00Z"), null, listOf(photo()), user, height = HeightReading(80.0, "MANUAL"))
         val op = db.outbox().due(Long.MAX_VALUE, 10).last()
         assertEquals(80.0, TmsJson.parseToJsonElement(op.payloadJson).jsonObject["height_cm"]!!.jsonPrimitive.double, 0.0)
     }
@@ -194,6 +194,71 @@ class LocalStoreTest {
     }
 
     @Test
+    fun everyVisitNeedsAPhotoExceptCorrections() = runBlocking {
+        assertTrue(runCatching { trees.register(newTree("501", photos = emptyList()), user) }.exceptionOrNull() is RegistrationException)
+        val id = trees.register(newTree("502"), user)
+        assertTrue(runCatching { trees.addObservation(id, "st-healthy", Instant.now(), null, emptyList(), user) }.exceptionOrNull() is RegistrationException)
+        val first = db.observations().forTree(id).first().single()
+        trees.addObservation(id, "st-healthy", Instant.now(), null, emptyList(), user, amendsObservationId = first.id, amendmentReason = "typo")
+        assertEquals(2, db.observations().forTree(id).first().size)
+    }
+
+    @Test
+    fun myVisitsAreNewestFirstAndOnlyMine() = runBlocking {
+        val a = trees.register(newTree("601"), user)
+        Thread.sleep(5)
+        trees.addObservation(a, "st-healthy", Instant.now(), "second", listOf(photo()), user)
+        trees.register(newTree("602"), "someone-else")
+        val mine = db.observations().mine(user, "1970-01-01T00:00:00Z").first()
+        assertEquals(listOf("second", null), mine.map { it.remarks })
+        assertTrue(mine.all { it.photoCount == 1 && it.syncState == SyncState.PENDING })
+        assertTrue(mine.last().isInitial)
+    }
+
+    @Test
+    fun aliveAndDeadShareIsCountedPerSubSector() = runBlocking {
+        trees.register(newTree("701"), user)
+        val dead = trees.register(newTree("702"), user)
+        trees.addObservation(dead, "st-dead", Instant.now(), null, listOf(photo()), user)
+        val share = db.trees().shareBySubSector("p1").first().single()
+        assertEquals(2, share.total)
+        assertEquals(1, share.alive)
+        assertEquals(1, share.dead)
+        assertEquals(0.5, share.deadShare!!, 0.0)
+    }
+
+    @Test
+    fun warnsWhenATreeIsVisitedOutsideItsRegisteredSector() = runBlocking {
+        db.reference().upsertSectors(listOf(SectorEntity("s2", "p1", "South", "S02", 7.3, 3.9, null, true)))
+        val id = trees.register(newTree("801"), user)
+        val tree = db.trees().get(id)!!
+        val here = FieldSession("p1", "y2024", "s1", "ss1")
+        assertNull(com.teasoo.tms.ui.screens.areaMismatch(db, tree, here))
+        val elsewhere = here.copy(sectorId = "s2", subSectorId = "ss9")
+        assertTrue(com.teasoo.tms.ui.screens.areaMismatch(db, tree, elsewhere)!!.contains("S01"))
+        assertNull(com.teasoo.tms.ui.screens.areaMismatch(db, tree, null))
+    }
+
+    @Test
+    fun backupHoldsUnsentOperationsAndPhotosWithoutChangingAnything() = runBlocking {
+        val p = photo()
+        trees.register(newTree("901", listOf(p)), user)
+        val out = java.io.ByteArrayOutputStream()
+        val summary = BackupExporter(db, SessionStore(context)).export(out)
+        assertEquals(1, summary.operations)
+        assertEquals(1, summary.photos)
+        val names = mutableMapOf<String, ByteArray>()
+        java.util.zip.ZipInputStream(out.toByteArray().inputStream()).use { zip ->
+            while (true) { val e = zip.nextEntry ?: break; names[e.name] = zip.readBytes() }
+        }
+        assertTrue(names.keys.containsAll(listOf("manifest.json", "operations.json", "trees.json", "observations.json", "photos.json", "photos/${p.mediaId}.jpg")))
+        val ops = TmsJson.parseToJsonElement(names["operations.json"]!!.decodeToString()).jsonArray
+        assertEquals("tree", ops.single().jsonObject["entity_type"]!!.jsonPrimitive.content)
+        assertEquals(1, db.outbox().pendingList().size)
+        assertTrue(p.file.exists())
+    }
+
+    @Test
     fun enforcesAllocatedSerialRanges() = runBlocking {
         db.reference().upsertAllocations(listOf(SerialAllocationEntity("a1", "p1", "PLANTING_YEAR=y2024|PROJECT=p1", user, 100, 199, true)))
         val info = trees.prefix(area)
@@ -217,7 +282,7 @@ class LocalStoreTest {
     @Test
     fun amendmentSupersedesWithoutDeleting() = runBlocking {
         val id = trees.register(newTree("30"), user)
-        val obs = trees.addObservation(id, "st-healthy", Instant.parse("2026-03-01T10:00:00Z"), null, emptyList(), user)
+        val obs = trees.addObservation(id, "st-healthy", Instant.parse("2026-03-01T10:00:00Z"), null, listOf(photo()), user)
         trees.addObservation(id, "st-planted", Instant.parse("2026-03-01T10:00:00Z"), null, emptyList(), user, amendsObservationId = obs, amendmentReason = "Wrong status")
         assertEquals(3, db.observations().forTree(id).first().size)
         assertEquals("st-planted", db.trees().get(id)!!.currentStatusId)
