@@ -607,6 +607,10 @@ describe('visit types, hand-set replacement IDs and portal access', () => {
       .set('Origin', 'https://tms-portal-git-main-teasoo.vercel.app')
       .set('Access-Control-Request-Method', 'POST');
     expect(res.headers['access-control-allow-origin']).toBe('https://tms-portal-git-main-teasoo.vercel.app');
+    const own = await request(app.getHttpServer()).options('/api/v1/auth/login').set('Origin', 'https://tms.teasooconsulting.com').set('Access-Control-Request-Method', 'POST');
+    expect(own.headers['access-control-allow-origin']).toBe('https://tms.teasooconsulting.com');
+    // A portal built with a trailing slash on the API address calls //api/v1/…
+    await request(app.getHttpServer()).get('//api/v1/health').expect(200);
     const other = await request(app.getHttpServer()).options('/api/v1/auth/login').set('Origin', 'https://evil.example.com').set('Access-Control-Request-Method', 'POST');
     expect(other.headers['access-control-allow-origin']).toBeUndefined();
   });
