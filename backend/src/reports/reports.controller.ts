@@ -22,6 +22,7 @@ const Filter = z.object({
 });
 const VisitFilter = Filter.extend({
   recorded_by: z.string().uuid().optional(),
+  visit_type: z.enum(['VISIT', 'FIRST_INSTANCE', 'PLANTING', 'MAINTENANCE']).optional(),
   q: z.string().max(100).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
   offset: z.coerce.number().int().min(0).default(0),
@@ -57,7 +58,7 @@ export class ReportsController {
     await this.audit.record({ actorId: user.id, action: 'export.csv', entityType: 'report', projectId: f.project_id, metadata: { rows: items.length, kind: 'visits' } });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="visits-${new Date().toISOString().slice(0, 10)}.csv"`);
-    const header = ['observed_at', 'physical_tree_id', 'project', 'planting_year', 'sector', 'sub_sector', 'species', 'status', 'height_cm', 'height_method',
+    const header = ['observed_at', 'visit_type', 'physical_tree_id', 'project', 'planting_year', 'sector', 'sub_sector', 'species', 'status', 'height_cm', 'height_method',
       'remarks', 'custom_fields', 'recorded_by', 'recorded_at', 'synced_at', 'photos', 'is_initial', 'is_amendment', 'superseded', 'amendment_reason', 'id', 'tree_id'];
     res.write('\uFEFF' + header.join(',') + '\n');
     for (const r of items) res.write(header.map((h) => csvCell(h === 'custom_fields' ? JSON.stringify(r[h] ?? {}) : r[h])).join(',') + '\n');
