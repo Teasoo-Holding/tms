@@ -20,6 +20,10 @@ import { OperationContext, OperationResult, Rejection } from './operation-result
 
 const COMPONENT_VALUE_KEYS = ['PROJECT_CODE', 'PLANTING_YEAR', 'VENDOR_CODE', 'SECTOR_CODE', 'SUB_SECTOR_CODE'] as const;
 
+/** Why the visit was made: an ordinary visit, the first data collection on existing trees, at planting, or maintenance. */
+export const VISIT_TYPES = ['VISIT', 'FIRST_INSTANCE', 'PLANTING', 'MAINTENANCE'] as const;
+const visitType = z.enum(VISIT_TYPES).default('VISIT');
+
 const customFields = z.record(z.string(), z.unknown()).refine((v) => JSON.stringify(v).length <= 20_000, 'Too much custom field data');
 
 /** Height typed in, or measured on the photo against a reference stick (points kept for review). */
@@ -47,6 +51,8 @@ export const CreateTreePayload = z.object({
   /** Code values the device assembled the prefix from (its cache may predate a code change). */
   id_component_values: z.record(z.enum(COMPONENT_VALUE_KEYS), z.string().max(32).nullable()).optional(),
   replaces_tree_id: z.string().uuid().nullish(),
+  /** Administrators may give a replanted tree an ID of their choosing instead of the format's. */
+  custom_physical_id: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9\-_/.]*$/, 'Use letters, digits, - _ / .').optional(),
   planted_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   notes: z.string().max(4000).nullish(),
   custom_fields: customFields.optional(),
@@ -57,6 +63,7 @@ export const CreateTreePayload = z.object({
     observed_at: z.string().datetime({ offset: true }),
     remarks: z.string().max(4000).nullish(),
     custom_fields: customFields.optional(),
+    visit_type: visitType,
     ...height,
   }),
 });
@@ -89,6 +96,7 @@ export const ObservationPayload = z.object({
   amends_observation_id: z.string().uuid().nullish(),
   amendment_reason: z.string().max(1000).nullish(),
   custom_fields: customFields.optional(),
+  visit_type: visitType,
   ...height,
 });
 export type Observation = z.infer<typeof ObservationPayload>;
@@ -169,11 +177,19 @@ export class TreesService {
     };
     const values: ComponentValues = { ...currentValues, ...(p.id_component_values ?? {}) };
     let assembled;
-    try {
-      assembled = assemblePhysicalId(scheme, values, p.serial_input);
-    } catch (e) {
-      if (e instanceof TreeIdError) throw new Rejection(e.code, idErrorMessage(e.code));
-      throw e;
+    const custom = p.custom_physical_id;
+    if (custom) {
+      if (actor.role !== 'ADMIN') throw new Rejection('CUSTOM_ID_NOT_ALLOWED', 'Only an administrator can set a tree ID by hand.');
+      if (!p.replaces_tree_id) throw new Rejection('CUSTOM_ID_NOT_ALLOWED', 'A hand-set tree ID is only for replanted (replacement) trees.');
+      const normalized = normalizePhysicalId(custom);
+      assembled = { prefix: '', serial: normalized, physicalId: custom, normalized };
+    } else {
+      try {
+        assembled = assemblePhysicalId(scheme, values, p.serial_input);
+      } catch (e) {
+        if (e instanceof TreeIdError) throw new Rejection(e.code, idErrorMessage(e.code));
+        throw e;
+      }
     }
     if (p.physical_tree_id && normalizePhysicalId(p.physical_tree_id) !== assembled.normalized) {
       throw new Rejection('ID_MISMATCH', `The confirmed ID ${p.physical_tree_id} does not match the assembled ID ${assembled.physicalId}.`);
@@ -185,7 +201,13 @@ export class TreesService {
       SECTOR_CODE: p.sector_id,
       SUB_SECTOR_CODE: p.sub_sector_id,
     };
-    const snapshot = {
+    const snapshot = custom ? {
+      scheme_version: schemeRow.version,
+      separator: '',
+      serial_width: assembled.serial.length,
+      custom: true,
+      components: [{ type: 'CUSTOM', value: assembled.physicalId, entity_id: null, matches_current_code: true }],
+    } : {
       scheme_version: schemeRow.version,
       separator: scheme.separator,
       serial_width: scheme.serialWidth,
@@ -196,14 +218,17 @@ export class TreesService {
         return { type: c.type, value: v, entity_id: entityIds[c.type], matches_current_code: v === (currentValues[c.type] ?? null) };
       }),
     };
-    const serialKey = serialScopeKey(scheme.serialUniquenessScope, {
-      project: project.id,
-      plantingYear: year.id,
-      vendor: vendor?.id ?? null,
-      sector: p.sector_id,
-      subSector: p.sub_sector_id,
-    });
-    await this.assertSerialAllocated(tx, actor, serialKey, assembled.serial);
+    // Hand-set IDs live outside the format's serial numbering; the full ID is still unique.
+    const serialKey = custom
+      ? `CUSTOM|PROJECT=${project.id}`
+      : serialScopeKey(scheme.serialUniquenessScope, {
+          project: project.id,
+          plantingYear: year.id,
+          vendor: vendor?.id ?? null,
+          sector: p.sector_id,
+          subSector: p.sub_sector_id,
+        });
+    if (!custom) await this.assertSerialAllocated(tx, actor, serialKey, assembled.serial);
 
     if (p.replaces_tree_id) await this.assertReplaceable(tx, p.replaces_tree_id, p.project_id);
     const treeFields = await this.customValues(tx, p.project_id, 'TREE', p.custom_fields);
@@ -242,6 +267,7 @@ export class TreesService {
       recorded_at: p.client_recorded_at,
       remarks: p.initial_observation.remarks,
       custom_fields: p.initial_observation.custom_fields,
+      visit_type: p.initial_observation.visit_type,
       height_cm: p.initial_observation.height_cm,
       height_method: p.initial_observation.height_method,
       height_measurement: p.initial_observation.height_measurement,
@@ -441,13 +467,14 @@ export class TreesService {
       tx,
       `INSERT INTO tree_observations (id, tree_id, observed_status_id, observed_at, recorded_at, recorded_by, device_id, remarks,
                                       is_initial, is_amendment, amends_observation_id, amendment_reason, custom_fields,
-                                      height_cm, height_method, height_measurement)
-       VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
+                                      height_cm, height_method, height_measurement, visit_type)
+       VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
       [
         p.id, p.tree_id, p.observed_status_id, p.observed_at, p.recorded_at ?? null, actor.id, ctx.deviceId, p.remarks ?? null,
         initial, !!p.amends_observation_id, p.amends_observation_id ?? null, p.amendment_reason ?? null, JSON.stringify(fields),
         heightCm, heightCm == null ? null : (p.height_method ?? 'MANUAL'),
         heightCm == null || !p.height_measurement ? null : JSON.stringify(p.height_measurement),
+        p.visit_type ?? 'VISIT',
       ],
     ))!;
   }
@@ -495,13 +522,24 @@ export class TreesService {
     };
     const values: ComponentValues = Object.fromEntries(snapshot.components.filter((c: any) => c.type !== 'SERIAL').map((c: any) => [c.type, c.value]));
     let assembled;
-    try {
-      assembled = assemblePhysicalId(scheme, values, serialInput);
-    } catch (e) {
-      if (e instanceof TreeIdError) throw new Rejection(e.code, idErrorMessage(e.code));
-      throw e;
+    if (snapshot.custom) {
+      // A hand-set ID is corrected by entering the whole new ID.
+      const id = serialInput.trim();
+      if (!/^[A-Za-z0-9][A-Za-z0-9\-_/.]{0,63}$/.test(id)) throw new Rejection('CUSTOM_ID_INVALID', 'Enter the full tree ID (letters, digits, - _ / .).');
+      const normalized = normalizePhysicalId(id);
+      assembled = { physicalId: id, normalized, serial: normalized };
+    } else {
+      try {
+        assembled = assemblePhysicalId(scheme, values, serialInput);
+      } catch (e) {
+        if (e instanceof TreeIdError) throw new Rejection(e.code, idErrorMessage(e.code));
+        throw e;
+      }
     }
-    const newSnapshot = { ...snapshot, components: snapshot.components.map((c: any) => (c.type === 'SERIAL' ? { ...c, value: assembled.serial } : c)) };
+    const newSnapshot = {
+      ...snapshot,
+      components: snapshot.components.map((c: any) => (c.type === 'SERIAL' || c.type === 'CUSTOM' ? { ...c, value: c.type === 'CUSTOM' ? assembled.physicalId : assembled.serial } : c)),
+    };
     const state = activate ? 'ACTIVE' : tree.record_state;
     await tx.query('SAVEPOINT correct_serial');
     let after;

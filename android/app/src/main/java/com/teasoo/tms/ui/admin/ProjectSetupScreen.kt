@@ -135,7 +135,7 @@ class ProjectSetupViewModel @Inject constructor(
 }
 
 enum class SetupTab(val title: String, val perYear: Boolean = false) {
-    DETAILS("Checklist", perYear = true),
+    DETAILS("Details"),
     YEARS("Planting years"),
     AREAS("Areas", perYear = true),
     VENDORS("Vendors", perYear = true),
@@ -205,98 +205,9 @@ internal fun NoYearState(onAddYear: () -> Unit) {
     )
 }
 
-// ---------------------------------------------------------------- checklist + details
+// ---------------------------------------------------------------- details
 
 private data class CheckItem(val label: String, val detail: String, val done: Boolean, val optional: Boolean, val tab: SetupTab)
-
-@Composable
-private fun SetupChecklist(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: ProjectSetupViewModel, onJump: (SetupTab) -> Unit) {
-    val areas = collect(vm.areas)
-    val fields = collect(vm.fields)
-    val assignments = collect(vm.assignments)
-    val saving = collect(vm.saving)
-
-    val yearSectors = areas.filter { it.active && year != null && it.plantingYearId == year.id }
-    val olderSectors = areas.filter { it.active && it.plantingYearId == null }
-    val subSectors = yearSectors.sumOf { s -> s.subSectors.count { it.active } }
-    val olderSubSectors = olderSectors.sumOf { s -> s.subSectors.count { it.active } }
-    val vendors = p.linkedVendors(year?.id)
-    val yearFormat = year?.let { p.schemes.activeIn(null, it.id) }
-    val defaultFormat = p.schemes.activeIn(null, null)
-    val vendorFormats = vendors.count { v -> p.schemes.any { it.active && it.vendorId == v.vendorId && (it.plantingYearId == null || it.plantingYearId == year?.id) } }
-    val officers = assignments.filter { it.active && it.userRole != "EXECUTIVE" }.map { it.userId }.distinct().size
-    val y = year?.yearLabel ?: "this year"
-
-    val items = listOf(
-        CheckItem(
-            "Planting year",
-            when {
-                year == null -> "Add the year trees are planted in, e.g. 2025"
-                year.active -> "${year.yearLabel} is open for registration"
-                else -> "${year.yearLabel} is closed – reopen it to register trees"
-            },
-            year?.active == true, false, SetupTab.YEARS,
-        ),
-        CheckItem(
-            "Areas surveyed",
-            when {
-                subSectors > 0 -> "${yearSectors.size} sectors · $subSectors sub-sectors mapped for $y"
-                olderSubSectors > 0 -> "Using ${olderSectors.size} older sectors not tied to a year. Map $y's survey under Areas."
-                else -> "Map $y's planting area: sectors, then sub-sectors"
-            },
-            subSectors > 0 || olderSubSectors > 0, false, SetupTab.AREAS,
-        ),
-        CheckItem(
-            "Vendors linked",
-            if (vendors.isEmpty()) "Add the vendors planting in $y" else vendors.joinToString(", ") { it.vendorName ?: "Vendor" },
-            vendors.isNotEmpty(), false, SetupTab.VENDORS,
-        ),
-        CheckItem(
-            "ID format",
-            when {
-                yearFormat != null -> "$y has its own format" + if (vendorFormats > 0) " · $vendorFormats vendor formats" else ""
-                defaultFormat != null -> "Uses the project default" + if (vendorFormats > 0) " · $vendorFormats vendor formats" else ""
-                else -> "Define how tree IDs are built"
-            },
-            yearFormat != null || defaultFormat != null, false, SetupTab.ID_FORMAT,
-        ),
-        CheckItem("Officers assigned", if (officers == 0) "Assign field officers to the project or its areas" else "$officers assigned", officers > 0, false, SetupTab.OFFICERS),
-        CheckItem("Custom fields", if (fields.isEmpty()) "Extra questions such as nursery batch" else "${fields.count { it.active }} active", fields.isNotEmpty(), true, SetupTab.FIELDS),
-        CheckItem("Project ACTIVE", if (p.status == "ACTIVE") "Officers can record data" else "Currently ${projectStatusLabel(p.status)}", p.status == "ACTIVE", false, SetupTab.DETAILS),
-    )
-    val requiredDone = items.filter { !it.optional && it.tab != SetupTab.DETAILS }.all { it.done }
-    ElevatedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(vertical = 12.dp)) {
-            Text("Setup checklist for ${year?.yearLabel ?: "the first year"}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
-            Text(
-                "${items.count { it.done && !it.optional }} of ${items.count { !it.optional }} steps done. Tap a step to open it.",
-                style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-            )
-            items.forEachIndexed { i, item ->
-                ListItem(
-                    headlineContent = { Text("${i + 1}. ${item.label}" + if (item.optional) " (optional)" else "") },
-                    supportingContent = { Text(item.detail) },
-                    leadingContent = {
-                        if (item.done) Icon(Icons.Default.CheckCircle, "Done", tint = StatusColors.good)
-                        else Icon(Icons.Default.RadioButtonUnchecked, if (item.optional) "Optional" else "To do", tint = MaterialTheme.colorScheme.outline)
-                    },
-                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                    modifier = Modifier.clickable { onJump(item.tab) }.heightIn(min = 56.dp),
-                )
-            }
-            if (p.status != "ACTIVE") {
-                Button(
-                    onClick = { vm.setStatus("ACTIVE") }, enabled = requiredDone && !saving,
-                    modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().heightIn(min = 48.dp),
-                ) { Text("Activate project") }
-                if (!requiredDone) Text(
-                    "Finish steps 1 to 5 to activate.", style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
-        }
-    }
-}
 
 @Composable
 private fun DetailsTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: ProjectSetupViewModel, onJump: (SetupTab) -> Unit, onAddYear: () -> Unit) {
@@ -308,7 +219,6 @@ private fun DetailsTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: Pro
         description = initial.description?.ifBlank { null }, location = initial.location?.ifBlank { null },
     )
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SetupChecklist(p, year, vm) { t -> if (t == SetupTab.YEARS && year == null) onAddYear() else onJump(t) }
         SectionHeader("Project details")
         ProjectFields(state, creating = false, originalCode = p.shortCode)
         BoldValue("Tree ID uniqueness", if (p.physicalIdUniqueness == "GLOBAL") "Across all projects" else "Within this project")

@@ -52,6 +52,9 @@ data class NewTree(
     val treeFields: FieldValues = emptyMap(),
     val observationFields: FieldValues = emptyMap(),
     val height: HeightReading? = null,
+    val visitType: String = "VISIT",
+    /** Administrators only, for replanted trees: an ID typed by hand instead of the format's. */
+    val customPhysicalId: String? = null,
 )
 
 /** A tree height recorded with an observation. */
@@ -67,6 +70,8 @@ data class HeightReading(
 typealias FieldValues = Map<String, JsonPrimitive>
 
 fun FieldValues.toJson() = JsonObject(this)
+
+private val CUSTOM_ID = Regex("^[A-Za-z0-9][A-Za-z0-9\\-_/.]{0,63}$")
 
 class RegistrationException(message: String) : Exception(message)
 
@@ -154,12 +159,20 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
      */
     suspend fun register(t: NewTree, userId: String): String {
         val info = prefix(t.area)
-        val check = checkSerial(t.area, info, t.serialInput, userId)
-        val ok = when (check) {
-            is SerialCheck.Ok -> check
-            is SerialCheck.Invalid -> throw RegistrationException(check.message)
-            is SerialCheck.NotAllocated -> throw RegistrationException(check.message)
-            is SerialCheck.LocalDuplicate -> throw RegistrationException("${check.physicalId} is already registered on this device.")
+        val custom = t.customPhysicalId?.trim()?.takeIf { it.isNotEmpty() }
+        val ok = if (custom != null) {
+            if (t.replacesTreeId == null) throw RegistrationException("A hand-set ID is only for replanted trees.")
+            if (!CUSTOM_ID.matches(custom)) throw RegistrationException("Use letters, digits and - _ / . (up to 64) for the tree ID.")
+            val normalized = TreeIdAssembler.normalize(custom)
+            db.trees().findByNormalizedInProject(normalized, t.area.projectId)?.let { throw RegistrationException("$custom is already registered on this device.") }
+            SerialCheck.Ok(TreeIdAssembler.Assembled("", normalized, custom, normalized), "CUSTOM|PROJECT=${t.area.projectId}")
+        } else {
+            when (val check = checkSerial(t.area, info, t.serialInput, userId)) {
+                is SerialCheck.Ok -> check
+                is SerialCheck.Invalid -> throw RegistrationException(check.message)
+                is SerialCheck.NotAllocated -> throw RegistrationException(check.message)
+                is SerialCheck.LocalDuplicate -> throw RegistrationException("${check.physicalId} is already registered on this device.")
+            }
         }
         if (TreeIdAssembler.normalize(t.confirmedPhysicalId) != ok.assembled.normalized) {
             throw RegistrationException("The confirmed ID does not match the assembled ID. Check the serial.")
@@ -199,6 +212,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
             put("physical_tree_id", ok.assembled.physicalId)
             putJsonObject("id_component_values") { info.componentValues.forEach { (k, v) -> put(k, v) } }
             t.replacesTreeId?.let { put("replaces_tree_id", it) }
+            custom?.let { put("custom_physical_id", it) }
             t.plantedOn?.let { put("planted_on", it) }
             t.notes?.let { put("notes", it) }
             if (t.treeFields.isNotEmpty()) put("custom_fields", t.treeFields.toJson())
@@ -208,6 +222,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
                 put("observed_at", t.observedAt.toString())
                 t.remarks?.let { put("remarks", it) }
                 if (t.observationFields.isNotEmpty()) put("custom_fields", t.observationFields.toJson())
+                put("visit_type", t.visitType)
                 putHeight(t.height)
             }
         }
@@ -217,7 +232,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
                 ObservationEntity(
                     observationId, treeId, t.statusId, t.observedAt.toString(), now, userId, t.remarks, true, null, null, SyncState.PENDING, null,
                     customFieldsJson = t.observationFields.toJson().toString(), heightCm = t.height?.cm, heightMethod = t.height?.method,
-                    heightMeasurementJson = t.height?.measurementJson,
+                    heightMeasurementJson = t.height?.measurementJson, visitType = t.visitType,
                 ),
             )
             t.photos.forEach { db.media().insert(it.toEntity(treeId, observationId, now)) }
@@ -229,7 +244,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
     suspend fun addObservation(
         treeId: String, statusId: String, observedAt: Instant, remarks: String?, photos: List<CapturedPhoto>, userId: String,
         amendsObservationId: String? = null, amendmentReason: String? = null,
-        height: HeightReading? = null, fields: FieldValues = emptyMap(),
+        height: HeightReading? = null, fields: FieldValues = emptyMap(), visitType: String = "VISIT",
     ): String {
         val status = ref.status(statusId) ?: throw RegistrationException("Choose a status.")
         // Every visit needs a photo; a correction of an earlier visit may reuse that visit's photos.
@@ -247,6 +262,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
             amendsObservationId?.let { put("amends_observation_id", it) }
             amendmentReason?.let { put("amendment_reason", it) }
             if (fields.isNotEmpty()) put("custom_fields", fields.toJson())
+            put("visit_type", visitType)
             putHeight(height)
         }
         db.withTransaction {
@@ -254,6 +270,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
                 ObservationEntity(
                     id, treeId, statusId, observedAt.toString(), now, userId, remarks, false, amendsObservationId, amendmentReason, SyncState.PENDING, null,
                     customFieldsJson = fields.toJson().toString(), heightCm = height?.cm, heightMethod = height?.method, heightMeasurementJson = height?.measurementJson,
+                    visitType = visitType,
                 ),
             )
             photos.forEach { db.media().insert(it.toEntity(treeId, id, now)) }

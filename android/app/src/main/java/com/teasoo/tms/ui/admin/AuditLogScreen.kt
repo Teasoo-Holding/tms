@@ -39,6 +39,8 @@ import kotlinx.serialization.json.contentOrNull
 import javax.inject.Inject
 
 private const val PAGE = 50
+/** The short default view: just the latest entries. */
+private const val LATEST = 10
 
 @HiltViewModel
 class AuditLogViewModel @Inject constructor(
@@ -49,6 +51,10 @@ class AuditLogViewModel @Inject constructor(
     val actorId = MutableStateFlow(handle.get<String>("actor")?.takeIf { it.isNotBlank() })
     val actionPrefix = MutableStateFlow<String?>(null)
     val projectId = MutableStateFlow(handle.get<String>("project")?.takeIf { it.isNotBlank() })
+    val from = MutableStateFlow<java.time.LocalDate?>(null)
+    val to = MutableStateFlow<java.time.LocalDate?>(null)
+    /** False: the latest 10 entries only. True: filters (dates, person, activity) with paging. */
+    val full = MutableStateFlow(actorId.value != null || projectId.value != null)
     val entries = MutableStateFlow<List<AuditEntryDto>?>(null)
     val hasMore = MutableStateFlow(false)
     val loadingMore = MutableStateFlow(false)
@@ -65,15 +71,24 @@ class AuditLogViewModel @Inject constructor(
     fun setActor(id: String?) { actorId.value = id; refresh() }
     fun setAction(prefix: String?) { actionPrefix.value = prefix; refresh() }
     fun setProject(id: String?) { projectId.value = id; refresh() }
+    fun setDates(f: java.time.LocalDate?, t: java.time.LocalDate?) { from.value = f; to.value = t; refresh() }
+    fun showFull(on: Boolean) {
+        full.value = on
+        if (!on) { actorId.value = null; actionPrefix.value = null; projectId.value = null; from.value = null; to.value = null }
+        refresh()
+    }
 
     private suspend fun page(before: Long?) =
-        api.auditLogs(actorId = actorId.value, actionPrefix = actionPrefix.value, projectId = projectId.value, beforeId = before, limit = PAGE)
+        api.auditLogs(
+            actorId = actorId.value, actionPrefix = actionPrefix.value, projectId = projectId.value,
+            from = from.value?.toString(), to = to.value?.toString(), beforeId = before, limit = if (full.value) PAGE else LATEST,
+        )
 
     fun refresh() = load {
         entries.value = null
         val list = page(null)
         entries.value = list
-        hasMore.value = list.size >= PAGE
+        hasMore.value = full.value && list.size >= PAGE
     }
 
     fun loadOlder() {
@@ -134,16 +149,25 @@ fun AuditLogScreen(onBack: () -> Unit, onOpenTree: (String) -> Unit, vm: AuditLo
     val actorId = collect(vm.actorId)
     val action = collect(vm.actionPrefix)
     val projectId = collect(vm.projectId)
+    val full = collect(vm.full)
     val actorName = users.find { it.id == actorId }?.fullName
 
     AdminScaffold(
         title = "Activity log",
-        subtitle = actorName?.let { "By $it" } ?: "Everyone",
+        subtitle = if (!full) "Latest activity" else actorName?.let { "By $it" } ?: "Full log",
+
         onBack = onBack,
         actions = { IconButton(onClick = { vm.refresh() }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh") } },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            Filters(users, projects, actorId, action, projectId, vm)
+            if (full) {
+                Filters(users, projects, actorId, action, projectId, vm)
+            } else {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("The 10 most recent changes and records.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { vm.showFull(true) }) { Text("See full log") }
+                }
+            }
             AdminLoadState(loading, error, entries != null, onRetry = { vm.refresh() }) {
                 val list = entries.orEmpty()
                 if (list.isEmpty()) {
@@ -158,6 +182,7 @@ fun AuditLogScreen(onBack: () -> Unit, onOpenTree: (String) -> Unit, vm: AuditLo
                     item {
                         when {
                             loadingMore -> Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                            !full -> OutlinedButton(onClick = { vm.showFull(true) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("See full log (filter by date)") }
                             hasMore -> OutlinedButton(onClick = { vm.loadOlder() }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Load older") }
                             else -> Hint("Start of the log for these filters.")
                         }
@@ -174,6 +199,13 @@ private fun Filters(users: List<AdminUserDto>, projects: List<AdminProjectDto>, 
     var expanded by rememberSaveable { mutableStateOf(actorId == null) }
     Surface(tonalElevation = 1.dp) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val from = collect(vm.from)
+            val to = collect(vm.to)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.teasoo.tms.ui.components.DateField("From", from, { vm.setDates(it, to) }, Modifier.weight(1f))
+                com.teasoo.tms.ui.components.DateField("To", to, { vm.setDates(from, it) }, Modifier.weight(1f))
+            }
+            TextButton(onClick = { vm.showFull(false) }) { Text("Back to latest activity") }
             val people = listOf<Pair<String?, String>>(null to "Everyone") + users.sortedBy { it.fullName }.map { it.id to it.fullName }
             Picker("Person", people, people.find { it.first == actorId } ?: (actorId to "Selected person"), { it.second }, { vm.setActor(it.first) })
             if (expanded) {

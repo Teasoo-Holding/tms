@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { auth } from '../api/client';
-import { ErrorNotice, Field } from '../components/ui';
+import { ErrorNotice, Field, PasswordInput } from '../components/ui';
 
 export function LoginPage() {
   const [login, setLogin] = useState('');
@@ -31,7 +31,7 @@ export function LoginPage() {
           <input type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} required value={login} onChange={(e) => setLogin(e.target.value)} />
         </Field>
         <Field label="Password">
-          <input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
+          <PasswordInput autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
         <button className="primary" type="submit" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}

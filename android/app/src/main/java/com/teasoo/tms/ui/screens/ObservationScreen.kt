@@ -45,7 +45,7 @@ class ObservationViewModel @Inject constructor(
     val amended = flow { emit(amends?.let { db.observations().get(it) }) }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val statuses = db.reference().statuses().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val statusId = MutableStateFlow<String?>(null)
-    val date = MutableStateFlow(LocalDate.now())
+    val visitType = MutableStateFlow("VISIT")
     val remarks = MutableStateFlow("")
     val reason = MutableStateFlow("")
     val photos = MutableStateFlow<List<CapturedPhoto>>(emptyList())
@@ -63,7 +63,10 @@ class ObservationViewModel @Inject constructor(
     private var saved = false
 
     init {
-        viewModelScope.launch { referenceCm.value = fieldSessions.referenceCm() }
+        viewModelScope.launch {
+            referenceCm.value = fieldSessions.referenceCm()
+            fieldSessions.current()?.let { visitType.value = it.visitType }
+        }
         viewModelScope.launch {
             // Sticky values from today's field session pre-fill the form.
             fieldSessions.current()?.stickyValues?.let { sticky ->
@@ -74,7 +77,7 @@ class ObservationViewModel @Inject constructor(
         viewModelScope.launch {
             amended.filterNotNull().first().let { o ->
                 statusId.value = o.statusId
-                date.value = java.time.Instant.parse(o.observedAt).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+                visitType.value = o.visitType
                 remarks.value = o.remarks.orEmpty()
                 height.value = o.heightCm?.let { HeightReading(it, o.heightMethod ?: "MANUAL", o.heightMeasurementJson) }
                 fieldValues.value = storedFieldText(o.customFieldsJson)
@@ -96,7 +99,9 @@ class ObservationViewModel @Inject constructor(
             trees.addObservation(
                 treeId = treeId,
                 statusId = statusId.value ?: throw RegistrationException("Choose a status."),
-                observedAt = observedInstant(date.value),
+                // Stamped when saved and not editable; a correction keeps the time of the visit it corrects.
+                observedAt = amended.value?.observedAt?.let(java.time.Instant::parse) ?: java.time.Instant.now(),
+                visitType = visitType.value,
                 remarks = remarks.value.ifBlank { null },
                 photos = photos.value,
                 userId = session.userId() ?: throw RegistrationException("Sign in again to save."),
@@ -130,7 +135,7 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
     val tree by vm.tree.collectAsStateWithLifecycle()
     val statuses by vm.statuses.collectAsStateWithLifecycle()
     val statusId by vm.statusId.collectAsStateWithLifecycle()
-    val date by vm.date.collectAsStateWithLifecycle()
+    val visitType by vm.visitType.collectAsStateWithLifecycle()
     val remarks by vm.remarks.collectAsStateWithLifecycle()
     val reason by vm.reason.collectAsStateWithLifecycle()
     val photos by vm.photos.collectAsStateWithLifecycle()
@@ -156,16 +161,16 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
             tree?.let { TreeIdText(it.physicalTreeId, "") }
             areaWarning?.let { Notice(it, MaterialTheme.colorScheme.errorContainer) }
             if (amending) Notice("The original observation is kept and marked as superseded. Your correction is recorded with its reason.")
-            Text("What do you see?", style = MaterialTheme.typography.titleSmall)
-            // One tap per tree: statuses as chips rather than a dropdown.
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                statuses.forEach { st -> FilterChip(selected = st.id == statusId, onClick = { vm.statusId.value = st.id }, label = { Text(st.name) }) }
-            }
-            DateField("Observed on", date, { vm.date.value = it ?: LocalDate.now() }, allowClear = false)
+            StatusSelector(statuses, statusId, { vm.statusId.value = it }, label = "What do you see?")
+            VisitTypeSelector(visitType) { vm.visitType.value = it }
+            Text(
+                if (amending) "The correction keeps the date and time of the original visit." else "Date and time are recorded automatically when you save.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             OutlinedTextField(remarks, { vm.remarks.value = it }, label = { Text("Remarks") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
             if (amending) OutlinedTextField(reason, { vm.reason.value = it }, label = { Text("Reason for correction") }, modifier = Modifier.fillMaxWidth())
             PhotoRow(photos, onAdd = { camera = true }, onRemove = { p -> vm.photoStore.discard(p); vm.photos.value = vm.photos.value - p }, required = photoMissing)
-            HeightSection(height, { vm.height.value = it }, photos, referenceCm, vm::setReferenceCm)
+            if (SHOW_HEIGHT) HeightSection(height, { vm.height.value = it }, photos, referenceCm, vm::setReferenceCm)
             CustomFieldsForm(fieldDefs, fieldValues, vm::setField, showFieldErrors)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(

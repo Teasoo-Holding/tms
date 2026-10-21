@@ -4,13 +4,14 @@ import { Link } from 'react-router-dom';
 import { api, qs } from '../api/client';
 import { useIsAdmin } from '../auth';
 import { ReportFilters, useReportFilters } from '../components/ReportFilters';
-import { EmptyState, ErrorNotice, fmtDateTime, fmtNum, PageHeader, StatusPill } from '../components/ui';
+import { EmptyState, ErrorNotice, fmtDateTime, fmtNum, PageHeader, StatusPill, VISIT_TYPES, visitTypeLabel } from '../components/ui';
+import { SHOW_HEIGHT } from '../features';
 
 const PAGE = 100;
 
 export function VisitsPage() {
   const isAdmin = useIsAdmin();
-  const f = useReportFilters(['recorded_by', 'q']);
+  const f = useReportFilters(['recorded_by', 'q', 'visit_type']);
   const [q, setQ] = useState(f.get('q'));
   // Keep the search box in step with the URL (e.g. after "Reset filters" or following a link).
   useEffect(() => setQ(f.get('q')), [f.get('q')]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -55,6 +56,13 @@ export function VisitsPage() {
             <input type="search" placeholder="Part of a tree ID" value={q} onChange={(e) => setQ(e.target.value)} onBlur={() => q.trim() !== f.get('q') && f.set('q', q.trim())} />
           </label>
         </form>
+        <label className="field">
+          Visit type
+          <select value={f.get('visit_type')} onChange={(e) => f.set('visit_type', e.target.value)}>
+            <option value="">All types</option>
+            {VISIT_TYPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+          </select>
+        </label>
         {isAdmin && (
           <label className="field">
             Recorded by
@@ -73,13 +81,14 @@ export function VisitsPage() {
         <table>
           <thead>
             <tr>
-              <th>Date</th><th>Tree ID</th><th>Area</th><th>Species</th><th>Status</th><th className="num">Height</th><th>Recorded by</th><th className="num">Photos</th><th>Remarks</th>
+              <th>Date</th><th>Type</th><th>Tree ID</th><th>Area</th><th>Species</th><th>Status</th>{SHOW_HEIGHT && <th className="num">Height</th>}<th>Recorded by</th><th className="num">Photos</th><th>Remarks</th>
             </tr>
           </thead>
           <tbody>
             {visits.data?.items.map((v: any) => (
               <tr key={v.id} style={v.superseded ? { opacity: 0.6 } : undefined}>
                 <td className="nowrap" title={`Recorded ${fmtDateTime(v.recorded_at)} · synced ${fmtDateTime(v.synced_at)}`}>{fmtDateTime(v.observed_at)}</td>
+                <td className="nowrap">{visitTypeLabel(v.visit_type)}</td>
                 <td className="nowrap">
                   <Link className="mono" to={`/trees/${v.tree_id}`}>{v.physical_tree_id}</Link>
                   <div className="muted">{v.project} · {v.planting_year}</div>
@@ -95,10 +104,12 @@ export function VisitsPage() {
                   </div>
                   {v.is_amendment && v.amendment_reason && <div className="muted">{v.amendment_reason}</div>}
                 </td>
+                {SHOW_HEIGHT && (
                 <td className="num nowrap">
                   {v.height_cm == null ? <span className="muted">—</span> : `${fmtNum(v.height_cm)} cm`}
                   {v.height_cm != null && v.height_method && <div className="muted">{String(v.height_method).replace(/_/g, ' ').toLowerCase()}</div>}
                 </td>
+                )}
                 <td>{v.recorded_by}</td>
                 <td className="num">{v.photos || <span className="muted">0</span>}</td>
                 <td style={{ maxWidth: 280 }}>{v.remarks ?? ''}</td>

@@ -57,6 +57,7 @@ fun ObservationDto.toEntity() = ObservationEntity(
     id, treeId, statusId, observedAt, recordedAt, recordedBy, remarks, isInitial, amendsObservationId, amendmentReason, SyncState.SYNCED, null,
     customFieldsJson = customFields.toString(), heightCm = heightCm, heightMethod = heightMethod,
     heightMeasurementJson = heightMeasurement?.takeUnless { it is kotlinx.serialization.json.JsonNull }?.toString(), recordedByName = recordedByName,
+    visitType = visitType,
 )
 
 fun CustomFieldDto.toEntity() = CustomFieldEntity(

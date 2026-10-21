@@ -43,10 +43,12 @@ data class RegisterForm(
     val statusId: String? = null,
     val serial: String = "",
     val plantedOn: LocalDate? = LocalDate.now(),
-    val observedOn: LocalDate = LocalDate.now(),
     val notes: String = "",
     val remarks: String = "",
-    val confirmed: Boolean = false,
+    /** Administrators only, for replacements: a tree ID typed by hand. */
+    val customId: String = "",
+    val useCustomId: Boolean = false,
+    val visitType: String = "VISIT",
     val photos: List<CapturedPhoto> = emptyList(),
     val treeFields: Map<String, String> = emptyMap(),
     val observationFields: Map<String, String> = emptyMap(),
@@ -80,7 +82,7 @@ class RegisterViewModel @Inject constructor(
         .map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val subSectors = projectId.filterNotNull().flatMapLatest { ref.subSectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val species = ref.species().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val statuses = ref.statuses().map { l -> l.filter { it.active && !it.isTerminal } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val statuses = ref.statuses().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     private val linkedVendors = yearId.flatMapLatest { y -> if (y == null) flowOf(emptyList()) else ref.vendorsForYear(y) }
     /** Vendors planting in the chosen year, or every active vendor when none are linked. */
     val vendors = combine(linkedVendors, ref.vendors()) { linked, all -> linked.ifEmpty { all.filter { it.active } } }
@@ -111,7 +113,7 @@ class RegisterViewModel @Inject constructor(
 
     fun update(change: (RegisterForm) -> RegisterForm) {
         val before = form.value
-        form.update { change(it).let { n -> if (n.serial != before.serial || n.subSectorId != before.subSectorId || n.yearId != before.yearId || n.vendorId != before.vendorId) n.copy(confirmed = false) else n } }
+        form.update { change(it) }
         viewModelScope.launch { refresh() }
     }
 
@@ -146,7 +148,9 @@ class RegisterViewModel @Inject constructor(
     fun save(onSaved: (String) -> Unit) = viewModelScope.launch {
         val a = area() ?: return@launch
         val f = form.value
-        val ok = serialCheck.value as? SerialCheck.Ok ?: return@launch
+        val custom = f.useCustomId && replacesTreeId != null && isAdmin.value
+        val ok = serialCheck.value as? SerialCheck.Ok
+        if (!custom && ok == null) return@launch
         saving.value = true
         saveError.value = null
         try {
@@ -158,11 +162,13 @@ class RegisterViewModel @Inject constructor(
             val id = trees.register(
                 NewTree(
                     area = a, speciesId = f.speciesId ?: throw RegistrationException("Choose a species."),
-                    serialInput = f.serial, confirmedPhysicalId = ok.assembled.physicalId,
+                    serialInput = f.serial, confirmedPhysicalId = if (custom) f.customId.trim() else ok!!.assembled.physicalId,
                     statusId = f.statusId ?: throw RegistrationException("Choose a status."),
-                    observedAt = observedInstant(f.observedOn), plantedOn = f.plantedOn?.toString(),
+                    observedAt = Instant.now(), plantedOn = f.plantedOn?.toString(),
                     notes = f.notes.ifBlank { null }, remarks = f.remarks.ifBlank { null }, photos = f.photos,
                     replacesTreeId = replacesTreeId,
+                    customPhysicalId = f.customId.trim().takeIf { custom && it.isNotEmpty() },
+                    visitType = f.visitType,
                     treeFields = toFieldValues(treeFieldDefs.value, f.treeFields),
                     observationFields = toFieldValues(observationFieldDefs.value, f.observationFields),
                     height = f.height,
@@ -239,7 +245,22 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
 
             HorizontalDivider()
             Text("Tree ID", style = MaterialTheme.typography.titleMedium)
-            when (val p = prefix) {
+            // Administrators can give a replanted tree any ID (e.g. the tag the vendor attached).
+            if (isAdmin && vm.replacesTreeId != null) {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Switch(f.useCustomId, { v -> vm.update { it.copy(useCustomId = v) } })
+                    Spacer(Modifier.width(8.dp))
+                    Text("Set the new tree's ID by hand", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+            if (f.useCustomId && isAdmin && vm.replacesTreeId != null) OutlinedTextField(
+                value = f.customId,
+                onValueChange = { v -> vm.update { it.copy(customId = v.take(64)) } },
+                label = { Text("New tree ID") },
+                supportingText = { Text("Letters, digits and - _ / . — must not be used by another tree.") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            ) else when (val p = prefix) {
                 null -> Text("Choose the planting year and area to see the ID prefix.", style = MaterialTheme.typography.bodyMedium)
                 else -> p.fold(
                     onSuccess = { info ->
@@ -259,10 +280,7 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
                             is SerialCheck.Invalid -> Text(c.message, color = MaterialTheme.colorScheme.error)
                             is SerialCheck.NotAllocated -> Text(c.message, color = MaterialTheme.colorScheme.error)
                             is SerialCheck.LocalDuplicate -> Text("${c.physicalId} is already registered on this device. Check the label.", color = MaterialTheme.colorScheme.error)
-                            is SerialCheck.Ok -> Row {
-                                Checkbox(f.confirmed, { v -> vm.update { it.copy(confirmed = v) } })
-                                Text("I compared ${c.assembled.physicalId} with the physical label and it matches.", Modifier.padding(top = 12.dp))
-                            }
+                            is SerialCheck.Ok -> Text("Tree ID: ${c.assembled.physicalId}", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                             null -> {}
                         }
                         if (check is SerialCheck.Ok) {
@@ -275,9 +293,9 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
 
             HorizontalDivider()
             Picker("Species", species, species.find { it.id == f.speciesId }, { it.commonName?.let { c -> "$c (${it.scientificName})" } ?: it.scientificName }, { s -> vm.update { it.copy(speciesId = s.id) } })
-            Picker("Status", statuses, status, { it.name }, { s -> vm.update { it.copy(statusId = s.id) } })
+            StatusSelector(statuses, f.statusId, { id -> vm.update { it.copy(statusId = id) } })
+            VisitTypeSelector(f.visitType) { t -> vm.update { it.copy(visitType = t) } }
             DateField("Planted on", f.plantedOn, { d -> vm.update { it.copy(plantedOn = d) } })
-            DateField("Observed on", f.observedOn, { d -> vm.update { it.copy(observedOn = d ?: LocalDate.now()) } }, allowClear = false)
             OutlinedTextField(f.remarks, { v -> vm.update { it.copy(remarks = v) } }, label = { Text("Observation remarks") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(f.notes, { v -> vm.update { it.copy(notes = v) } }, label = { Text("Tree notes") }, modifier = Modifier.fillMaxWidth())
             Text("No GPS is recorded for the tree; its location is the sub-sector.", style = MaterialTheme.typography.bodySmall)
@@ -287,14 +305,14 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
             val observationFieldDefs by vm.observationFieldDefs.collectAsStateWithLifecycle()
             val showFieldErrors by vm.showFieldErrors.collectAsStateWithLifecycle()
             // Stick length is not remembered here; the default 1 m pole is offered.
-            HeightSection(f.height, { h -> vm.form.update { it.copy(height = h) } }, f.photos, 100.0, {})
+            if (SHOW_HEIGHT) HeightSection(f.height, { h -> vm.form.update { it.copy(height = h) } }, f.photos, 100.0, {})
             CustomFieldsForm(treeFieldDefs, f.treeFields, { k, v -> vm.form.update { it.copy(treeFields = it.treeFields + (k to v)) } }, showFieldErrors)
             CustomFieldsForm(observationFieldDefs, f.observationFields, { k, v -> vm.form.update { it.copy(observationFields = it.observationFields + (k to v)) } }, showFieldErrors)
 
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(
                 onClick = { vm.save(onDone) },
-                enabled = !saving && check is SerialCheck.Ok && f.confirmed && f.speciesId != null && f.statusId != null && !photoMissing,
+                enabled = !saving && (check is SerialCheck.Ok || (f.useCustomId && isAdmin && f.customId.isNotBlank())) && f.speciesId != null && f.statusId != null && !photoMissing,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(if (saving) "Saving…" else "Save on this device") }
         }

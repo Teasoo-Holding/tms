@@ -38,10 +38,8 @@ import javax.inject.Inject
 /** Per-tree input; everything else comes from the field session. */
 data class TreeEntry(
     val serial: String = "",
-    val confirmed: Boolean = false,
     val remarks: String = "",
     val notes: String = "",
-    val observedOn: LocalDate = LocalDate.now(),
     val photos: List<CapturedPhoto> = emptyList(),
     /** Custom field text for the tree and its first observation, keyed by field key. */
     val treeFields: Map<String, String> = emptyMap(),
@@ -63,7 +61,8 @@ class RapidRegisterViewModel @Inject constructor(
     val session = sessions.session.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val species = ref.species().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     // A newly registered tree is alive; dead/missing are recorded later as observations.
-    val statuses = ref.statuses().map { l -> l.filter { it.active && !it.isTerminal } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    // Any active status: trees found already dead during a first data collection are recorded as such.
+    val statuses = ref.statuses().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val entry = MutableStateFlow(TreeEntry())
     val prefix = MutableStateFlow<Result<PrefixInfo>?>(null)
@@ -94,7 +93,8 @@ class RapidRegisterViewModel @Inject constructor(
                 prefix.value = runCatching { trees.prefix(s.area()) }
                 refreshCheck()
                 suggestion.value = trees.suggestNextSerial(s.area(), auth.userId().orEmpty())
-                if (s.statusId == null) {
+                // A remembered status may since have been retired by an administrator; fall back to the default.
+                if (s.statusId == null || ref.status(s.statusId)?.active != true) {
                     ref.statuses().first().let { l -> l.firstOrNull { it.code == "ALIVE" && it.active } ?: l.firstOrNull { it.code == "PLANTED" && it.active } ?: l.firstOrNull { it.active && !it.isTerminal } }?.let { p -> sessions.update { it.copy(statusId = p.id) } }
                 }
             }
@@ -102,7 +102,7 @@ class RapidRegisterViewModel @Inject constructor(
     }
 
     fun setSerial(v: String) {
-        entry.update { it.copy(serial = v, confirmed = false) }
+        entry.update { it.copy(serial = v) }
         viewModelScope.launch { refreshCheck() }
     }
 
@@ -124,6 +124,7 @@ class RapidRegisterViewModel @Inject constructor(
     /** Remembered for the rest of the session. */
     fun setSpecies(id: String) = viewModelScope.launch { sessions.update { it.copy(speciesId = id) } }
     fun setStatus(id: String) = viewModelScope.launch { sessions.update { it.copy(statusId = id) } }
+    fun setVisitType(code: String) = viewModelScope.launch { sessions.update { it.copy(visitType = code) } }
     fun setPlantedOn(d: LocalDate?) = viewModelScope.launch { sessions.update { it.copy(plantedOn = d?.toString()) } }
     fun switchSubSector(id: String) = viewModelScope.launch { sessions.update { it.copy(subSectorId = id) } }
 
@@ -159,7 +160,9 @@ class RapidRegisterViewModel @Inject constructor(
                     serialInput = e.serial,
                     confirmedPhysicalId = ok.assembled.physicalId,
                     statusId = s.statusId ?: throw RegistrationException("Choose a status."),
-                    observedAt = observedInstant(e.observedOn),
+                    // Stamped when saved; not editable.
+                    observedAt = java.time.Instant.now(),
+                    visitType = s.visitType,
                     plantedOn = s.plantedOn,
                     notes = e.notes.ifBlank { null },
                     remarks = e.remarks.ifBlank { null },
@@ -177,7 +180,6 @@ class RapidRegisterViewModel @Inject constructor(
             lastSaved.value = ok.assembled.physicalId
             // Ready for the next tree: keep the session choices, clear what belongs to this tree.
             entry.value = TreeEntry(
-                observedOn = e.observedOn,
                 treeFields = e.treeFields.filterKeys { k -> treeFieldDefs.value.any { it.key == k && it.sticky } },
                 observationFields = e.observationFields.filterKeys { k -> observationFieldDefs.value.any { it.key == k && it.sticky } },
             )
@@ -280,10 +282,12 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
                                     Button(onClick = { onVisitTree(c.existingTreeId) }) { Text("Record a visit to this tree") }
                                 }
                             }
+                            // The ID is built from the session and the serial; no separate confirmation is needed.
                             is SerialCheck.Ok -> Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(e.confirmed, { v -> vm.update { it.copy(confirmed = v) } })
-                                Text("Matches the label: ", style = MaterialTheme.typography.bodyMedium)
-                                Text(c.assembled.physicalId, fontFamily = FontFamily.Monospace)
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Tree ID: ", style = MaterialTheme.typography.bodyMedium)
+                                Text(c.assembled.physicalId, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleSmall)
                             }
                             null -> {}
                         }
@@ -294,21 +298,18 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
 
             Picker("Species", species, species.find { it.id == s?.speciesId }, { it.commonName?.let { c -> "$c (${it.scientificName})" } ?: it.scientificName },
                 { vm.setSpecies(it.id) }, supportingText = "Remembered for the next tree")
-            Text("Status", style = MaterialTheme.typography.labelMedium)
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                statuses.forEach { st -> FilterChip(selected = st.id == s?.statusId, onClick = { vm.setStatus(st.id) }, label = { Text(st.name) }) }
-            }
+            StatusSelector(statuses, s?.statusId, vm::setStatus)
+            VisitTypeSelector(s?.visitType ?: "VISIT", vm::setVisitType)
             OutlinedTextField(e.remarks, { v -> vm.update { it.copy(remarks = v) } }, label = { Text("Remarks (optional)") }, modifier = Modifier.fillMaxWidth())
             PhotoRow(e.photos, onAdd = { camera = true }, onRemove = vm::removePhoto, required = photoMissing)
-            HeightSection(e.height, vm::setHeight, e.photos, referenceCm, vm::setReferenceCm)
+            if (SHOW_HEIGHT) HeightSection(e.height, vm::setHeight, e.photos, referenceCm, vm::setReferenceCm)
             CustomFieldsForm(treeFieldDefs, e.treeFields, vm::setTreeField, showFieldErrors)
             CustomFieldsForm(observationFieldDefs, e.observationFields, vm::setObservationField, showFieldErrors)
 
-            TextButton(onClick = { moreDetails = !moreDetails }) { Text(if (moreDetails) "Hide details" else "More details (dates, notes)") }
+            TextButton(onClick = { moreDetails = !moreDetails }) { Text(if (moreDetails) "Hide details" else "More details (planting date, notes)") }
             AnimatedVisibility(moreDetails) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     DateField("Planted on (remembered)", s?.plantedOn?.let(LocalDate::parse), vm::setPlantedOn)
-                    DateField("Observed on", e.observedOn, { d -> vm.update { it.copy(observedOn = d ?: LocalDate.now()) } }, allowClear = false)
                     OutlinedTextField(e.notes, { v -> vm.update { it.copy(notes = v) } }, label = { Text("Tree notes") }, modifier = Modifier.fillMaxWidth())
                 }
             }
@@ -316,7 +317,7 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(
                 onClick = { vm.save { scope.launch { scroll.animateScrollTo(0); runCatching { serialFocus.requestFocus() } } } },
-                enabled = !saving && check is SerialCheck.Ok && e.confirmed && s?.speciesId != null && s?.statusId != null && !photoMissing,
+                enabled = !saving && check is SerialCheck.Ok && s?.speciesId != null && s?.statusId != null && !photoMissing,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
             ) { Text(if (saving) "Saving…" else "Save and next tree") }
         }

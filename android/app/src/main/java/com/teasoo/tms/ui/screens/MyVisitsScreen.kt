@@ -83,9 +83,10 @@ fun MyVisitsScreen(onOpenTree: (String) -> Unit, onBack: () -> Unit, vm: MyVisit
                             StatusChip(r.statusCode, r.statusName)
                             Text(
                                 listOfNotNull(
-                                    when { r.isInitial -> "Registered"; r.isCorrection -> "Correction"; else -> "Visit" },
+                                    when { r.isInitial -> "Registered"; r.isCorrection -> "Correction"; else -> null },
+                                    com.teasoo.tms.data.local.VisitType.label(r.visitType),
                                     listOfNotNull(r.sectorCode, r.subSectorCode).joinToString("/").ifBlank { null },
-                                    r.heightCm?.let(::formatHeight),
+                                    r.heightCm?.takeIf { SHOW_HEIGHT }?.let(::formatHeight),
                                     "${r.photoCount} photo${if (r.photoCount == 1) "" else "s"}",
                                 ).joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall,

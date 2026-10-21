@@ -222,10 +222,14 @@ export class ReportsService {
    * Every visit (observation) in scope, newest first, for the visits table and its CSV export.
    * Tree filters apply to the tree; the date range applies to the visit date.
    */
-  async visitRows(user: AuthUser, f: ReportFilter & { recorded_by?: string; q?: string }, limit: number, offset: number) {
+  async visitRows(user: AuthUser, f: ReportFilter & { recorded_by?: string; q?: string; visit_type?: string }, limit: number, offset: number) {
     const { baseWhere, inRange, params } = await this.scope(user, f);
     const p = [...params];
     const extra: string[] = [inRange('o.observed_at')];
+    if (f.visit_type) {
+      p.push(f.visit_type);
+      extra.push(`o.visit_type = $${p.length}`);
+    }
     if (f.recorded_by) {
       p.push(f.recorded_by);
       extra.push(`o.recorded_by = $${p.length}`);
@@ -240,7 +244,7 @@ export class ReportsService {
         `SELECT o.id, o.observed_at, o.recorded_at, o.synced_at, o.tree_id, t.physical_tree_id, p.short_code AS project,
                 py.year_label AS planting_year, s.short_code AS sector, ss.short_code AS sub_sector,
                 COALESCE(sp.common_name, sp.scientific_name) AS species, st.code AS status_code, st.name AS status,
-                o.height_cm::float8 AS height_cm, o.height_method, o.remarks, o.custom_fields, u.full_name AS recorded_by,
+                o.height_cm::float8 AS height_cm, o.height_method, o.remarks, o.custom_fields, o.visit_type, u.full_name AS recorded_by,
                 o.is_initial, o.is_amendment, o.amendment_reason,
                 EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id) AS superseded,
                 (SELECT count(*) FROM tree_media m WHERE m.observation_id = o.id)::int AS photos

@@ -60,7 +60,15 @@ export const config = {
   },
   mediaMaxBytes: num('MEDIA_MAX_BYTES', 15 * 1024 * 1024),
   uploadUrlTtlSeconds: num('UPLOAD_URL_TTL_SECONDS', 600),
-  corsOrigins: (process.env.CORS_ORIGINS ?? 'http://localhost:5173').split(',').map((s) => s.trim()),
+  /**
+   * Browser origins allowed to call the API. Entries may use a * wildcard (e.g. https://*.vercel.app).
+   * Vercel deployments of the portal are always allowed: the API uses bearer tokens, not cookies,
+   * so another site cannot act for a signed-in user, and preview URLs change with every deploy.
+   */
+  corsOrigins: [...(process.env.CORS_ORIGINS ?? 'http://localhost:5173').split(','), 'https://*.vercel.app']
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((o) => (o.includes('*') ? new RegExp('^' + o.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[a-z0-9-]+') + '$', 'i') : o.replace(/\/$/, ''))),
   syncBatchMaxOperations: num('SYNC_BATCH_MAX_OPERATIONS', 200),
   changesPageSize: num('CHANGES_PAGE_SIZE', 500),
 };

@@ -14,6 +14,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -283,7 +285,13 @@ fun FormDialog(
         onDismissRequest = { if (!saving) onDismiss() },
         title = { Text(title) },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val focus = androidx.compose.ui.platform.LocalFocusManager.current
+            // Tapping outside a field closes the keyboard.
+            Column(
+                Modifier.verticalScroll(rememberScrollState())
+                    .pointerInput(Unit) { detectTapGestures(onTap = { focus.clearFocus() }) },
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 content()
                 error?.let {
                     Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.small) {

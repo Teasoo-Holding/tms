@@ -115,7 +115,7 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
 
             val heights = observations.filter { it.id !in superseded && it.heightCm != null }
                 .mapNotNull { o -> runCatching { java.time.Instant.parse(o.observedAt) }.getOrNull()?.let { it to o.heightCm!! } }
-            if (heights.isNotEmpty()) {
+            if (SHOW_HEIGHT && heights.isNotEmpty()) {
                 Text("Growth", style = MaterialTheme.typography.titleMedium)
                 ElevatedCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -143,14 +143,15 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
                             "Recorded by ${if (o.recordedBy == userId) "you" else o.recordedByName ?: "another user"}",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        o.heightCm?.let { cm ->
+                        Text(VisitType.label(o.visitType), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        if (SHOW_HEIGHT) o.heightCm?.let { cm ->
                             Text("Height ${formatHeight(cm)}" + if (o.heightMethod == "PHOTO_REFERENCE") " · measured on photo" else "", style = MaterialTheme.typography.bodyMedium)
                         }
                         displayFields(fieldDefs.filter { it.appliesTo == "OBSERVATION" }, o.customFieldsJson).forEach { (label, value) ->
                             Text("$label: $value", style = MaterialTheme.typography.bodyMedium)
                         }
                         o.remarks?.let { Text(it) }
-                        PhotoStrip(photos, vm::photo, HeightMeasurement.parse(o.heightMeasurementJson))
+                        PhotoStrip(photos, vm::photo, if (SHOW_HEIGHT) HeightMeasurement.parse(o.heightMeasurementJson) else null)
                         if (photos.any { it.state != MediaState.VERIFIED }) Text(photos.joinToString { photoState(it) }, style = MaterialTheme.typography.bodySmall)
                         SyncBadge(o.syncState)
                         o.syncMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }

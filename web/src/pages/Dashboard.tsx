@@ -5,8 +5,9 @@ import { ChartCard, Donut, GroupedColumns, HBarChart, Legend, LineChart, LineSer
 import { ReportFilters, useReportFilters } from '../components/ReportFilters';
 import { deadShare, ShareArea, ShareLegend, ShareMap } from '../components/ShareMap';
 import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime } from '../components/ui';
+import { SHOW_HEIGHT } from '../features';
 
-export const DATE_NOTE = 'Dates: tree counts cover trees registered in the period; visit charts (observations, growth, weekly activity) cover visits in the period.';
+export const DATE_NOTE = `Dates: tree counts cover trees registered in the period; visit charts (observations, ${SHOW_HEIGHT ? 'growth, ' : ''}weekly activity) cover visits in the period.`;
 
 export function DashboardPage() {
   const f = useReportFilters();
@@ -82,7 +83,7 @@ export function DashboardPage() {
     <div className="stack">
       <PageHeader
         title="Dashboard"
-        subtitle="Registered trees, their latest recorded status, growth and field activity across the projects you can see."
+        subtitle={`Registered trees, their latest recorded status${SHOW_HEIGHT ? ', growth' : ''} and field activity across the projects you can see.`}
         actions={
           <>
             <button onClick={() => api.download(`/reports/trees.csv${filter}`, 'trees.csv')}>Export CSV</button>
@@ -120,6 +121,7 @@ export function DashboardPage() {
             >
               <Donut data={s.by_status.map((r: any) => ({ label: r.name, value: r.count, color: colorOf(r.code) }))} />
             </ChartCard>
+            {SHOW_HEIGHT && (
             <ChartCard
               title="Average height over time"
               subtitle="Monthly mean of the latest height measurement per tree; the five most-measured species."
@@ -140,6 +142,7 @@ export function DashboardPage() {
             >
               <LineChart series={growthSeries} unit="cm" xFormat={fmtMonth} ariaLabel="Average tree height by month and species" />
             </ChartCard>
+            )}
             <ChartCard
               title="Weekly field activity"
               subtitle={`Trees registered and follow-up observations per week, ${hasRange ? 'in the selected period (up to 52 weeks)' : 'last 12 weeks'}.`}

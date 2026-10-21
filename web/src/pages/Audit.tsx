@@ -185,7 +185,40 @@ function Details({ l }: { l: any }) {
   );
 }
 
+// ------------------------------------------------------------------ entries
+function EntryList({ rows, open, onToggle }: { rows: any[]; open: string | null; onToggle: (key: string) => void }) {
+  return (
+    <ul className="audit-list">
+      {rows.map((l) => {
+        const key = String(l.id);
+        const meta = [l.project_name, l.actor_role && ROLE_LABEL[l.actor_role], friendlyAction(l.action)].filter(Boolean);
+        return (
+          <li key={key}>
+            <div className="audit-row">
+              <div>
+                <Sentence l={l} />
+                <div className="muted">{meta.join(' · ')}</div>
+              </div>
+              <span className="muted nowrap" title={fmtDateTime(l.created_at)}>{fmtWhen(l.created_at)}</span>
+              <button className="link" aria-expanded={open === key} onClick={() => onToggle(key)}>
+                {open === key ? 'Hide' : 'Details'}
+              </button>
+            </div>
+            {open === key && (
+              <div className="details">
+                <Details l={l} />
+              </div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 // ------------------------------------------------------------------ page
+const RECENT = 10;
+
 export function AuditPage() {
   const [params, setParams] = useSearchParams();
   const get = (k: string) => params.get(k) ?? '';
@@ -196,18 +229,29 @@ export function AuditPage() {
     setParams(next, { replace: true });
   };
   const [open, setOpen] = useState<string | null>(null);
-  const users = useQuery({ queryKey: ['users'], queryFn: () => api.get<any[]>('/users') });
-  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
+  const toggle = (key: string) => setOpen((o) => (o === key ? null : key));
   const filter = { actor_id: get('actor'), action: get('action'), project_id: get('project'), from: get('from'), to: get('to') };
+  const filtered = Object.values(filter).some(Boolean);
+  // The full log (filters and paging) opens from "See full log", or directly from a filtered link such as /audit?actor=<id>.
+  const full = filtered || get('full') === '1';
+  const users = useQuery({ queryKey: ['users'], queryFn: () => api.get<any[]>('/users') });
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects'), enabled: full });
+  const recent = useQuery({ queryKey: ['audit', 'recent'], queryFn: () => api.get<any[]>(`/audit-logs${qs({ limit: RECENT })}`), enabled: !full });
   const logs = useInfiniteQuery({
     queryKey: ['audit', filter],
     initialPageParam: undefined as string | number | undefined,
     queryFn: ({ pageParam }) => api.get<any[]>(`/audit-logs${qs({ ...filter, before_id: pageParam, limit: PAGE })}`),
     getNextPageParam: (last) => (last.length === PAGE ? last[last.length - 1].id : undefined),
+    enabled: full,
   });
-  const rows = logs.data?.pages.flat() ?? [];
-  const filtered = Object.values(filter).some(Boolean);
+  const rows = full ? logs.data?.pages.flat() ?? [] : recent.data ?? [];
   const actor = users.data?.find((u) => u.id === get('actor'));
+  const showFull = () => set('full', '1');
+  const showRecent = () => setParams(new URLSearchParams(), { replace: true });
+  const clearFilters = () => {
+    const next = new URLSearchParams({ full: '1' });
+    setParams(next, { replace: true });
+  };
 
   const exportCsv = () =>
     downloadCsv(
@@ -230,14 +274,47 @@ export function AuditPage() {
       ]),
     );
 
+  if (!full) {
+    return (
+      <div>
+        <PageHeader
+          title="Audit log"
+          subtitle="The latest activity: field work, setup changes and access. Entries cannot be edited or deleted."
+          actions={<button onClick={showFull}>See full log</button>}
+        />
+        <ErrorNotice error={recent.error} />
+        <div className={`card flush ${recent.isFetching && recent.data ? 'refetching' : ''}`}>
+          {rows.length > 0 && <EntryList rows={rows} open={open} onToggle={toggle} />}
+          {rows.length === 0 && !recent.isLoading && <EmptyState title="No entries yet" />}
+          {recent.isLoading && <div className="empty">Loading…</div>}
+        </div>
+        {rows.length > 0 && (
+          <div className="row" style={{ marginTop: 12 }}>
+            <span className="muted">Latest {rows.length} entries.</span>
+            <button className="link" onClick={showFull}>See full log, with date, person and activity filters</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
       <PageHeader
+        crumbs={<button className="link" onClick={showRecent}>← Recent activity</button>}
         title="Audit log"
         subtitle={actor ? <>Everything <strong>{actor.full_name}</strong> did in the system, newest first.</> : 'Who did what and when: field work, setup changes and access. Entries cannot be edited or deleted.'}
         actions={<button onClick={exportCsv} disabled={rows.length === 0}>Export CSV{rows.length ? ` (${rows.length})` : ''}</button>}
       />
       <div className="filters">
+        <label className="field" style={{ minWidth: 140 }}>
+          From
+          <input type="date" value={get('from')} max={get('to') || undefined} onChange={(e) => set('from', e.target.value)} />
+        </label>
+        <label className="field" style={{ minWidth: 140 }}>
+          To
+          <input type="date" value={get('to')} min={get('from') || undefined} onChange={(e) => set('to', e.target.value)} />
+        </label>
         <label className="field">
           Person
           <select value={get('actor')} onChange={(e) => set('actor', e.target.value)}>
@@ -258,59 +335,20 @@ export function AuditPage() {
             ))}
           </select>
         </label>
-        <label className="field">
-          Project
-          <select value={get('project')} onChange={(e) => set('project', e.target.value)}>
-            <option value="">All projects</option>
-            {projects.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
-        <label className="field" style={{ minWidth: 140 }}>
-          From
-          <input type="date" value={get('from')} max={get('to') || undefined} onChange={(e) => set('from', e.target.value)} />
-        </label>
-        <label className="field" style={{ minWidth: 140 }}>
-          To
-          <input type="date" value={get('to')} min={get('from') || undefined} onChange={(e) => set('to', e.target.value)} />
-        </label>
-        {filtered && <button type="button" className="link" style={{ marginBottom: 8 }} onClick={() => setParams(new URLSearchParams(), { replace: true })}>Clear filters</button>}
+        {get('project') && (
+          <label className="field">
+            Project
+            <select value={get('project')} onChange={(e) => set('project', e.target.value)}>
+              <option value="">All projects</option>
+              {projects.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </label>
+        )}
+        {filtered && <button type="button" className="link" style={{ marginBottom: 8 }} onClick={clearFilters}>Clear filters</button>}
       </div>
       <ErrorNotice error={logs.error} />
-      <div className={`card table-wrap tall ${logs.isFetching && !logs.isFetchingNextPage ? 'refetching' : ''}`}>
-        <table>
-          <thead>
-            <tr><th>Activity</th><th>When</th><th /></tr>
-          </thead>
-          <tbody>
-            {rows.map((l) => {
-              const key = String(l.id);
-              const meta = [l.project_name, l.actor_role && ROLE_LABEL[l.actor_role], friendlyAction(l.action)].filter(Boolean);
-              return (
-                <Fragment key={key}>
-                  <tr>
-                    <td>
-                      <Sentence l={l} />
-                      <div className="muted">{meta.join(' · ')}</div>
-                    </td>
-                    <td className="nowrap" title={fmtDateTime(l.created_at)}>{fmtWhen(l.created_at)}</td>
-                    <td className="nowrap">
-                      <button className="link" aria-expanded={open === key} onClick={() => setOpen(open === key ? null : key)}>
-                        {open === key ? 'Hide' : 'Details'}
-                      </button>
-                    </td>
-                  </tr>
-                  {open === key && (
-                    <tr>
-                      <td colSpan={3} className="details-cell">
-                        <Details l={l} />
-                      </td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className={`card flush ${logs.isFetching && !logs.isFetchingNextPage ? 'refetching' : ''}`}>
+        {rows.length > 0 && <EntryList rows={rows} open={open} onToggle={toggle} />}
         {rows.length === 0 && !logs.isLoading && (
           <EmptyState title={filtered ? 'No entries match these filters' : 'No entries yet'}>{filtered ? 'Try a wider date range or another activity type.' : undefined}</EmptyState>
         )}

@@ -204,6 +204,7 @@ data class ObservationDto(
     @SerialName("height_method") val heightMethod: String? = null,
     @SerialName("height_measurement") val heightMeasurement: JsonElement? = null,
     @SerialName("recorded_by_name") val recordedByName: String? = null,
+    @SerialName("visit_type") val visitType: String = "VISIT",
 )
 
 @Serializable

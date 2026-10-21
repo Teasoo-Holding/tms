@@ -44,7 +44,13 @@ class MigrationTest {
             assertEquals("{}", it.getString(2))
         }
         // Version 3: areas per planting year, vendors per year, per-vendor ID formats.
-        val v3 = helper.runMigrationsAndValidate("migration-test", 3, true)
+        helper.runMigrationsAndValidate("migration-test", 3, true).close()
+        // Version 4: visit type on observations (existing ones become ordinary visits).
+        val v3 = helper.runMigrationsAndValidate("migration-test", 4, true)
+        v3.query("SELECT visitType FROM observations WHERE id = 'o1'").use {
+            it.moveToFirst()
+            assertEquals("VISIT", it.getString(0))
+        }
         v3.query("SELECT syncState FROM trees WHERE id = 't1'").use {
             it.moveToFirst()
             assertEquals("PENDING", it.getString(0))

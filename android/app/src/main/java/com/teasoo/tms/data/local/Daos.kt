@@ -205,7 +205,7 @@ interface ObservationDao {
     /** This person's own visits (registrations included), newest first. */
     @Query(
         """SELECT o.id, o.treeId, t.physicalTreeId, o.observedAt, o.recordedAt, o.isInitial, o.amendsObservationId IS NOT NULL AS isCorrection,
-                  st.name AS statusName, st.code AS statusCode, o.heightCm, o.remarks, o.syncState, o.syncMessage,
+                  st.name AS statusName, st.code AS statusCode, o.heightCm, o.remarks, o.syncState, o.syncMessage, o.visitType,
                   s.shortCode AS sectorCode, ss.shortCode AS subSectorCode,
                   (SELECT count(*) FROM media m WHERE m.observationId = o.id) AS photoCount
              FROM observations o JOIN trees t ON t.id = o.treeId
@@ -236,6 +236,7 @@ data class MyVisitRow(
     val remarks: String?,
     val syncState: String,
     val syncMessage: String?,
+    val visitType: String,
     val sectorCode: String?,
     val subSectorCode: String?,
     val photoCount: Int,

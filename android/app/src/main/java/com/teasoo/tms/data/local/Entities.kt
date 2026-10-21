@@ -216,7 +216,21 @@ data class ObservationEntity(
     /** Reference length and marked points when measured on a photo. */
     val heightMeasurementJson: String? = null,
     val recordedByName: String? = null,
+    /** VISIT, FIRST_INSTANCE, PLANTING or MAINTENANCE. */
+    @ColumnInfo(defaultValue = "VISIT") val visitType: String = "VISIT",
 )
+
+/** Why a visit was made (the kind of data collection). */
+enum class VisitType(val code: String, val label: String) {
+    VISIT("VISIT", "Visit"),
+    FIRST_INSTANCE("FIRST_INSTANCE", "First data collection"),
+    PLANTING("PLANTING", "At planting"),
+    MAINTENANCE("MAINTENANCE", "Maintenance");
+
+    companion object {
+        fun label(code: String?) = entries.find { it.code == code }?.label ?: "Visit"
+    }
+}
 
 object MediaState {
     /** On device only, waiting for upload. */

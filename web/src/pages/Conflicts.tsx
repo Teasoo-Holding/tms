@@ -83,7 +83,7 @@ function ConflictReview({ id, onClose }: { id: string; onClose: () => void }) {
         {d.conflict_type === 'REVISION_MISMATCH' && (
           <section className="card">
             <h3>Incoming edit (based on revision {d.details.base_revision}; server is at {d.details.server_revision})</h3>
-            <pre className="mono" style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(d.details.changes, null, 2)}</pre>
+            <pre className="mono" style={{ margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(d.details.changes, null, 2)}</pre>
           </section>
         )}
         {d.status === 'OPEN' ? (

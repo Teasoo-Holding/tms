@@ -18,7 +18,9 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.teasoo.tms.data.session.SessionState
 import com.teasoo.tms.ui.admin.adminGraph
+import com.teasoo.tms.ui.components.KeyboardAware
 import com.teasoo.tms.ui.components.Notice
+import com.teasoo.tms.ui.components.PasswordField
 import com.teasoo.tms.ui.screens.*
 
 object Routes {
@@ -43,7 +45,7 @@ object Routes {
 }
 
 @Composable
-fun TmsApp(vm: AppViewModel = hiltViewModel()) {
+fun TmsApp(vm: AppViewModel = hiltViewModel()) = KeyboardAware {
     when (val s = vm.sessionState.collectAsStateWithLifecycle().value) {
         null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         is SessionState.SignedOut -> LoginScreen(vm, prefillEmail = "", reason = null)
@@ -101,9 +103,7 @@ private fun LoginScreen(vm: AppViewModel, prefillEmail: String, reason: String?)
             reason?.let { Notice("$it Records on this device are kept and will sync after you sign in.") }
             OutlinedTextField(email, { email = it }, label = { Text("Username, email or phone") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, autoCorrectEnabled = false), modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(password, { password = it }, label = { Text("Password") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth())
+            PasswordField(password, { password = it }, "Password")
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(onClick = { vm.login(email, password) }, enabled = !busy && email.isNotBlank() && password.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
                 Text(if (busy) "Signing in…" else "Sign in")

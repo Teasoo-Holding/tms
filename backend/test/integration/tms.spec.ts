@@ -474,7 +474,7 @@ describe('spec alignment: statuses, sign-in identifiers, filters, visits', () =>
     const mine = (await admin.get(`/reports/visits?recorded_by=${f.officerId}&q=007001`).expect(200)).body;
     expect(mine.items.every((v: any) => v.recorded_by && v.physical_tree_id.includes('007001'))).toBe(true);
     const csv = await admin.get(`/reports/visits.csv?project_id=${f.projectId}`).expect(200);
-    expect(csv.text.split('\n')[0]).toContain('observed_at,physical_tree_id');
+    expect(csv.text.split('\n')[0]).toContain('observed_at,visit_type,physical_tree_id');
   });
 });
 
@@ -565,5 +565,49 @@ describe('areas per planting year, vendors and their ID formats', () => {
     expect(await list(mgmtToken)).toContain(other);
     expect(await list(clientToken)).toEqual([]);
     expect(client.body.all_projects).toBe(false);
+  });
+});
+
+describe('visit types, hand-set replacement IDs and portal access', () => {
+  it('records the type of each visit, defaulting to an ordinary visit, and filters by it', async () => {
+    const payload = treePayload(f, '9101');
+    payload.initial_observation = { ...payload.initial_observation, visit_type: 'FIRST_INSTANCE' } as any;
+    expect((await sync(officer, [createOp(payload)])).body.results[0].status).toBe('ACCEPTED');
+    const visit = await sync(officer, [observationOp(payload.id, f.status.ALIVE)]);
+    expect(visit.body.results[0].entity.visit_type).toBe('VISIT');
+    const maint = await sync(officer, [observationOp(payload.id, f.status.ALIVE, { visit_type: 'MAINTENANCE' })]);
+    expect(maint.body.results[0].entity.visit_type).toBe('MAINTENANCE');
+    const bad = await sync(officer, [observationOp(payload.id, f.status.ALIVE, { visit_type: 'PICNIC' })]);
+    expect(bad.body.results[0].status).toBe('REJECTED');
+    const first = (await admin.get(`/reports/visits?visit_type=FIRST_INSTANCE&q=009101`).expect(200)).body;
+    expect(first.items.map((v: any) => v.visit_type)).toEqual(['FIRST_INSTANCE']);
+  });
+
+  it('lets only an administrator give a replanted tree a hand-set ID, and correct it later', async () => {
+    const original = treePayload(f, '9201');
+    await sync(officer, [createOp(original)]);
+    await sync(officer, [observationOp(original.id, f.status.DEAD)]);
+    const replacement = (by: string) => treePayload(f, '1', { replaces_tree_id: original.id, custom_physical_id: by, physical_tree_id: undefined });
+    const refused = await sync(officer, [createOp(replacement('REPL-0001'))]);
+    expect(refused.body.results[0].code).toBe('CUSTOM_ID_NOT_ALLOWED');
+    const ok = await sync(admin, [createOp(replacement('REPL-0001'))]);
+    expect(ok.body.results[0].status).toBe('ACCEPTED');
+    expect(ok.body.results[0].entity.physical_tree_id).toBe('REPL-0001');
+    expect(ok.body.results[0].entity.replaces_tree_id).toBe(original.id);
+    const noReplace = await sync(admin, [createOp(treePayload(f, '1', { custom_physical_id: 'X-1', physical_tree_id: undefined }))]);
+    expect(noReplace.body.results[0].code).toBe('CUSTOM_ID_NOT_ALLOWED');
+    await admin.post(`/trees/${ok.body.results[0].entity.id}/physical-id-corrections`, { serial_input: 'REPL-0002', reason: 'Typo on the tag' }).expect(200);
+    const tree = (await admin.get(`/trees/${ok.body.results[0].entity.id}`).expect(200)).body;
+    expect(tree.physical_tree_id).toBe('REPL-0002');
+  });
+
+  it('accepts the web portal from any Vercel address', async () => {
+    const res = await request(app.getHttpServer())
+      .options('/api/v1/auth/login')
+      .set('Origin', 'https://tms-portal-git-main-teasoo.vercel.app')
+      .set('Access-Control-Request-Method', 'POST');
+    expect(res.headers['access-control-allow-origin']).toBe('https://tms-portal-git-main-teasoo.vercel.app');
+    const other = await request(app.getHttpServer()).options('/api/v1/auth/login').set('Origin', 'https://evil.example.com').set('Access-Control-Request-Method', 'POST');
+    expect(other.headers['access-control-allow-origin']).toBeUndefined();
   });
 });

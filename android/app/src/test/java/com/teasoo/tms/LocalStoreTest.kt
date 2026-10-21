@@ -286,6 +286,30 @@ class LocalStoreTest {
     }
 
     @Test
+    fun visitTypeIsSavedAndSent() = runBlocking {
+        val id = trees.register(newTree("1101").copy(visitType = "FIRST_INSTANCE"), user)
+        assertEquals("FIRST_INSTANCE", db.observations().forTree(id).first().single().visitType)
+        val initial = TmsJson.parseToJsonElement(db.outbox().due(Long.MAX_VALUE, 10).single().payloadJson).jsonObject["initial_observation"]!!.jsonObject
+        assertEquals("FIRST_INSTANCE", initial["visit_type"]!!.jsonPrimitive.content)
+        trees.addObservation(id, "st-healthy", Instant.now(), null, listOf(photo()), user)
+        val op = db.outbox().due(Long.MAX_VALUE, 10).last()
+        assertEquals("VISIT", TmsJson.parseToJsonElement(op.payloadJson).jsonObject["visit_type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun aReplantedTreeCanCarryAHandSetId() = runBlocking {
+        val original = trees.register(newTree("1201"), user)
+        trees.addObservation(original, "st-dead", Instant.now(), null, listOf(photo()), user)
+        val replacement = newTree("1", replaces = original).copy(customPhysicalId = "REPL-0001", confirmedPhysicalId = "REPL-0001")
+        val id = trees.register(replacement, user)
+        assertEquals("REPL-0001", db.trees().get(id)!!.physicalTreeId)
+        val payload = TmsJson.parseToJsonElement(db.outbox().due(Long.MAX_VALUE, 10).last().payloadJson).jsonObject
+        assertEquals("REPL-0001", payload["custom_physical_id"]!!.jsonPrimitive.content)
+        // Not for ordinary registrations, and not twice.
+        assertTrue(runCatching { trees.register(newTree("1202").copy(customPhysicalId = "X-1", confirmedPhysicalId = "X-1"), user) }.exceptionOrNull() is RegistrationException)
+    }
+
+    @Test
     fun enforcesAllocatedSerialRanges() = runBlocking {
         db.reference().upsertAllocations(listOf(SerialAllocationEntity("a1", "p1", "PLANTING_YEAR=y2024|PROJECT=p1", user, 100, 199, true)))
         val info = trees.prefix(area)

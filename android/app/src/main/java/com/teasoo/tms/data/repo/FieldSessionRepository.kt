@@ -29,6 +29,8 @@ data class FieldSession(
     val plantedOn: String? = null,
     /** Last values of "remember during a session" custom fields, e.g. the nursery batch number. */
     val stickyValues: Map<String, String> = emptyMap(),
+    /** The kind of collection this outing is for; "VISIT" unless chosen otherwise. */
+    val visitType: String = "VISIT",
 ) {
     fun area() = AreaSelection(projectId, plantingYearId, sectorId, subSectorId, vendorId)
 }
