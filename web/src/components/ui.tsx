@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from 'react';
+import { InputHTMLAttributes, ReactNode, useEffect, useState } from 'react';
 import { ApiError } from '../api/client';
 
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
@@ -110,6 +110,32 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: [T, st
     </div>
   );
 }
+
+/** Password input with an accessible show/hide toggle. Accepts the usual input props (value, onChange, autoComplete…). */
+export function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const [shown, setShown] = useState(false);
+  return (
+    <span className="password-field">
+      <input {...props} type={shown ? 'text' : 'password'} autoCapitalize="none" spellCheck={false} />
+      <button type="button" className="password-toggle" aria-label={shown ? 'Hide password' : 'Show password'} aria-pressed={shown} title={shown ? 'Hide password' : 'Show password'} onClick={() => setShown((v) => !v)}>
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+          <circle cx="12" cy="12" r="3" />
+          {shown && <path d="M4 4l16 16" />}
+        </svg>
+      </button>
+    </span>
+  );
+}
+
+/** Why a visit was made (observation `visit_type`); VISIT is the default. */
+export const VISIT_TYPES: [string, string][] = [
+  ['VISIT', 'Visit'],
+  ['FIRST_INSTANCE', 'First data collection'],
+  ['PLANTING', 'At planting'],
+  ['MAINTENANCE', 'Maintenance'],
+];
+export const visitTypeLabel = (v?: string | null) => VISIT_TYPES.find(([k]) => k === (v || 'VISIT'))?.[1] ?? String(v);
 
 const STATUS_TONE: Record<string, string> = {
   ALIVE: 'good',

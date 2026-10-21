@@ -76,7 +76,6 @@ export function ProjectDetailPage() {
     ['fields', 'Custom fields'],
   ];
   if (isAdmin) tabs.push(['assignments', 'Officers & assignments'], ['serials', 'Serial ranges']);
-  const justCreated = !!(location.state as { created?: boolean } | null)?.created;
   const addYear = () => setAddingYear(true);
   return (
     <div className="stack" style={{ gap: 0 }}>
@@ -92,7 +91,6 @@ export function ProjectDetailPage() {
         actions={isAdmin && <button onClick={() => setEditing(true)}>Edit project</button>}
       />
       <YearBar years={years} selected={year} onSelect={setYear} onAdd={isAdmin ? addYear : undefined} />
-      {isAdmin && <SetupChecklist project={p} year={year} justCreated={justCreated} onTab={setTab} onAddYear={addYear} onEditProject={() => setEditing(true)} />}
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'areas' && <AreasTab project={p} year={year} onAddYear={addYear} />}
       {tab === 'vendors' && <VendorsTab project={p} year={year} onAddYear={addYear} onTab={setTab} />}
@@ -158,76 +156,6 @@ function YearForm({ projectId, onClose, onCreated }: { projectId: string; onClos
         </div>
       </form>
     </Modal>
-  );
-}
-
-// ------------------------------------------------------------------ setup checklist
-function SetupChecklist({ project, year, justCreated, onTab, onAddYear, onEditProject }: {
-  project: any;
-  year?: PlantingYear;
-  justCreated: boolean;
-  onTab: (t: Tab) => void;
-  onAddYear: () => void;
-  onEditProject: () => void;
-}) {
-  // Same query keys as the tabs, so these are shared with (and refreshed by) the tab views.
-  const areas = useQuery({ queryKey: ['areas', project.id], queryFn: () => api.get<any[]>(`/projects/${project.id}/areas`) });
-  const assignments = useQuery({ queryKey: ['assignments', project.id], queryFn: () => api.get<any[]>(`/assignments${qs({ project_id: project.id })}`) });
-  const fields = useQuery({ queryKey: ['custom-fields', project.id], queryFn: () => api.get<CustomField[]>(`/projects/${project.id}/custom-fields`) });
-  const [dismissed, setDismissed] = useState(false);
-  if (!areas.data || !assignments.data || !fields.data) return null;
-  const hasActiveSub = (s: any) => s.active && s.sub_sectors?.some((ss: any) => ss.active);
-  const yearSurveyed = !!year && areas.data.some((s) => s.planting_year_id === year.id && hasActiveSub(s));
-  const legacySurveyed = areas.data.some((s) => s.planting_year_id == null && hasActiveSub(s));
-  const vendorsLinked = !!year && yearLinks(project, year.id).some((l) => l.active);
-  const hasFormat = !!year && (project.tree_id_schemes as Scheme[]).some((s) => s.active && (s.planting_year_id == null || s.planting_year_id === year.id));
-  const label = year ? ` for ${year.year_label}` : '';
-  const needYear = () => (year ? undefined : onAddYear);
-  const items: { done: boolean; title: string; detail: string; action: string; go: () => void; optional?: boolean }[] = [
-    { done: !!year, title: 'Planting year added', detail: 'Each year gets its own survey, vendors and ID format.', action: 'Add planting year', go: onAddYear },
-    {
-      done: yearSurveyed || legacySurveyed,
-      title: `Areas surveyed${label}`,
-      detail: yearSurveyed || !legacySurveyed ? 'At least one active sub-sector. Trees are located by sector and sub-sector.' : 'Only older areas not tied to a year exist; add this year’s survey when ready.',
-      action: 'Add sectors',
-      go: needYear() ?? (() => onTab('areas')),
-    },
-    { done: vendorsLinked, title: `Vendors linked${label}`, detail: 'The phone offers only these vendors for this year.', action: 'Link vendors', go: needYear() ?? (() => onTab('vendors')) },
-    { done: hasFormat, title: 'Tree ID format defined', detail: 'A project default, or a format for this year or its vendors.', action: 'Define the ID format', go: needYear() ?? (() => onTab('schemes')) },
-    { done: assignments.data.some((a) => a.user_role === 'FIELD_OFFICER'), title: 'Field officers assigned', detail: 'Unassigned officers cannot see the project.', action: 'Assign officers', go: () => onTab('assignments') },
-    { done: fields.data.length > 0, optional: true, title: 'Custom fields (optional)', detail: 'Extra data to record, e.g. nursery batch number.', action: 'Add custom fields', go: () => onTab('fields') },
-    { done: project.status === 'ACTIVE', title: 'Project status ACTIVE', detail: 'Draft projects are not offered on devices.', action: 'Set status', go: onEditProject },
-  ];
-  const required = items.filter((i) => !i.optional);
-  const doneCount = required.filter((i) => i.done).length;
-  const complete = doneCount === required.length;
-  if (dismissed || (complete && !justCreated)) return null;
-  return (
-    <section className="card" style={{ marginBottom: 16 }} aria-label="Project setup checklist">
-      <CardHeader
-        title={complete ? `Ready for field work${label}` : `Finish setting up${year ? ` planting year ${year.year_label}` : ' this project'}`}
-        description={`${doneCount} of ${required.length} required steps done. Devices pick up changes on their next sync.`}
-        actions={<button className="link" onClick={() => setDismissed(true)}>Hide</button>}
-      />
-      <div className="progress" style={{ marginBottom: 12 }} role="progressbar" aria-valuemin={0} aria-valuemax={required.length} aria-valuenow={doneCount}>
-        <span style={{ width: `${(doneCount / required.length) * 100}%` }} />
-      </div>
-      <ol className="checklist">
-        {items.map((i) => (
-          <li key={i.title} className={i.done ? 'done' : ''}>
-            <span className="tick" aria-hidden>{i.done ? '✓' : ''}</span>
-            <div>
-              <div className="title">
-                {i.title}
-                <span className="visually-hidden">{i.done ? ' (done)' : ' (to do)'}</span>
-              </div>
-              <div className="muted">{i.detail}</div>
-              <button className="link" style={{ marginTop: 2 }} onClick={i.go}>{i.done ? 'Review' : i.action}</button>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </section>
   );
 }
 

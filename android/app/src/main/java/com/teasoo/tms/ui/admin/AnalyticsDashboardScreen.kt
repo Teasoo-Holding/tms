@@ -194,7 +194,7 @@ private fun DashboardBody(s: AnalyticsSummary) {
     }
 
     // Growth
-    ChartCard("Average height by species", "Monthly average of measured heights, for the most measured species.") {
+    if (SHOW_HEIGHT) ChartCard("Average height by species", "Monthly average of measured heights, for the most measured species.") {
         val bySpecies = s.growth.filter { it.avgHeightCm != null }.groupBy { it.speciesId }
         if (bySpecies.isEmpty()) EmptyChart("No height measurements yet. Heights recorded at visits appear here.")
         else {

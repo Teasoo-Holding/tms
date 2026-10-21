@@ -24,6 +24,7 @@ import com.teasoo.tms.data.session.SessionStore
 import com.teasoo.tms.ui.components.DateField
 import com.teasoo.tms.ui.components.Notice
 import com.teasoo.tms.ui.components.Picker
+import com.teasoo.tms.ui.components.VisitTypeSelector
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -158,6 +159,7 @@ class SessionSetupViewModel @Inject constructor(
     val subSectorId = MutableStateFlow<String?>(null)
     val vendorId = MutableStateFlow<String?>(null)
     val plantedOn = MutableStateFlow<LocalDate?>(LocalDate.now())
+    val visitType = MutableStateFlow("VISIT")
 
     val years = projectId.filterNotNull().flatMapLatest { ref.years(it) }
         // Officers work in open planting years; administrators may back-enter closed ones.
@@ -186,6 +188,7 @@ class SessionSetupViewModel @Inject constructor(
             sessions.current()?.let { s ->
                 projectId.value = s.projectId; yearId.value = s.plantingYearId; sectorId.value = s.sectorId
                 subSectorId.value = s.subSectorId; vendorId.value = s.vendorId; plantedOn.value = s.plantedOn?.let(LocalDate::parse)
+                visitType.value = s.visitType
             }
         }
     }
@@ -212,7 +215,7 @@ class SessionSetupViewModel @Inject constructor(
         sessions.start(
             FieldSession(
                 projectId = projectId.value!!, plantingYearId = yearId.value!!, sectorId = sectorId.value!!, subSectorId = subSectorId.value!!,
-                vendorId = vendorId.value, plantedOn = plantedOn.value?.toString(),
+                vendorId = vendorId.value, plantedOn = plantedOn.value?.toString(), visitType = visitType.value,
                 // Keep the running count and remembered choices when only the sub-sector or vendor changed.
                 startedAt = if (sameDay) previous!!.startedAt else java.time.Instant.now().toString(),
                 speciesId = previous?.speciesId.takeIf { sameDay }, statusId = previous?.statusId.takeIf { sameDay },
@@ -240,6 +243,7 @@ fun SessionSetupScreen(onStarted: () -> Unit, onBack: () -> Unit, vm: SessionSet
     val subSectorId by vm.subSectorId.collectAsStateWithLifecycle()
     val vendorId by vm.vendorId.collectAsStateWithLifecycle()
     val plantedOn by vm.plantedOn.collectAsStateWithLifecycle()
+    val visitType by vm.visitType.collectAsStateWithLifecycle()
 
     // Only areas this user is assigned to; administrators have no assignment rows and see everything.
     val mySectors = sectors.filter { s -> isAdmin || allowed(grants, s.projectId, s.id, null) }
@@ -268,6 +272,7 @@ fun SessionSetupScreen(onStarted: () -> Unit, onBack: () -> Unit, vm: SessionSet
                 supportingText = "From this year’s land survey")
             Picker("Starting sub-sector", mySubs, mySubs.find { it.id == subSectorId }, { "${it.shortCode} · ${it.name}" }, { vm.subSectorId.value = it.id }, enabled = sectorId != null)
             if (yearId != null && mySectors.isEmpty()) Notice("No surveyed areas for this planting year on this device yet. Sync, or ask an administrator to add this year's sectors.")
+            VisitTypeSelector(visitType) { vm.visitType.value = it }
             DateField("Planted on (default for new trees)", plantedOn, { vm.plantedOn.value = it })
             if (projects.isEmpty()) Notice("No projects on this device yet. Sync while connected, or ask an administrator to assign you.")
             Button(

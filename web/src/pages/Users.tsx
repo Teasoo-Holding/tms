@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth';
-import { ActivePill, clean, EmptyState, ErrorNotice, Field, fmtDateTime, fmtNum, isStale, Modal, PageHeader, relativeTime, Tabs, useForm } from '../components/ui';
+import { ActivePill, clean, EmptyState, ErrorNotice, Field, fmtDateTime, fmtNum, isStale, Modal, PageHeader, PasswordInput, relativeTime, Tabs, useForm } from '../components/ui';
 
 const ROLE_LABEL: Record<string, string> = { ADMIN: 'Administrator', FIELD_OFFICER: 'Field officer', EXECUTIVE: 'Executive' };
 
@@ -153,7 +153,7 @@ function UserForm({ user, onClose }: { user: any; onClose: () => void }) {
             <select {...f.bind('role')}>{Object.entries(ROLE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
           </Field>
           <Field label={isNew ? 'Initial password' : 'Reset password'} hint={isNew ? 'at least 10 characters' : 'leave blank to keep'}>
-            <input type="password" autoComplete="new-password" required={isNew} minLength={10} {...f.bind('password')} />
+            <PasswordInput autoComplete="new-password" required={isNew} minLength={10} {...f.bind('password')} />
           </Field>
         </div>
         {f.values.role === 'EXECUTIVE' && (
