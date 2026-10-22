@@ -246,7 +246,7 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(8.dp))
-                        Text("Saved ${lastSaved.orEmpty()} on this device · $treesCount this session. Next tree.", style = MaterialTheme.typography.bodyMedium)
+                        Text("Saved ${lastSaved.orEmpty()} · $treesCount today", style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -261,14 +261,14 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
                         OutlinedTextField(
                             value = e.serial,
                             onValueChange = { v -> vm.setSerial(v.filter(Char::isDigit).take(info.serialWidth)) },
-                            label = { Text("Serial number on the label") },
+                            label = { Text("Tree number") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                             singleLine = true,
                             isError = check != null && check !is SerialCheck.Ok,
                             modifier = Modifier.fillMaxWidth().focusRequester(serialFocus),
                         )
                         if (e.serial.isBlank() && suggestion != null) {
-                            AssistChip(onClick = { vm.setSerial(suggestion.toString()) }, label = { Text("Next in sequence: ${suggestion.toString().padStart(info.serialWidth, '0')}") })
+                            AssistChip(onClick = { vm.setSerial(suggestion.toString()) }, label = { Text("Next: ${suggestion.toString().padStart(info.serialWidth, '0')}") })
                         }
                         when (val c = check) {
                             is SerialCheck.Invalid -> Text(c.message, color = MaterialTheme.colorScheme.error)
@@ -297,7 +297,7 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
             }
 
             Picker("Species", species, species.find { it.id == s?.speciesId }, { it.commonName?.let { c -> "$c (${it.scientificName})" } ?: it.scientificName },
-                { vm.setSpecies(it.id) }, supportingText = "Remembered for the next tree")
+                { vm.setSpecies(it.id) })
             StatusSelector(statuses, s?.statusId, vm::setStatus)
             VisitTypeSelector(s?.visitType ?: "VISIT", vm::setVisitType)
             OutlinedTextField(e.remarks, { v -> vm.update { it.copy(remarks = v) } }, label = { Text("Remarks (optional)") }, modifier = Modifier.fillMaxWidth())

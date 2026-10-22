@@ -59,11 +59,17 @@ class ReferenceDataViewModel @Inject constructor(@ApplicationContext context: Co
 
     fun saveVendor(id: String?, r: VendorRequest, onDone: () -> Unit = {}) =
         save(if (id == null) "Vendor added" else "Vendor saved", onDone, ::refresh) { if (id == null) api.createVendor(r) else api.updateVendor(id, r.toPatchBody()) }
+
+    fun deleteSpecies(s: AdminSpeciesDto, onDone: () -> Unit) = save("${s.displayName()} deleted", onDone, ::refresh) { api.deleteSpecies(s.id) }
+    fun deleteStatus(s: AdminStatusDto, onDone: () -> Unit) = save("${s.name} deleted", onDone, ::refresh) { api.deleteStatus(s.id) }
+    fun deleteVendor(v: AdminVendorDto, onDone: () -> Unit) = save("${v.name} deleted", onDone, ::refresh) { api.deleteVendor(v.id) }
 }
+
+private fun AdminSpeciesDto.displayName() = commonName?.takeIf { it.isNotBlank() } ?: scientificName
 
 private enum class RefTab(val title: String) { SPECIES("Species"), STATUSES("Statuses"), VENDORS("Vendors") }
 
-/** Species, tree statuses and vendors: shared by every project. Entries are deactivated, never deleted. */
+/** Species, tree statuses and vendors, shared by every project. Long-press or swipe an entry for more actions. */
 @Composable
 fun ReferenceDataScreen(onBack: () -> Unit, vm: ReferenceDataViewModel = hiltViewModel()) {
     val species = collect(vm.species)
@@ -77,11 +83,11 @@ fun ReferenceDataScreen(onBack: () -> Unit, vm: ReferenceDataViewModel = hiltVie
     var tab by rememberSaveable { mutableStateOf(RefTab.SPECIES) }
     var editing by remember { mutableStateOf<Any?>(null) }
     var adding by remember { mutableStateOf(false) }
+    val actions = rememberItemActions()
     CollectMessages(vm, snackbar)
 
     AdminScaffold(
         title = "Reference data",
-        subtitle = "Shared by all projects",
         onBack = onBack,
         snackbar = snackbar,
         actions = { IconButton(onClick = { vm.refresh() }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh") } },
@@ -101,38 +107,62 @@ fun ReferenceDataScreen(onBack: () -> Unit, vm: ReferenceDataViewModel = hiltVie
                 when (tab) {
                     RefTab.SPECIES -> RefList(
                         species.orEmpty().sortedWith(compareBy({ !it.active }, { it.scientificName })), { it.id },
-                        empty = { EmptyState(Icons.Default.Eco, "No species yet", "Add the tree species planted in your projects.", "Add species", { vm.clearFormError(); adding = true }) },
+                        empty = { EmptyState(Icons.Default.Eco, "No species yet", actionLabel = "Add species", onAction = { vm.clearFormError(); adding = true }) },
                     ) { s ->
+                        val edit = { vm.clearFormError(); editing = s }
                         RefRow(
-                            title = s.commonName?.takeIf { it.isNotBlank() } ?: s.scientificName,
+                            title = s.displayName(),
                             subtitle = listOfNotNull(s.scientificName.takeIf { !s.commonName.isNullOrBlank() }, s.code).joinToString(" · "),
                             italicSubtitle = true, active = s.active,
-                            onToggle = { on -> vm.saveSpecies(s.id, SpeciesRequest(s.scientificName, s.commonName, s.code, on)) }, enabled = !saving,
-                            onClick = { vm.clearFormError(); editing = s },
+                            onClick = edit,
+                            onActions = {
+                                actions.open(
+                                    s.displayName(), onEdit = edit, active = s.active,
+                                    onSetActive = { on -> vm.saveSpecies(s.id, SpeciesRequest(s.scientificName, s.commonName, s.code, on)) },
+                                    delete = PendingDelete(s.displayName(), run = { done -> vm.deleteSpecies(s, done) },
+                                        deactivate = { done: () -> Unit -> vm.saveSpecies(s.id, SpeciesRequest(s.scientificName, s.commonName, s.code, false), done); Unit }.takeIf { s.active }),
+                                )
+                            },
                         )
                     }
                     RefTab.STATUSES -> RefList(
                         statuses.orEmpty().sortedWith(compareBy({ !it.active }, { it.sortOrder }, { it.name })), { it.id },
-                        empty = { EmptyState(Icons.Default.Category, "No statuses yet", "Statuses describe a tree’s condition at each visit, e.g. Healthy, Damaged, Dead.", "Add status", { vm.clearFormError(); adding = true }) },
+                        empty = { EmptyState(Icons.Default.Category, "No statuses yet", actionLabel = "Add status", onAction = { vm.clearFormError(); adding = true }) },
                     ) { s ->
+                        val edit = { vm.clearFormError(); editing = s }
                         RefRow(
                             title = s.name,
-                            subtitle = listOfNotNull(s.code, "ends the tree’s life".takeIf { s.isTerminal }, "replaceable".takeIf { s.allowsReplacement }, "photo required".takeIf { s.requiresPhoto }).joinToString(" · "),
+                            subtitle = listOfNotNull("Final".takeIf { s.isTerminal }, "Photo required".takeIf { s.requiresPhoto }).joinToString(" · "),
                             active = s.active, dot = { Box(Modifier.size(12.dp).background(StatusPalette.color(s.code), CircleShape)) },
-                            onToggle = { on -> vm.updateStatus(s.id, s.toPatch().copy(active = on)) }, enabled = !saving,
-                            onClick = { vm.clearFormError(); editing = s },
+                            onClick = edit,
+                            onActions = {
+                                actions.open(
+                                    s.name, onEdit = edit, active = s.active,
+                                    onSetActive = { on -> vm.updateStatus(s.id, s.toPatch().copy(active = on)) },
+                                    delete = PendingDelete(s.name, run = { done -> vm.deleteStatus(s, done) },
+                                        deactivate = { done: () -> Unit -> vm.updateStatus(s.id, s.toPatch().copy(active = false), done); Unit }.takeIf { s.active }),
+                                )
+                            },
                         )
                     }
                     RefTab.VENDORS -> RefList(
                         vendors.orEmpty().sortedWith(compareBy({ !it.active }, { it.name })), { it.id },
-                        empty = { EmptyState(Icons.Default.Storefront, "No vendors yet", "Vendors supply seedlings. Their code can be part of tree IDs.", "Add vendor", { vm.clearFormError(); adding = true }) },
+                        empty = { EmptyState(Icons.Default.Storefront, "No vendors yet", actionLabel = "Add vendor", onAction = { vm.clearFormError(); adding = true }) },
                     ) { v ->
+                        val edit = { vm.clearFormError(); editing = v }
                         RefRow(
                             title = v.name,
-                            subtitle = listOfNotNull(v.shortCode, v.contactName, v.contactPhone, v.location).filter { it.isNotBlank() }.joinToString(" · "),
+                            subtitle = listOfNotNull(v.shortCode, v.contactName).filter { it.isNotBlank() }.joinToString(" · "),
                             active = v.active,
-                            onToggle = { on -> vm.saveVendor(v.id, v.toRequest().copy(active = on)) }, enabled = !saving,
-                            onClick = { vm.clearFormError(); editing = v },
+                            onClick = edit,
+                            onActions = {
+                                actions.open(
+                                    v.name, onEdit = edit, active = v.active,
+                                    onSetActive = { on -> vm.saveVendor(v.id, v.toRequest().copy(active = on)) },
+                                    delete = PendingDelete(v.name, run = { done -> vm.deleteVendor(v, done) },
+                                        deactivate = { done: () -> Unit -> vm.saveVendor(v.id, v.toRequest().copy(active = false), done); Unit }.takeIf { v.active }),
+                                )
+                            },
                         )
                     }
                 }
@@ -140,6 +170,7 @@ fun ReferenceDataScreen(onBack: () -> Unit, vm: ReferenceDataViewModel = hiltVie
         }
     }
 
+    ItemActionsHost(actions, vm)
     val close = { adding = false; editing = null }
     when (val e = editing) {
         is AdminSpeciesDto -> SpeciesDialog(e, saving, formError, { vm.saveSpecies(e.id, it, close) }, close)
@@ -154,7 +185,7 @@ fun ReferenceDataScreen(onBack: () -> Unit, vm: ReferenceDataViewModel = hiltVie
 }
 
 private fun AdminStatusDto.toPatch() = StatusPatch(name, description, isTerminal, allowsReplacement, requiresPhoto, sortOrder, active)
-private fun AdminVendorDto.toRequest() = VendorRequest(name, shortCode, contactName, contactPhone, contactEmail, location, active)
+internal fun AdminVendorDto.toRequest() = VendorRequest(name, shortCode, contactName, contactPhone, contactEmail, location, active)
 
 @Composable
 private fun <T> RefList(items: List<T>, key: (T) -> Any, empty: @Composable () -> Unit, row: @Composable (T) -> Unit) {
@@ -169,23 +200,19 @@ private fun RefRow(
     title: String,
     subtitle: String,
     active: Boolean,
-    onToggle: (Boolean) -> Unit,
-    enabled: Boolean,
     onClick: () -> Unit,
+    onActions: () -> Unit,
     italicSubtitle: Boolean = false,
     dot: (@Composable () -> Unit)? = null,
 ) {
-    OutlinedCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(start = 16.dp, end = 8.dp).heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
+    ActionItem(onClick = onClick, onActions = onActions) {
+        Row(Modifier.padding(horizontal = 16.dp).heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
             dot?.let { it(); Spacer(Modifier.width(12.dp)) }
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(title, style = MaterialTheme.typography.titleSmall)
-                    if (!active) InactiveTag()
-                }
-                if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall, fontStyle = if (italicSubtitle) FontStyle.Italic else FontStyle.Normal)
+                ItemTitle(title, active)
+                if (subtitle.isNotBlank()) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontStyle = if (italicSubtitle) FontStyle.Italic else FontStyle.Normal, maxLines = 1)
             }
-            Switch(checked = active, onCheckedChange = onToggle, enabled = enabled)
         }
     }
 }
@@ -201,10 +228,10 @@ private fun SpeciesDialog(existing: AdminSpeciesDto?, saving: Boolean, error: St
         onConfirm = { onSave(SpeciesRequest(scientific.trim(), common.trim().ifBlank { null }, code.trim().ifBlank { null }, active)) },
         onDismiss = onDismiss,
     ) {
-        TextInput(scientific, { scientific = it }, "Scientific name", supporting = "e.g. Khaya senegalensis")
-        TextInput(common, { common = it }, "Common name (optional)", supporting = "e.g. African mahogany")
+        TextInput(scientific, { scientific = it }, "Scientific name")
+        TextInput(common, { common = it }, "Common name (optional)")
         TextInput(code, { code = it.take(32) }, "Code (optional)")
-        SwitchRow("Active", active, { active = it }, supporting = "Inactive species are hidden for new trees")
+        SwitchRow("Active", active, { active = it })
     }
 }
 
@@ -231,21 +258,21 @@ private fun StatusDialog(existing: AdminStatusDto?, saving: Boolean, error: Stri
     ) {
         if (existing == null) {
             TextInput(code, { raw -> code = raw.uppercase().filter { it in 'A'..'Z' || it == '_' }.take(32) }, "Code",
-                supporting = "Capital letters and underscores, e.g. NEEDS_WATER. Cannot change later.",
+                supporting = "e.g. NEEDS_WATER. Can’t change later.",
                 keyboardOptions = KeyboardOptions(capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.Characters, autoCorrectEnabled = false))
         } else BoldValue("Code", existing.code)
-        TextInput(name, { name = it }, "Name", supporting = "What officers see, e.g. Needs water")
+        TextInput(name, { name = it }, "Name")
         TextInput(description, { description = it }, "Description (optional)", singleLine = false)
-        SwitchRow("Ends the tree’s life", terminal, { terminal = it }, supporting = "Like Dead or Missing: counted as dead or missing on the dashboard")
-        SwitchRow("Allows a replacement", replacement, { replacement = it }, supporting = "Officers may plant a replacement tree")
-        SwitchRow("Photo required", photo, { photo = it }, supporting = "Officers must take a photo when recording it")
+        SwitchRow("Final (dead or missing)", terminal, { terminal = it })
+        SwitchRow("Allows a replacement", replacement, { replacement = it })
+        SwitchRow("Photo required", photo, { photo = it })
         TextInput(order, { order = it.filter { c -> c.isDigit() || c == '-' }.take(6) }, "Sort order", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
         SwitchRow("Active", active, { active = it })
     }
 }
 
 @Composable
-private fun VendorDialog(existing: AdminVendorDto?, saving: Boolean, error: String?, onSave: (VendorRequest) -> Unit, onDismiss: () -> Unit) {
+internal fun VendorDialog(existing: AdminVendorDto?, saving: Boolean, error: String?, onSave: (VendorRequest) -> Unit, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf(existing?.name.orEmpty()) }
     var code by remember { mutableStateOf(existing?.shortCode.orEmpty()) }
     var contact by remember { mutableStateOf(existing?.contactName.orEmpty()) }
@@ -264,7 +291,7 @@ private fun VendorDialog(existing: AdminVendorDto?, saving: Boolean, error: Stri
     ) {
         TextInput(name, { name = it }, "Name")
         CodeInput(code, { code = it }, label = "Short code (optional)",
-            supporting = if (existing?.shortCode != null && code != existing.shortCode) "Registered tree IDs keep the old code." else "Used when tree IDs include the vendor, e.g. V03")
+            supporting = if (existing?.shortCode != null && code != existing.shortCode) "Existing tree IDs keep the old code." else null)
         TextInput(contact, { contact = it }, "Contact name (optional)")
         TextInput(phone, { phone = it }, "Phone (optional)", keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
         TextInput(email, { email = it }, "Email (optional)", isError = !emailOk, supporting = if (!emailOk) "Enter a valid email" else null,

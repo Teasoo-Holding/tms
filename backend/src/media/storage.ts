@@ -1,4 +1,4 @@
-import { HeadObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectsCommand, HeadObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import * as fs from 'fs';
@@ -20,6 +20,10 @@ export interface ObjectStorage {
   createUploadUrl(key: string, mimeType: string, byteSize: number, sha256: string): Promise<{ url: string; headers: Record<string, string> }>;
   createDownloadUrl(key: string): Promise<string>;
   inspect(key: string): Promise<StoredObjectInfo>;
+  getObject(key: string): Promise<Buffer>;
+  putObject(key: string, body: Buffer, contentType: string): Promise<void>;
+  /** Best effort; missing objects are ignored. */
+  deleteObjects(keys: string[]): Promise<void>;
 }
 
 export const OBJECT_STORAGE = Symbol('OBJECT_STORAGE');
@@ -78,6 +82,25 @@ export class S3Storage implements ObjectStorage {
     const object = await this.client.send(new GetObjectCommand({ Bucket: config.s3.bucket, Key: key }));
     return { exists: true, ...(await hashStream(object.Body as Readable)) };
   }
+
+  async getObject(key: string) {
+    const object = await this.client.send(new GetObjectCommand({ Bucket: config.s3.bucket, Key: key }));
+    return Buffer.from(await (object.Body as any).transformToByteArray());
+  }
+
+  async putObject(key: string, body: Buffer, contentType: string) {
+    // Thumbnails never change: let browsers and phones cache them.
+    await this.client.send(
+      new PutObjectCommand({ Bucket: config.s3.bucket, Key: key, Body: body, ContentType: contentType, CacheControl: 'private, max-age=31536000, immutable' }),
+    );
+  }
+
+  async deleteObjects(keys: string[]) {
+    for (let i = 0; i < keys.length; i += 1000) {
+      const batch = keys.slice(i, i + 1000).map((Key) => ({ Key }));
+      await this.client.send(new DeleteObjectsCommand({ Bucket: config.s3.bucket, Delete: { Objects: batch, Quiet: true } }));
+    }
+  }
 }
 
 /** Development driver: files on local disk, signed with an HMAC token. Not for production. */
@@ -121,5 +144,19 @@ export class LocalStorage implements ObjectStorage {
     const file = this.filePath(key);
     if (!fs.existsSync(file)) return { exists: false };
     return { exists: true, ...(await hashStream(fs.createReadStream(file))) };
+  }
+
+  async getObject(key: string) {
+    return fs.promises.readFile(this.filePath(key));
+  }
+
+  async putObject(key: string, body: Buffer) {
+    const file = this.filePath(key);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    await fs.promises.writeFile(file, body);
+  }
+
+  async deleteObjects(keys: string[]) {
+    for (const key of keys) await fs.promises.rm(this.filePath(key), { force: true });
   }
 }

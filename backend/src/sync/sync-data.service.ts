@@ -110,6 +110,7 @@ export class SyncDataService {
         cursor: String(c[0].cursor),
         server_time: new Date().toISOString(),
         assignment_fingerprint: await this.assignmentFingerprint(tx, user.id),
+        data_generation: await this.dataGeneration(tx),
         ...data,
       };
     }, 'REPEATABLE READ', true);
@@ -142,18 +143,22 @@ export class SyncDataService {
     const grants = await this.access.grants(user);
     const projectIds = grants === 'ALL' ? null : [...new Set(grants.map((g) => g.projectId))];
     const { rows } = await this.db.query(
-      `SELECT seq, entity_type, entity_id FROM change_log
+      `SELECT seq, entity_type, entity_id, deleted FROM change_log
         WHERE seq > $1 AND (project_id IS NULL OR $2::uuid[] IS NULL OR project_id = ANY($2))
         ORDER BY seq LIMIT $3`,
       [cursor, projectIds, limit],
     );
     // Keep only the latest change per entity; the loader returns current state anyway.
-    const latest = new Map<string, { seq: number; type: string; id: string }>();
-    for (const r of rows) latest.set(`${r.entity_type}:${r.entity_id}`, { seq: Number(r.seq), type: r.entity_type, id: r.entity_id });
+    const latest = new Map<string, { seq: number; type: string; id: string; deleted: boolean }>();
+    for (const r of rows) latest.set(`${r.entity_type}:${r.entity_id}`, { seq: Number(r.seq), type: r.entity_type, id: r.entity_id, deleted: r.deleted });
     const byType = new Map<string, string[]>();
-    for (const v of latest.values()) byType.set(v.type, [...(byType.get(v.type) ?? []), v.id]);
-
     const changes: any[] = [];
+    for (const v of latest.values()) {
+      // Deleted rows travel as tombstones so phones remove them too.
+      if (v.deleted) changes.push({ seq: v.seq, entity_type: v.type, deleted: true, data: { id: v.id } });
+      else byType.set(v.type, [...(byType.get(v.type) ?? []), v.id]);
+    }
+
     for (const [type, ids] of byType) {
       for (const row of await this.load(this.db, type, ids)) {
         if (this.visible(user, grants, type, row)) changes.push({ seq: latest.get(`${type}:${row.id}`)!.seq, entity_type: type, data: row });
@@ -166,7 +171,14 @@ export class SyncDataService {
       next_cursor: String(nextCursor),
       has_more: rows.length === limit,
       assignment_fingerprint: await this.assignmentFingerprint(this.db, user.id),
+      data_generation: await this.dataGeneration(this.db),
       server_time: new Date().toISOString(),
     };
+  }
+
+  /** Changes when an administrator clears all data; phones then back up, reset and download afresh. */
+  async dataGeneration(q: Queryable): Promise<number> {
+    const { rows } = await q.query(`SELECT value FROM system_settings WHERE key = 'data_generation'`);
+    return Number(rows[0]?.value ?? 1);
   }
 }

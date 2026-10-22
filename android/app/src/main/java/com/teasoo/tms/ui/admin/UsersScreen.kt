@@ -44,7 +44,7 @@ class UsersViewModel @Inject constructor(@ApplicationContext context: Context, p
 
 private val ROLES = listOf("FIELD_OFFICER", "ADMIN", "EXECUTIVE")
 private const val ALL_PROJECTS_LABEL = "Teasoo management – sees all projects"
-private const val PASSWORD_HINT = "At least 10 characters. The person signs in with it and can be asked to change it."
+private const val PASSWORD_HINT = "At least 10 characters"
 
 private sealed interface UserAction {
     data object Create : UserAction
@@ -86,7 +86,7 @@ fun UsersScreen(onBack: () -> Unit, onViewActivity: (String) -> Unit, vm: UsersV
             LazyColumn(contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 item {
                     OutlinedTextField(
-                        query, { query = it }, placeholder = { Text("Search by name, username, phone or email") }, singleLine = true,
+                        query, { query = it }, placeholder = { Text("Search") }, singleLine = true,
                         leadingIcon = { Icon(Icons.Default.Search, null) }, modifier = Modifier.fillMaxWidth(),
                     )
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
@@ -95,7 +95,7 @@ fun UsersScreen(onBack: () -> Unit, onViewActivity: (String) -> Unit, vm: UsersV
                     }
                 }
                 if (users.orEmpty().isEmpty()) item {
-                    EmptyState(Icons.Default.PersonAdd, "No users yet", "Create accounts for field officers, administrators and executives.", "New user", { open(UserAction.Create) })
+                    EmptyState(Icons.Default.PersonAdd, "No users yet", actionLabel = "New user", onAction = { open(UserAction.Create) })
                 } else if (filtered.isEmpty()) item { Hint("No one matches the search.") }
                 items(filtered, key = { it.id }) { u ->
                     UserCard(
@@ -117,8 +117,7 @@ fun UsersScreen(onBack: () -> Unit, onViewActivity: (String) -> Unit, vm: UsersV
         is UserAction.Password -> PasswordDialog(a.user, saving, formError, onSave = { vm.update(a.user, UserPatch(password = it), "Password reset for ${a.user.fullName}", close) }, onDismiss = close)
         is UserAction.Toggle -> ConfirmDialog(
             if (a.user.active) "Deactivate ${a.user.fullName}?" else "Reactivate ${a.user.fullName}?",
-            if (a.user.active) "They are signed out on every device and cannot sign in. Records they made stay. Unsynced records on their phone are kept until someone signs in and syncs."
-            else "They can sign in again with their existing password.",
+            if (a.user.active) "They are signed out everywhere. Their records stay." else "They can sign in again.",
             if (a.user.active) "Deactivate" else "Reactivate", saving, formError, destructive = a.user.active,
             onConfirm = { vm.update(a.user, UserPatch(active = !a.user.active), if (a.user.active) "${a.user.fullName} deactivated" else "${a.user.fullName} reactivated", close) },
             onDismiss = close,
@@ -170,21 +169,7 @@ private fun UserCard(u: AdminUserDto, onEdit: () -> Unit, onPassword: () -> Unit
 }
 
 @Composable
-private fun PasswordInput(value: String, onChange: (String) -> Unit, label: String) {
-    var visible by remember { mutableStateOf(false) }
-    OutlinedTextField(
-        value, onChange, label = { Text(label) }, singleLine = true,
-        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-        trailingIcon = {
-            IconButton(onClick = { visible = !visible }) {
-                Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (visible) "Hide password" else "Show password")
-            }
-        },
-        supportingText = { Text(PASSWORD_HINT) },
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
+private fun PasswordInput(value: String, onChange: (String) -> Unit, label: String) = PasswordField(value, onChange, label, supporting = PASSWORD_HINT)
 
 @Composable
 private fun UserDialog(existing: AdminUserDto?, saving: Boolean, error: String?, onCreate: (UserCreateRequest) -> Unit, onUpdate: (UserPatch) -> Unit, onDismiss: () -> Unit) {
@@ -230,23 +215,15 @@ private fun UserDialog(existing: AdminUserDto?, saving: Boolean, error: String?,
         TextInput(phone, { phone = it }, "Phone number", isError = !phoneOk, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
         TextInput(email, { email = it }, "Email (optional)", isError = !emailOk,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false))
-        Hint(if (hasLogin) "They can sign in with any of username, phone or email." else "Give at least a username, phone or email to sign in with.")
+        if (!hasLogin) Hint("Add a username, phone or email to sign in with.")
         ChoiceChips("Role", ROLES, role, ::roleLabel, { role = it })
-        Hint(
-            when (role) {
-                "ADMIN" -> "Sets up projects and users, resolves conflicts, and can also work in the field."
-                "EXECUTIVE" -> "Read-only dashboard. Teasoo management sees every project; clients and sponsors see only the projects they are assigned to."
-                else -> "Registers and visits trees in the areas they are assigned to."
-            },
-        )
         if (role == "EXECUTIVE") {
             SwitchRow(
                 ALL_PROJECTS_LABEL, allProjects, { allProjects = it },
-                supporting = if (allProjects) "Sees the dashboard of every project, including new ones."
-                else "Off: a client or sponsor. Assign them to their projects under Projects › Officers.",
+                supporting = if (allProjects) null else "Client or sponsor: assign projects under Officers",
             )
         }
-        if (existing != null && role != existing.role) Hint("Changing the role signs them out on every device.")
+        if (existing != null && role != existing.role) Hint("They’ll be signed out everywhere.")
         if (existing == null) {
             PasswordInput(password, { password = it }, "Initial password")
             SwitchRow("Active", active, { active = it })
@@ -258,7 +235,7 @@ private fun UserDialog(existing: AdminUserDto?, saving: Boolean, error: String?,
 private fun PasswordDialog(user: AdminUserDto, saving: Boolean, error: String?, onSave: (String) -> Unit, onDismiss: () -> Unit) {
     var password by remember { mutableStateOf("") }
     FormDialog("Reset password", "Reset", password.isNotEmpty(), saving, error, onConfirm = { onSave(password) }, onDismiss = onDismiss) {
-        Text("Set a new password for ${user.fullName}. They are signed out on every device and must sign in again with it.")
+        Text("${user.fullName} will be signed out everywhere.")
         PasswordInput(password, { password = it }, "New password")
     }
 }

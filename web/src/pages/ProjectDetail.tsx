@@ -1,11 +1,12 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useMemo, useRef, useState } from 'react';
-import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError, qs } from '../api/client';
 import { useIsAdmin } from '../auth';
 import { AreaMap, MapArea } from '../components/AreaMap';
 import { areaHectares, AreaSketch, boundaryCorners, LonLat, orderCorners } from '../components/AreaSketch';
-import { ActivePill, CardHeader, clean, EmptyState, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, Tabs, useForm } from '../components/ui';
+import { ShareLinksModal } from '../components/ShareLinks';
+import { ActivePill, CardHeader, clean, EmptyState, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RowMenu, Tabs, useDelete, useForm } from '../components/ui';
 import {
   COMPONENTS,
   componentLabel,
@@ -22,6 +23,7 @@ import {
   TEXT_VALUE,
 } from '../idscheme';
 import { ProjectForm } from './Projects';
+import { ReferenceForm } from './Reference';
 
 type Tab = 'areas' | 'vendors' | 'schemes' | 'years' | 'fields' | 'assignments' | 'serials';
 const TABS: Tab[] = ['areas', 'vendors', 'schemes', 'years', 'fields', 'assignments', 'serials'];
@@ -59,8 +61,11 @@ export function ProjectDetailPage() {
     setParams(next, { replace: true, state: location.state });
   };
   const setTab = (t: Tab) => setParam({ tab: t });
+  const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [addingYear, setAddingYear] = useState(false);
+  const del = useDelete();
   const project = useQuery({ queryKey: ['project', id], queryFn: () => api.get(`/projects/${id}`) });
   const p = project.data;
   if (project.error) return <ErrorNotice error={project.error} />;
@@ -71,25 +76,46 @@ export function ProjectDetailPage() {
   const tabs: [Tab, string][] = [
     ['areas', 'Areas'],
     ['vendors', 'Vendors'],
-    ['schemes', 'Tree ID format'],
-    ['years', 'Planting years'],
-    ['fields', 'Custom fields'],
+    ['schemes', 'ID format'],
+    ['years', 'Years'],
+    ['fields', 'Fields'],
   ];
-  if (isAdmin) tabs.push(['assignments', 'Officers & assignments'], ['serials', 'Serial ranges']);
+  if (isAdmin) tabs.push(['assignments', 'People'], ['serials', 'Serial ranges']);
   const addYear = () => setAddingYear(true);
   return (
     <div className="stack" style={{ gap: 0 }}>
       <PageHeader
         crumbs={<><Link to="/projects">Projects</Link> /</>}
         title={p.name}
-        subtitle={
-          <>
-            <span className="mono">{p.short_code}</span> · <span className="pill">{p.status.toLowerCase()}</span> · {p.location ?? 'no location'} · IDs unique{' '}
-            {p.physical_id_uniqueness === 'GLOBAL' ? 'across all projects' : 'within project'}
-          </>
+        actions={
+          isAdmin && (
+            <>
+              <button className="primary" onClick={() => setSharing(true)}>Share</button>
+              <RowMenu
+                label="Project actions"
+                items={[
+                  { label: 'Edit', onClick: () => setEditing(true) },
+                  {
+                    label: 'Delete',
+                    danger: true,
+                    onClick: () =>
+                      del.ask({
+                        what: 'project',
+                        name: p.name,
+                        path: `/projects/${p.id}`,
+                        note: 'Only a project without trees can be deleted. All its setup is removed.',
+                        onDeleted: () => navigate('/projects', { replace: true }),
+                      }),
+                  },
+                ]}
+              />
+            </>
+          )
         }
-        actions={isAdmin && <button onClick={() => setEditing(true)}>Edit project</button>}
-      />
+      >
+        <span className="pill mono">{p.short_code}</span>
+        <span className="pill">{p.status.toLowerCase()}</span>
+      </PageHeader>
       <YearBar years={years} selected={year} onSelect={setYear} onAdd={isAdmin ? addYear : undefined} />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'areas' && <AreasTab project={p} year={year} onAddYear={addYear} />}
@@ -100,6 +126,8 @@ export function ProjectDetailPage() {
       {tab === 'assignments' && <AssignmentsTab projectId={p.id} year={year} />}
       {tab === 'serials' && <SerialsTab project={p} year={year} />}
       {editing && <ProjectForm project={p} onClose={() => setEditing(false)} />}
+      {sharing && <ShareLinksModal projectId={p.id} projectName={p.name} onClose={() => setSharing(false)} />}
+      {del.dialog}
       {addingYear && <YearForm projectId={p.id} onClose={() => setAddingYear(false)} onCreated={(y) => setParam({ year: y.id })} />}
     </div>
   );
@@ -116,22 +144,19 @@ function YearBar({ years, selected, onSelect, onAdd }: { years: PlantingYear[]; 
           {!y.active && ' (closed)'}
         </button>
       ))}
-      {onAdd && <button type="button" className="chip add" onClick={onAdd}>+ Add planting year</button>}
-      <span className="muted">
-        {years.length === 0
-          ? onAdd
-            ? 'Start by adding the year being planted, e.g. 2026.'
-            : 'No planting years yet.'
-          : 'The selected year drives the Areas, Vendors and Tree ID format tabs.'}
-      </span>
+      {onAdd && <button type="button" className="chip add" onClick={onAdd}>+ Year</button>}
+      {years.length === 0 && !onAdd && <span className="muted">No planting years yet.</span>}
     </div>
   );
 }
 
-function YearForm({ projectId, onClose, onCreated }: { projectId: string; onClose: () => void; onCreated?: (year: PlantingYear) => void }) {
-  const f = useForm({ year_label: String(new Date().getFullYear()), start_date: '', end_date: '' });
+function YearForm({ projectId, year, onClose, onCreated }: { projectId: string; year?: PlantingYear; onClose: () => void; onCreated?: (year: PlantingYear) => void }) {
+  const f = useForm({ year_label: year?.year_label ?? String(new Date().getFullYear()), start_date: year?.start_date ?? '', end_date: year?.end_date ?? '' });
   const create = useMutation({
-    mutationFn: () => api.post<PlantingYear>(`/projects/${projectId}/planting-years`, clean({ ...f.values, year_label: f.values.year_label.trim() })),
+    mutationFn: () =>
+      year
+        ? api.patch<PlantingYear>(`/planting-years/${year.id}`, clean({ start_date: f.values.start_date, end_date: f.values.end_date }))
+        : api.post<PlantingYear>(`/projects/${projectId}/planting-years`, clean({ ...f.values, year_label: f.values.year_label.trim() })),
     onSuccess: (y) => {
       onCreated?.(y);
       onClose();
@@ -139,20 +164,17 @@ function YearForm({ projectId, onClose, onCreated }: { projectId: string; onClos
   });
   const apiError = create.error as ApiError | null;
   return (
-    <Modal title="Add planting year" onClose={onClose}>
+    <Modal title={year ? `Edit ${year.year_label}` : 'Add planting year'} onClose={onClose}>
       <form className="stack" onSubmit={(e) => (e.preventDefault(), create.mutate())}>
         {apiError?.code === 'YEAR_EXISTS' ? <div className="notice error" role="alert">This planting year already exists for the project.</div> : <ErrorNotice error={create.error} />}
-        <p className="muted" style={{ margin: 0 }}>
-          Each planting year has its own land survey (sectors and sub-sectors), its own vendors and, if needed, its own tree ID format. The label becomes part of tree IDs and cannot change later.
-        </p>
         <div className="form-grid">
-          <Field label="Label" hint="e.g. 2026 or WET26"><input required maxLength={16} {...f.bind('year_label')} /></Field>
+          <Field label="Label" hint={year ? 'fixed' : 'cannot change later'}><input required maxLength={16} disabled={!!year} {...f.bind('year_label')} /></Field>
           <Field label="Start date" hint="optional"><input type="date" {...f.bind('start_date')} /></Field>
           <Field label="End date" hint="optional"><input type="date" {...f.bind('end_date')} /></Field>
         </div>
         <div className="form-actions">
           <button type="button" onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={create.isPending}>Add planting year</button>
+          <button className="primary" disabled={create.isPending}>{year ? 'Save' : 'Add planting year'}</button>
         </div>
       </form>
     </Modal>
@@ -178,61 +200,62 @@ export interface CustomField {
 }
 export const FIELD_TYPE_LABEL: Record<CustomField['field_type'], string> = { TEXT: 'Text', NUMBER: 'Number', DATE: 'Date', SELECT: 'Choice list', BOOLEAN: 'Yes / no' };
 const APPLIES_TO: [CustomField['applies_to'], string, string][] = [
-  ['TREE', 'Recorded once per tree (at registration)', 'e.g. Nursery batch number, Seedling source, Spacing (m)'],
-  ['OBSERVATION', 'Recorded at every visit/observation', 'e.g. Stem diameter (mm), Weeded, Pest signs'],
+  ['TREE', 'Asked once, at registration', 'e.g. Nursery batch number'],
+  ['OBSERVATION', 'Asked at every visit', 'e.g. Stem diameter (mm)'],
 ];
 
 function CustomFieldsTab({ projectId }: { projectId: string }) {
   const isAdmin = useIsAdmin();
   const fields = useQuery({ queryKey: ['custom-fields', projectId], queryFn: () => api.get<CustomField[]>(`/projects/${projectId}/custom-fields`) });
   const [form, setForm] = useState<{ field?: CustomField; appliesTo: CustomField['applies_to'] } | null>(null);
+  const toggle = useMutation({ mutationFn: (f: CustomField) => api.patch(`/custom-fields/${f.id}`, { active: !f.active }) });
+  const del = useDelete();
   return (
     <div className="stack">
-      <p className="subtle" style={{ margin: 0 }}>
-        Extra questions the Android app asks for this project, beyond species, status and height. Fields can be deactivated but not deleted, so values already recorded are kept.
-      </p>
-      <ErrorNotice error={fields.error} />
-      {APPLIES_TO.map(([appliesTo, title, example]) => {
+      <ErrorNotice error={fields.error ?? toggle.error} />
+      {APPLIES_TO.map(([appliesTo, title]) => {
         const rows = (fields.data ?? []).filter((f) => f.applies_to === appliesTo);
         return (
           <section className="card flush" key={appliesTo}>
-            <CardHeader
-              title={title}
-              description={example}
-              actions={isAdmin && <button onClick={() => setForm({ appliesTo })}>Add field</button>}
-            />
+            <CardHeader title={title} actions={isAdmin && <button onClick={() => setForm({ appliesTo })}>+ Field</button>} />
             <div className="table-wrap" style={{ marginTop: 12 }}>
               <table>
                 <thead>
-                  <tr><th>Field</th><th>Type</th><th>Required</th><th>Remembered</th><th className="num">Order</th><th>State</th><th /></tr>
+                  <tr><th>Field</th><th>Type</th><th>State</th>{isAdmin && <th className="actions" />}</tr>
                 </thead>
                 <tbody>
                   {rows.map((f) => (
                     <tr key={f.id}>
                       <td>
-                        {f.label} <span className="muted mono" style={{ fontSize: 11 }}>{f.key}</span>
-                        {f.help_text && <div className="muted">{f.help_text}</div>}
+                        {f.label}
+                        {f.required && <span className="muted"> · required</span>}
                       </td>
                       <td>
                         {FIELD_TYPE_LABEL[f.field_type]}
                         {f.field_type === 'SELECT' && <div className="muted">{f.options.join(', ')}</div>}
                       </td>
-                      <td>{f.required ? 'Required' : 'Optional'}</td>
-                      <td>{f.sticky ? 'During session' : '—'}</td>
-                      <td className="num">{f.sort_order}</td>
                       <td><ActivePill active={f.active} /></td>
-                      <td>{isAdmin && <button className="link" onClick={() => setForm({ field: f, appliesTo })}>Edit</button>}</td>
+                      {isAdmin && (
+                        <td className="actions">
+                          <RowMenu
+                            items={[
+                              { label: 'Edit', onClick: () => setForm({ field: f, appliesTo }) },
+                              { label: f.active ? 'Deactivate' : 'Activate', onClick: () => toggle.mutate(f) },
+                              { label: 'Delete', danger: true, onClick: () => del.ask({ what: 'field', name: f.label, path: `/custom-fields/${f.id}` }) },
+                            ]}
+                          />
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
               </table>
-              {fields.data && rows.length === 0 && (
-                <EmptyState title="No fields yet">{isAdmin ? `Add one to collect extra data, ${example}.` : 'None defined for this project.'}</EmptyState>
-              )}
+              {fields.data && rows.length === 0 && <EmptyState title="No fields" />}
             </div>
           </section>
         );
       })}
+      {del.dialog}
       {form && <CustomFieldForm projectId={projectId} field={form.field} appliesTo={form.appliesTo} nextOrder={(fields.data ?? []).filter((f) => f.applies_to === form.appliesTo).reduce((m, f) => Math.max(m, f.sort_order), 0) + 10} onClose={() => setForm(null)} />}
     </div>
   );
@@ -304,7 +327,6 @@ function CustomFieldForm({ projectId, field, appliesTo, nextOrder, onClose }: { 
             </select>
           </Field>
         </div>
-        {field && <p className="muted" style={{ margin: '-6px 0 0' }}>Stored as <span className="mono">{field.key}</span>; the key and type cannot change, so existing values stay valid.</p>}
         {f.values.field_type === 'SELECT' && (
           <Field label="Options" hint="one per line">
             <textarea required placeholder={'Nursery A\nNursery B\nWildling'} {...f.bind('options')} />
@@ -317,14 +339,8 @@ function CustomFieldForm({ projectId, field, appliesTo, nextOrder, onClose }: { 
           <Field label="Order" hint="lower comes first"><input type="number" step={1} {...f.bind('sort_order')} /></Field>
         </div>
         <label className="check"><input type="checkbox" {...f.bindCheck('required')} /> Required</label>
-        <div>
-          <label className="check"><input type="checkbox" {...f.bindCheck('sticky')} /> Remember during a field session</label>
-          <p className="muted" style={{ margin: '2px 0 0 22px' }}>The phone pre-fills the last value entered, for values that repeat across many trees, e.g. a nursery batch number.</p>
-        </div>
-        <div>
-          <label className="check"><input type="checkbox" {...f.bindCheck('active')} /> Active</label>
-          <p className="muted" style={{ margin: '2px 0 0 22px' }}>Inactive fields are no longer asked on devices; values already recorded are kept.</p>
-        </div>
+        <label className="check"><input type="checkbox" {...f.bindCheck('sticky')} /> Pre-fill with the last value entered</label>
+        <label className="check"><input type="checkbox" {...f.bindCheck('active')} /> Active</label>
         <div className="form-actions">
           <button type="button" onClick={onClose}>Cancel</button>
           <button className="primary" disabled={save.isPending}>{field ? 'Save' : 'Add field'}</button>
@@ -369,6 +385,8 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
   const [form, setForm] = useState<{ kind: 'sector' | 'sub_sector'; area?: any; sector?: any } | null>(null);
   const [importing, setImporting] = useState(false);
   const [highlight, setHighlight] = useState<string>();
+  const toggle = useMutation({ mutationFn: ({ path, active }: { path: string; active: boolean }) => api.patch(path, { active }) });
+  const del = useDelete();
   const all = areas.data ?? [];
   const yearSectors = year ? all.filter((s) => s.planting_year_id === year.id) : [];
   const legacy = all.filter((s) => s.planting_year_id == null);
@@ -383,70 +401,75 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
     Object.assign(document.createElement('a'), { href: url, download: 'areas.geojson' }).click();
     URL.revokeObjectURL(url);
   };
-  const sectorCard = (s: any) => {
-    const corners = boundaryCorners(s.boundary).length;
+  const areaMenu = (kind: 'sector' | 'sub_sector', area: any, sector?: any) => {
+    const path = `/${kind === 'sector' ? 'sectors' : 'sub-sectors'}/${area.id}`;
+    const what = kind === 'sector' ? 'sector' : 'sub-sector';
     return (
-      <section className="card" key={s.id}>
-        <div className="page-header" style={{ marginBottom: 8 }}>
-          <h2 style={{ margin: 0 }}>
-            Sector <span className="mono">{s.short_code}</span> · {s.name}
-          </h2>
-          <ActivePill active={s.active} />
-          <span className="muted">{corners ? `${corners} corners${s.boundary ? ` · about ${areaHectares(orderCorners(boundaryCorners(s.boundary))).toFixed(1)} ha` : ''}` : `no outline · ref. ${s.reference_latitude}, ${s.reference_longitude}`}</span>
-          <span className="spacer" />
-          {isAdmin && <button onClick={() => setForm({ kind: 'sector', area: s })}>Edit</button>}
-          {isAdmin && <button onClick={() => setForm({ kind: 'sub_sector', sector: s })}>+ Add sub-sector</button>}
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr><th>Sub-sector</th><th>Outline</th><th>Reference point</th><th>State</th><th /></tr>
-            </thead>
-            <tbody>
-              {s.sub_sectors.map((ss: any) => {
-                const n = boundaryCorners(ss.boundary).length;
-                return (
-                  <tr key={ss.id} onMouseEnter={() => setHighlight(ss.id)} onMouseLeave={() => setHighlight(undefined)}>
-                    <td><span className="mono">{ss.short_code}</span> · {ss.name}</td>
-                    <td>{n ? `${n} corners · ${areaHectares(orderCorners(boundaryCorners(ss.boundary))).toFixed(2)} ha` : <span className="muted">—</span>}</td>
-                    <td className="mono">{ss.reference_latitude}, {ss.reference_longitude}</td>
-                    <td><ActivePill active={ss.active} /></td>
-                    <td>{isAdmin && <button className="link" onClick={() => setForm({ kind: 'sub_sector', area: ss, sector: s })}>Edit</button>}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {s.sub_sectors.length === 0 && (
-            <EmptyState title="No sub-sectors yet" action={isAdmin && <button onClick={() => setForm({ kind: 'sub_sector', sector: s })}>+ Add sub-sector</button>}>
-              Trees are located by sub-sector, so each sector needs at least one.
-            </EmptyState>
-          )}
-        </div>
-      </section>
+      <RowMenu
+        label={`${what} actions`}
+        items={[
+          { label: 'Edit', onClick: () => setForm(kind === 'sector' ? { kind, area } : { kind, area, sector }) },
+          { label: area.active ? 'Deactivate' : 'Activate', onClick: () => toggle.mutate({ path, active: !area.active }) },
+          {
+            label: 'Delete',
+            danger: true,
+            onClick: () => del.ask({ what, name: `${area.short_code} · ${area.name}`, path, note: kind === 'sector' ? 'Its sub-sectors are deleted too.' : undefined }),
+          },
+        ]}
+      />
     );
   };
+  const hectares = (boundary: any) => (boundaryCorners(boundary).length ? `${areaHectares(orderCorners(boundaryCorners(boundary))).toFixed(1)} ha` : null);
+  const sectorCard = (s: any) => (
+    <section className="card flush" key={s.id}>
+      <div className="card-header" style={{ padding: '12px 12px 0 18px', alignItems: 'center' }}>
+        <h2 style={{ minWidth: 0 }}>
+          <span className="mono">{s.short_code}</span> · {s.name}
+          {!s.active && <span className="pill" style={{ marginLeft: 8 }}>Inactive</span>}
+          {hectares(s.boundary) && <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>{hectares(s.boundary)}</span>}
+        </h2>
+        {isAdmin && (
+          <div className="row" style={{ flexWrap: 'nowrap' }}>
+            <button onClick={() => setForm({ kind: 'sub_sector', sector: s })}>+ Sub-sector</button>
+            {areaMenu('sector', s)}
+          </div>
+        )}
+      </div>
+      <div className="table-wrap" style={{ marginTop: 8 }}>
+        {s.sub_sectors.length > 0 && (
+          <table>
+            <tbody>
+              {s.sub_sectors.map((ss: any) => (
+                <tr key={ss.id} onMouseEnter={() => setHighlight(ss.id)} onMouseLeave={() => setHighlight(undefined)}>
+                  <td><span className="mono">{ss.short_code}</span> · {ss.name}</td>
+                  <td className="muted nowrap">{hectares(ss.boundary) ?? 'no outline'}</td>
+                  <td>{!ss.active && <ActivePill active={false} />}</td>
+                  {isAdmin && <td className="actions">{areaMenu('sub_sector', ss, s)}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {s.sub_sectors.length === 0 && <EmptyState title="No sub-sectors yet">Each sector needs at least one.</EmptyState>}
+      </div>
+    </section>
+  );
   return (
     <div className="stack">
-      <div className="notice">
-        Each planting year starts with a land survey: the year’s planting area is split into <strong>sectors</strong>, and sectors into <strong>sub-sectors</strong>, each recorded by its corner
-        points. Trees have no GPS position of their own; a tree is located by its sector and sub-sector.
-      </div>
-      <ErrorNotice error={areas.error} />
+      <ErrorNotice error={areas.error ?? toggle.error} />
       {!year ? (
-        <EmptyState title="Add a planting year first" action={isAdmin && <button className="primary" onClick={onAddYear}>+ Add planting year</button>}>
-          Areas are surveyed for a planting year.
-        </EmptyState>
+        <EmptyState title="Add a planting year first" action={isAdmin && <button className="primary" onClick={onAddYear}>+ Add planting year</button>} />
       ) : (
         <>
           <CardHeader
-            title={`Survey for ${year.year_label}`}
-            description={`${yearSectors.length} sector${yearSectors.length === 1 ? '' : 's'}, ${yearSectors.reduce((n, s) => n + s.sub_sectors.length, 0)} sub-sectors.`}
+            title={`${year.year_label}: ${yearSectors.length} sector${yearSectors.length === 1 ? '' : 's'}`}
             actions={
               <>
-                {isAdmin && <button className="primary" onClick={() => setForm({ kind: 'sector' })}>+ Add sector</button>}
-                {isAdmin && <button onClick={() => setImporting(true)}>Import GeoJSON</button>}
-                <button onClick={exportGeoJson}>Export GeoJSON</button>
+                {isAdmin && <button className="primary" onClick={() => setForm({ kind: 'sector' })}>+ Sector</button>}
+                <RowMenu
+                  label="GeoJSON"
+                  items={[isAdmin && { label: 'Import GeoJSON', onClick: () => setImporting(true) }, { label: 'Export GeoJSON', onClick: exportGeoJson }]}
+                />
               </>
             }
           />
@@ -463,7 +486,7 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
                   </div>
                 )}
               >
-                Walk to each corner of a sector with a GPS phone and enter the points here, or import the surveyor’s GeoJSON file.
+                Enter each sector’s corner points, or import a GeoJSON file.
               </EmptyState>
             </div>
           )}
@@ -471,13 +494,11 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
       )}
       {legacy.length > 0 && (
         <>
-          <CardHeader
-            title="Not tied to a year (older setup)"
-            description="Areas created before surveys were recorded per planting year. The phone still offers them in every year."
-          />
+          <CardHeader title="Older setup (all years)" />
           {legacy.map(sectorCard)}
         </>
       )}
+      {del.dialog}
       {form && <AreaForm projectId={projectId} year={year} {...form} onClose={() => setForm(null)} />}
       {importing && year && <ImportForm projectId={projectId} year={year} onClose={() => setImporting(false)} />}
     </div>
@@ -591,10 +612,7 @@ function AreaForm({ projectId, year, kind, area, sector, onClose }: { projectId:
         <div className="grid cols-2" style={{ alignItems: 'start' }}>
           <div className="stack" style={{ gap: 8 }}>
             <h3 style={{ margin: 0 }}>Corner points</h3>
-            <p className="muted" style={{ margin: 0 }}>
-              Walk to each corner of the surveyed area and record its GPS position. The order doesn’t matter. Decimal degrees, e.g. 7.401234 and 3.917345; pasting
-              “latitude, longitude” into one box fills both.
-            </p>
+            <p className="muted" style={{ margin: 0 }}>Decimal degrees, any order. Pasting “lat, lon” fills both boxes.</p>
             {existing.length > MAX_CORNERS && !touched && (
               <div className="notice">This outline has {existing.length} points (imported). Leave the corners blank to keep it, or enter new corners to replace it.</div>
             )}
@@ -707,114 +725,95 @@ function VendorsTab({ project, year, onAddYear, onTab }: { project: any; year?: 
   const codes = useExampleCodes(project.id, year);
   const [vendorId, setVendorId] = useState('');
   const [creating, setCreating] = useState(false);
+  const [editingVendor, setEditingVendor] = useState<any | null>(null);
+  const del = useDelete();
   const link = useMutation({ mutationFn: (vid: string) => api.post(`/planting-years/${year!.id}/vendors`, { vendor_id: vid }), onSuccess: () => setVendorId('') });
   const unlink = useMutation({ mutationFn: (id: string) => api.post(`/planting-year-vendors/${id}/unlink`) });
   if (!year) {
-    return (
-      <EmptyState title="Add a planting year first" action={isAdmin && <button className="primary" onClick={onAddYear}>+ Add planting year</button>}>
-        Vendors are linked to a planting year.
-      </EmptyState>
-    );
+    return <EmptyState title="Add a planting year first" action={isAdmin && <button className="primary" onClick={onAddYear}>+ Add planting year</button>} />;
   }
   const links = yearLinks(project, year.id);
   const active = links.filter((l) => l.active);
-  const previous = links.filter((l) => !l.active);
-  const available = (vendors.data ?? []).filter((v) => v.active !== false && !active.some((l) => l.vendor_id === v.id));
+  // Active links first, then earlier ones (kept so they can be linked again).
+  const ordered = [...active, ...links.filter((l) => !l.active && !active.some((a) => a.vendor_id === l.vendor_id))];
+  const available = (vendors.data ?? []).filter((v) => v.active !== false && !links.some((l) => l.vendor_id === v.id));
   const schemes: Scheme[] = project.tree_id_schemes;
   return (
     <div className="stack">
-      <div className="notice">
-        Vendors plant across this year’s whole area. The phone offers only these vendors for {year.year_label}. Each vendor can have its own tree ID format; otherwise the year’s or
-        the project’s format applies.
-      </div>
       <ErrorNotice error={vendors.error ?? link.error ?? unlink.error} />
       <section className="card flush">
-        <CardHeader title={`Vendors planting in ${year.year_label}`} description="The ID format each vendor’s officers use, with an example for the year’s first sector and sub-sector." />
+        <CardHeader title={`Vendors in ${year.year_label}`} />
         <div className="table-wrap" style={{ marginTop: 12 }}>
-          <table>
-            <thead><tr><th>Vendor</th><th>Code</th><th>ID format used</th><th>Example ID</th><th /></tr></thead>
-            <tbody>
-              {active.map((l) => {
-                const scheme = effectiveScheme(schemes, l.vendor_id, year.id);
-                const needsCode = scheme?.component_definition.some((c) => c.type === 'VENDOR_CODE') && !l.vendor_short_code;
-                return (
-                  <tr key={l.id}>
-                    <td>{l.vendor_name}</td>
-                    <td className="mono">{l.vendor_short_code ?? <span className="muted">—</span>}</td>
-                    <td>
-                      {scheme ? (
-                        <>
-                          {LEVEL_LABEL[levelOf(scheme)]} <span className="muted">· version {scheme.version}</span>
-                        </>
-                      ) : (
-                        <span className="pill warning">No format yet</span>
-                      )}
-                      {needsCode && (
-                        <div className="muted" style={{ color: 'var(--warning-ink)' }}>
-                          The format uses the vendor code but this vendor has none. Add one under <Link to="/reference">Species, statuses &amp; vendors</Link>.
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      {scheme
-                        ? exampleId(scheme, { PROJECT_CODE: project.short_code, PLANTING_YEAR: year.year_label, VENDOR_CODE: l.vendor_short_code, SECTOR_CODE: codes.sector, SUB_SECTOR_CODE: codes.subSector })
-                        : <button className="link" onClick={() => onTab('schemes')}>Define a format</button>}
-                    </td>
-                    <td>
+          {ordered.length > 0 && (
+            <table>
+              <thead><tr><th>Vendor</th><th>Example ID</th>{isAdmin && <th className="actions" />}</tr></thead>
+              <tbody>
+                {ordered.map((l) => {
+                  const scheme = effectiveScheme(schemes, l.vendor_id, year.id);
+                  const needsCode = scheme?.component_definition.some((c) => c.type === 'VENDOR_CODE') && !l.vendor_short_code;
+                  const vendor = vendors.data?.find((v) => v.id === l.vendor_id);
+                  return (
+                    <tr key={l.id} style={l.active ? undefined : { opacity: 0.65 }}>
+                      <td>
+                        {l.vendor_name}
+                        {l.vendor_short_code && <span className="muted mono"> · {l.vendor_short_code}</span>}
+                        {!l.active && <span className="pill" style={{ marginLeft: 8 }}>Unlinked</span>}
+                        {l.active && needsCode && <div className="muted" style={{ color: 'var(--warning-ink)' }}>Needs a short code for its ID format.</div>}
+                      </td>
+                      <td>
+                        {scheme ? (
+                          exampleId(scheme, { PROJECT_CODE: project.short_code, PLANTING_YEAR: year.year_label, VENDOR_CODE: l.vendor_short_code, SECTOR_CODE: codes.sector, SUB_SECTOR_CODE: codes.subSector })
+                        ) : (
+                          <button className="link" onClick={() => onTab('schemes')}>Define a format</button>
+                        )}
+                      </td>
                       {isAdmin && (
-                        <button
-                          className="link danger"
-                          onClick={() =>
-                            confirm(`Unlink ${l.vendor_name} from ${year.year_label}? The phone stops offering this vendor for new trees in this year. Trees already registered keep their vendor.`) &&
-                            unlink.mutate(l.id)
-                          }
-                        >
-                          Unlink
-                        </button>
+                        <td className="actions">
+                          <RowMenu
+                            items={[
+                              vendor && { label: 'Edit vendor', onClick: () => setEditingVendor(vendor) },
+                              l.active
+                                ? {
+                                    label: 'Unlink',
+                                    onClick: () => confirm(`Unlink ${l.vendor_name} from ${year.year_label}? Trees already registered keep their vendor.`) && unlink.mutate(l.id),
+                                  }
+                                : { label: 'Link again', onClick: () => link.mutate(l.vendor_id) },
+                              {
+                                label: 'Delete link',
+                                danger: true,
+                                onClick: () => del.ask({ what: 'vendor link', name: `${l.vendor_name} in ${year.year_label}`, path: `/planting-year-vendors/${l.id}` }),
+                              },
+                            ]}
+                          />
+                        </td>
                       )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {active.length === 0 && (
-            <EmptyState title={`No vendors linked to ${year.year_label} yet`}>
-              {isAdmin ? 'Link the vendors planting this year below, or create a new vendor.' : 'An administrator links the vendors planting this year.'}
-            </EmptyState>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
+          {ordered.length === 0 && <EmptyState title={`No vendors in ${year.year_label} yet`} />}
         </div>
       </section>
       {isAdmin && (
         <form className="card" onSubmit={(e) => (e.preventDefault(), vendorId && link.mutate(vendorId))}>
-          <h3>Link a vendor to {year.year_label}</h3>
           <div className="row" style={{ alignItems: 'flex-end' }}>
-            <Field label="Vendor">
-              <select required value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
-                <option value="">Choose…</option>
+            <Field label={`Add a vendor to ${year.year_label}`}>
+              <select required value={vendorId} onChange={(e) => setVendorId(e.target.value)} disabled={available.length === 0}>
+                <option value="">{available.length ? 'Choose…' : 'All vendors are linked'}</option>
                 {available.map((v) => (
                   <option key={v.id} value={v.id}>{v.name}{v.short_code ? ` (${v.short_code})` : ''}</option>
                 ))}
               </select>
             </Field>
-            <button className="primary" disabled={!vendorId || link.isPending}>Link vendor</button>
-            <span className="muted">or</span>
+            <button className="primary" disabled={!vendorId || link.isPending}>Link</button>
             <button type="button" onClick={() => setCreating(true)}>+ New vendor</button>
           </div>
-          {vendors.data && available.length === 0 && <p className="muted" style={{ marginBottom: 0 }}>Every vendor is already linked. Create a new vendor to add another.</p>}
-          {previous.length > 0 && (
-            <p className="muted" style={{ marginBottom: 0 }}>
-              Previously linked:{' '}
-              {previous.map((l, i) => (
-                <span key={l.id}>
-                  {i > 0 && ', '}
-                  {l.vendor_name} <button type="button" className="link" onClick={() => link.mutate(l.vendor_id)}>link again</button>
-                </span>
-              ))}
-            </p>
-          )}
         </form>
       )}
+      {del.dialog}
+      {editingVendor && <ReferenceForm kind="vendors" row={editingVendor} onClose={() => setEditingVendor(null)} />}
       {creating && <NewVendorForm onClose={() => setCreating(false)} onCreated={(v) => link.mutate(v.id)} />}
     </div>
   );
@@ -833,7 +832,6 @@ function NewVendorForm({ onClose, onCreated }: { onClose: () => void; onCreated:
     <Modal title="New vendor" onClose={onClose}>
       <form className="stack" onSubmit={(e) => (e.preventDefault(), save.mutate())}>
         <ErrorNotice error={save.error} />
-        <p className="muted" style={{ margin: 0 }}>The vendor is created and linked to this planting year. Contact details can be added later under Species, statuses &amp; vendors.</p>
         <div className="form-grid">
           <Field label="Name"><input required maxLength={200} placeholder="Kano Nurseries Ltd" {...f.bind('name')} /></Field>
           <Field label="Short code" hint="e.g. KNM; used in tree IDs">
@@ -862,6 +860,8 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
   const codes = useExampleCodes(project.id, year);
   const [builder, setBuilder] = useState<ScopeChoice | null>(null);
   const retire = useMutation({ mutationFn: (id: string) => api.post(`/tree-id-schemes/${id}/retire`) });
+  const del = useDelete();
+  const deleteVersion = (sc: Scheme) => del.ask({ what: 'ID format version', name: `Version ${sc.version}`, path: `/tree-id-schemes/${sc.id}`, note: 'Only a version no tree uses can be deleted.' });
   const schemes: Scheme[] = project.tree_id_schemes;
   const active = schemes.filter((s) => s.active);
   const links = yearLinks(project, year?.id).filter((l) => l.active);
@@ -896,15 +896,19 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
         <div className="muted">{emptyText}</div>
       )}
       {isAdmin && (
-        <div className="row">
+        <div className="row" style={{ flexWrap: 'nowrap' }}>
           <button onClick={() => setBuilder(scope)}>{scheme ? 'Change' : 'Create'}</button>
-          {scheme && levelOf(scheme) !== 'default' && (
-            <button
-              className="link danger"
-              onClick={() => confirm('Retire this format? The broader format applies again to new registrations. Trees already registered keep their IDs.') && retire.mutate(scheme.id)}
-            >
-              Retire
-            </button>
+          {scheme && (
+            <RowMenu
+              label="Format actions"
+              items={[
+                levelOf(scheme) !== 'default' && {
+                  label: 'Retire (deactivate)',
+                  onClick: () => confirm('Retire this format? The broader format applies again to new registrations.') && retire.mutate(scheme.id),
+                },
+                { label: 'Delete', danger: true, onClick: () => deleteVersion(scheme) },
+              ]}
+            />
           )}
         </div>
       )}
@@ -913,50 +917,45 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
 
   return (
     <div className="stack">
-      <div className="notice">
-        A tree ID joins <strong>fixed parts</strong>, filled in by the phone (project code, planting year, vendor code, fixed text), and <strong>changing parts</strong> that depend on
-        the tree (sector, sub-sector and the tree number the officer types). The phone uses the most specific format: vendor in this year → vendor → this planting year → project
-        default. Changes apply to new registrations only.
-      </div>
-      {!def && <div className="notice warning">No project default format yet. Field officers cannot register trees unless a format applies to their year and vendor.</div>}
+      {!def && <div className="notice warning">No project default format yet: officers cannot register trees without a format.</div>}
       <ErrorNotice error={retire.error} />
       <section className="card">
         <CardHeader
-          title={year ? `Formats that apply in ${year.year_label}` : 'Formats'}
-          description="Example IDs use this project’s codes, the year’s first sector and sub-sector, and tree number 15."
-          actions={isAdmin && <button className="primary" onClick={() => setBuilder({ vendorId: null, yearId: year?.id ?? null })}>+ New format</button>}
+          title={year ? `Formats in ${year.year_label}` : 'Formats'}
+          actions={isAdmin && <button className="primary" onClick={() => setBuilder({ vendorId: null, yearId: year?.id ?? null })}>+ Format</button>}
         />
-        {level('Project default', 'All years and vendors, unless a more specific format exists.', def, { vendorId: null, yearId: null }, 'None yet. Create one so every vendor and year has a format.')}
-        {year &&
-          level(`Planting year ${year.year_label}`, 'All vendors in this year.', yearFormat, { vendorId: null, yearId: year.id }, 'None — the project default applies.')}
+        {level('Project default', 'All years and vendors', def, { vendorId: null, yearId: null }, 'None yet.')}
+        {year && level(`Year ${year.year_label}`, 'All vendors this year', yearFormat, { vendorId: null, yearId: year.id }, 'Project default applies.')}
         {vendorFormats.map((s) =>
           level(
             s.planting_year_id ? `Vendor ${s.vendor_name} in ${s.year_label}` : `Vendor ${s.vendor_name}`,
-            s.planting_year_id ? 'This vendor, this year only.' : 'This vendor, every year.',
+            s.planting_year_id ? 'This year only' : 'Every year',
             s,
             { vendorId: s.vendor_id, yearId: s.planting_year_id },
             '',
           ),
         )}
-        {year && vendorFormats.length === 0 && (
-          <p className="muted" style={{ margin: '8px 0 0' }}>
-            No vendor-specific formats. {links.length ? 'Create one if a vendor tags its trees its own way.' : 'Link vendors in the Vendors tab first.'}
-          </p>
-        )}
       </section>
+      <details className="more">
+        <summary>How formats are chosen</summary>
+        <p className="muted">
+          The phone uses the most specific format: vendor in this year → vendor → planting year → project default. Fixed parts (project, year, vendor, text) are filled in by the
+          phone; the officer types only the tree number. Changes apply to new registrations only.
+        </p>
+      </details>
       {history.length > 0 && (
         <details className="card">
-          <summary><strong>Earlier versions ({history.length})</strong> <span className="muted">— trees registered with them keep their IDs</span></summary>
+          <summary><strong>Earlier versions ({history.length})</strong></summary>
           <div className="table-wrap" style={{ marginTop: 12 }}>
             <table>
-              <thead><tr><th>Version</th><th>Applied to</th><th>Example</th><th>Since</th></tr></thead>
+              <thead><tr><th>Version</th><th>Applied to</th><th>Example</th>{isAdmin && <th className="actions" />}</tr></thead>
               <tbody>
                 {history.map((s) => (
                   <tr key={s.id}>
-                    <td>{s.version}</td>
+                    <td title={`Since ${fmtDateTime(s.active_from)}`}>{s.version}</td>
                     <td>{LEVEL_LABEL[levelOf(s)]}{s.vendor_name ? ` · ${s.vendor_name}` : ''}{s.year_label ? ` · ${s.year_label}` : ''}</td>
                     <td>{exampleId(s, values(s.vendor_short_code, s.year_label))}</td>
-                    <td>{fmtDateTime(s.active_from)}</td>
+                    {isAdmin && <td className="actions"><RowMenu items={[{ label: 'Delete', danger: true, onClick: () => deleteVersion(s) }]} /></td>}
                   </tr>
                 ))}
               </tbody>
@@ -964,6 +963,7 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
           </div>
         </details>
       )}
+      {del.dialog}
       {builder && <SchemeBuilder project={project} year={year} initial={builder} codes={codes} onClose={() => setBuilder(null)} />}
     </div>
   );
@@ -1183,39 +1183,49 @@ function SchemeBuilder({ project, year, initial, codes, onClose }: { project: an
 function YearsTab({ project, selected, onSelect, onAdd }: { project: any; selected?: PlantingYear; onSelect: (id: string) => void; onAdd: () => void }) {
   const isAdmin = useIsAdmin();
   const toggle = useMutation({ mutationFn: (y: PlantingYear) => api.patch(`/planting-years/${y.id}`, { active: !y.active }) });
+  const [editing, setEditing] = useState<PlantingYear | null>(null);
+  const del = useDelete();
   const years: PlantingYear[] = project.planting_years;
   return (
     <div className="stack">
-      <p className="subtle" style={{ margin: 0 }}>
-        Officers pick the planting year explicitly; it is never inferred from the registration date. Closed years stay visible and can be used by administrators for back-entry.
-      </p>
       <ErrorNotice error={toggle.error} />
       <div className="card table-wrap">
-        <table>
-          <thead><tr><th>Year / cohort</th><th>Start</th><th>End</th><th className="num">Vendors</th><th>State</th><th /></tr></thead>
-          <tbody>
-            {years.map((y) => (
-              <tr key={y.id}>
-                <td className="mono">{y.year_label}{y.id === selected?.id && <span className="pill" style={{ marginLeft: 8 }}>Selected</span>}</td>
-                <td>{fmtDate(y.start_date)}</td>
-                <td>{fmtDate(y.end_date)}</td>
-                <td className="num">{yearLinks(project, y.id).filter((l) => l.active).length}</td>
-                <td><ActivePill active={y.active} /></td>
-                <td className="row" style={{ flexWrap: 'nowrap' }}>
-                  {y.id !== selected?.id && <button className="link" onClick={() => onSelect(y.id)}>Select</button>}
-                  {isAdmin && <button className="link" onClick={() => toggle.mutate(y)}>{y.active ? 'Close for new registrations' : 'Reopen'}</button>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {years.length === 0 && (
-          <EmptyState title="No planting years yet" action={isAdmin && <button className="primary" onClick={onAdd}>+ Add planting year</button>}>
-            Add the year being planted, e.g. 2026. Its survey, vendors and ID format are set up per year.
-          </EmptyState>
+        {years.length > 0 && (
+          <table>
+            <thead><tr><th>Year</th><th>Dates</th><th className="num">Vendors</th><th>State</th>{isAdmin && <th className="actions" />}</tr></thead>
+            <tbody>
+              {years.map((y) => (
+                <tr key={y.id} className="clickable" onClick={() => onSelect(y.id)} aria-selected={y.id === selected?.id}>
+                  <td className="mono">{y.year_label}{y.id === selected?.id && <span className="pill" style={{ marginLeft: 8 }}>Selected</span>}</td>
+                  <td className="nowrap">{y.start_date || y.end_date ? `${fmtDate(y.start_date)} – ${fmtDate(y.end_date)}` : <span className="muted">—</span>}</td>
+                  <td className="num">{yearLinks(project, y.id).filter((l) => l.active).length}</td>
+                  <td>{y.active ? <span className="pill good">Open</span> : <span className="pill">Closed</span>}</td>
+                  {isAdmin && (
+                    <td className="actions">
+                      <RowMenu
+                        items={[
+                          { label: 'Edit dates', onClick: () => setEditing(y) },
+                          { label: y.active ? 'Close for new trees' : 'Reopen', onClick: () => toggle.mutate(y) },
+                          {
+                            label: 'Delete',
+                            danger: true,
+                            onClick: () =>
+                              del.ask({ what: 'planting year', name: y.year_label, path: `/planting-years/${y.id}`, note: 'Its sectors, sub-sectors, vendor links and formats are deleted too.' }),
+                          },
+                        ]}
+                      />
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
+        {years.length === 0 && <EmptyState title="No planting years yet" action={isAdmin && <button className="primary" onClick={onAdd}>+ Add planting year</button>} />}
       </div>
-      {isAdmin && years.length > 0 && <div><button onClick={onAdd}>+ Add planting year</button></div>}
+      {isAdmin && years.length > 0 && <div><button onClick={onAdd}>+ Year</button></div>}
+      {del.dialog}
+      {editing && <YearForm projectId={project.id} year={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }
@@ -1233,27 +1243,27 @@ function AssignmentsTab({ projectId, year }: { projectId: string; year?: Plantin
   const subSectors = sectors.find((s) => s.id === f.values.sector_id)?.sub_sectors ?? [];
   return (
     <div className="stack">
-      <p className="subtle" style={{ margin: 0 }}>
-        Field officers see only the projects (or sectors) they are assigned to. Clients and sponsors (executives without “Teasoo management”) also see only the projects assigned here.
-      </p>
       <div className="card table-wrap">
-        <table>
-          <thead><tr><th>User</th><th>Role</th><th>Scope</th><th /></tr></thead>
-          <tbody>
-            {assignments.data?.map((a) => (
-              <tr key={a.id}>
-                <td>{a.user_name}</td>
-                <td>{a.user_role.replace('_', ' ').toLowerCase()}</td>
-                <td>{a.sub_sector_name ? `${a.sector_name} / ${a.sub_sector_name}` : a.sector_name ?? 'Whole project'}</td>
-                <td><button className="link danger" onClick={() => confirm(`Remove ${a.user_name}'s access to this scope?`) && revoke.mutate(a.id)}>Revoke</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {assignments.data?.length === 0 && <div className="empty">Nobody is assigned yet. Unassigned users cannot see this project.</div>}
+        {!!assignments.data?.length && (
+          <table>
+            <thead><tr><th>Person</th><th>Access</th><th className="actions" /></tr></thead>
+            <tbody>
+              {assignments.data.map((a) => (
+                <tr key={a.id}>
+                  <td>{a.user_name}<div className="muted">{a.user_role === 'EXECUTIVE' ? 'Client / sponsor' : a.user_role.replace('_', ' ').toLowerCase()}</div></td>
+                  <td>{a.sub_sector_name ? `${a.sector_name} / ${a.sub_sector_name}` : a.sector_name ?? 'Whole project'}</td>
+                  <td className="actions">
+                    <RowMenu items={[{ label: 'Remove access', danger: true, onClick: () => confirm(`Remove ${a.user_name}'s access?`) && revoke.mutate(a.id) }]} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {assignments.data?.length === 0 && <EmptyState title="Nobody assigned">Unassigned officers and clients cannot see this project.</EmptyState>}
       </div>
       <form className="card" onSubmit={(e) => (e.preventDefault(), create.mutate())}>
-        <h3>Assign a user</h3>
+        <h3>Give access</h3>
         <ErrorNotice error={create.error ?? revoke.error} />
         <div className="form-grid">
           <Field label="User">
@@ -1317,27 +1327,26 @@ function SerialsTab({ project, year }: { project: any; year?: PlantingYear }) {
   const revoke = useMutation({ mutationFn: (id: string) => api.post(`/serial-allocations/${id}/revoke`) });
   return (
     <div className="stack">
-      <div className="notice">
-        Disconnected devices cannot detect each other’s registrations. Pre-allocating serial ranges per officer is the only way to guarantee collision-free offline issuance.
-        When a scope has ranges, serials outside them are rejected at sync.
-      </div>
+      <div className="notice warning">When a scope has ranges, serials outside them are rejected at sync.</div>
       <div className="card table-wrap">
-        <table>
-          <thead><tr><th>Scope key</th><th>Officer</th><th className="num">From</th><th className="num">To</th><th>Notes</th><th /></tr></thead>
-          <tbody>
-            {allocations.data?.map((a) => (
-              <tr key={a.id}>
-                <td className="mono" style={{ fontSize: 11, maxWidth: 320, wordBreak: 'break-all' }}>{a.scope_key}</td>
-                <td>{a.user_name ?? 'Any officer'}</td>
-                <td className="num">{a.range_start}</td>
-                <td className="num">{a.range_end}</td>
-                <td>{a.notes}</td>
-                <td><button className="link danger" onClick={() => revoke.mutate(a.id)}>Revoke</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {allocations.data?.length === 0 && <div className="empty">No ranges allocated: any serial is accepted and duplicates are resolved as conflicts.</div>}
+        {!!allocations.data?.length && (
+          <table>
+            <thead><tr><th>Officer</th><th className="num">Range</th><th>Scope</th><th className="actions" /></tr></thead>
+            <tbody>
+              {allocations.data.map((a) => (
+                <tr key={a.id}>
+                  <td>{a.user_name ?? 'Any officer'}{a.notes && <div className="muted">{a.notes}</div>}</td>
+                  <td className="num nowrap">{a.range_start} – {a.range_end}</td>
+                  <td className="mono muted" style={{ fontSize: 11, maxWidth: 280, wordBreak: 'break-all' }}>{a.scope_key}</td>
+                  <td className="actions">
+                    <RowMenu items={[{ label: 'Revoke', danger: true, onClick: () => confirm(`Revoke range ${a.range_start}–${a.range_end}?`) && revoke.mutate(a.id) }]} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {allocations.data?.length === 0 && <EmptyState title="No ranges">Any serial is accepted; duplicates become conflicts.</EmptyState>}
       </div>
       <form className="card" onSubmit={(e) => (e.preventDefault(), create.mutate())}>
         <h3>Allocate a range{year ? ` in ${year.year_label}` : ''}</h3>

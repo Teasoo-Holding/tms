@@ -89,7 +89,6 @@ fun EditTreeScreen(app: AppViewModel, onDone: () -> Unit, vm: EditTreeViewModel 
     }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TreeIdText(physicalId, "")
-            Text("The tree ID, planting year and area cannot be edited here. Ask an administrator for an ID correction.", style = MaterialTheme.typography.bodySmall)
             Picker("Species", species, species.find { it.id == speciesId }, { it.commonName ?: it.scientificName }, { vm.speciesId.value = it.id })
             DateField("Planted on", plantedOn, { vm.plantedOn.value = it })
             OutlinedTextField(notes, { vm.notes.value = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth(), minLines = 3)

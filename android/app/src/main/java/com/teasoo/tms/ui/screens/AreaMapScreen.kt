@@ -159,7 +159,7 @@ private fun AreaShareList(sectors: List<SectorEntity>, subs: List<SubSectorEntit
     androidx.compose.foundation.lazy.LazyColumn(modifier, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Alive and dead by area", style = MaterialTheme.typography.titleSmall)
-            Text("From each tree’s latest visit, for trees on this device. Circle colour: green mostly alive → red mostly dead; grey not yet observed.",
+            Text("Green = mostly alive · red = mostly dead · grey = not visited",
                 style = MaterialTheme.typography.bodySmall)
         }
         sectors.forEach { sector ->

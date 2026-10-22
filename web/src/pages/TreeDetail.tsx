@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useIsAdmin } from '../auth';
 import { ChartEmpty, LineChart, SERIES } from '../charts/charts';
-import { CardHeader, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RecordStatePill, StatusPill, visitTypeLabel } from '../components/ui';
+import { CardHeader, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RecordStatePill, RowMenu, StatusPill, visitTypeLabel } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 import { effectiveScheme, previewId, Scheme } from '../idscheme';
 import type { CustomField } from './ProjectDetail';
@@ -37,18 +37,18 @@ export function TreeDetailPage() {
   const currentStatus = statuses.data?.find((s) => s.code === t.status_code);
   const alreadyReplaced = t.lineage.some((l: any) => l.generation === 1);
   const canReplace = isAdmin && t.record_state === 'ACTIVE' && !!currentStatus?.allows_replacement && !alreadyReplaced;
+  const hasLineage = t.lineage.length > 1 || t.physical_id_history.length > 0;
   return (
     <div className="stack">
       <PageHeader
         crumbs={<><Link to="/trees">Trees</Link> / {t.project_name}</>}
         title={t.physical_tree_id}
         mono
-        subtitle={`Registration details, custom data${SHOW_HEIGHT ? ', growth' : ''} and every observation recorded for this tree.`}
         actions={
           <>
-            <Link className="btn" to={`/visits?q=${encodeURIComponent(t.physical_tree_id)}`}>All visits for this tree</Link>
-            {isAdmin && <button onClick={() => setCorrecting(true)}>Correct serial</button>}
             {canReplace && <button className="primary" onClick={() => setReplacing(true)}>Plant replacement</button>}
+            <Link className="btn" to={`/visits?q=${encodeURIComponent(t.physical_tree_id)}`}>Visits</Link>
+            {isAdmin && <RowMenu label="Tree actions" items={[{ label: 'Correct serial', onClick: () => setCorrecting(true) }]} />}
           </>
         }
       >
@@ -56,40 +56,40 @@ export function TreeDetailPage() {
         <RecordStatePill state={t.record_state} />
       </PageHeader>
 
-      <div className="grid cols-2">
+      <div className={hasLineage ? 'grid cols-2' : 'stack'}>
         <section className="card">
-          <h2>Registration</h2>
           <dl className="kv">
-            <dt>Internal ID</dt><dd className="mono" style={{ fontSize: 12 }}>{t.id}</dd>
             <dt>Planting year</dt><dd>{t.year_label}</dd>
             <dt>Area</dt><dd>{t.sector_code} · {t.sector_name} / {t.sub_sector_code} · {t.sub_sector_name}</dd>
             <dt>Species</dt><dd>{t.species_name}{t.species_common_name && ` (${t.species_common_name})`}</dd>
-            <dt>Vendor</dt><dd>{t.vendor_name ?? '—'}</dd>
+            {t.vendor_name && (<><dt>Vendor</dt><dd>{t.vendor_name}</dd></>)}
             <dt>Planted on</dt><dd>{fmtDate(t.planted_on)}</dd>
-            <dt>ID format</dt>
-            <dd>
-              Version {t.id_scheme_version}:{' '}
-              {t.id_components_snapshot.components.map((c: any) => (
-                <span key={c.type} className="mono" title={c.type} style={{ marginRight: 6 }}>
-                  {c.value ?? '∅'}{c.matches_current_code === false && <span className="muted"> (code since changed)</span>}
-                </span>
-              ))}
-            </dd>
-            <dt>Registered</dt><dd>{fmtDateTime(t.created_at)} by {t.created_by_name}</dd>
-            <dt>Synced</dt><dd>{fmtDateTime(t.synced_at)}</dd>
-            <dt>Revision</dt><dd>{t.revision}</dd>
             {t.notes && (<><dt>Notes</dt><dd>{t.notes}</dd></>)}
           </dl>
-          <h3 style={{ marginTop: 16 }}>Custom fields</h3>
-          <CustomValues values={t.custom_fields} defs={treeDefs} empty="No custom fields recorded at registration." />
-          <p className="muted" style={{ marginBottom: 0 }}>Location is the sub-sector; individual trees carry no GPS position.</p>
+          <CustomValues values={t.custom_fields} defs={treeDefs} empty="" />
+          <details className="more" style={{ marginTop: 12 }}>
+            <summary>More details</summary>
+            <dl className="kv" style={{ marginTop: 8 }}>
+              <dt>Registered</dt><dd>{fmtDateTime(t.created_at)} by {t.created_by_name}</dd>
+              <dt>Synced</dt><dd>{fmtDateTime(t.synced_at)}</dd>
+              <dt>ID format</dt>
+              <dd>
+                Version {t.id_scheme_version}:{' '}
+                {t.id_components_snapshot.components.map((c: any) => (
+                  <span key={c.type} className="mono" title={c.type} style={{ marginRight: 6 }}>
+                    {c.value ?? '∅'}{c.matches_current_code === false && <span className="muted"> (code since changed)</span>}
+                  </span>
+                ))}
+              </dd>
+              <dt>Internal ID</dt><dd className="mono" style={{ fontSize: 12 }}>{t.id}</dd>
+              <dt>Revision</dt><dd>{t.revision}</dd>
+            </dl>
+          </details>
         </section>
 
-        <section className="card">
-          <h2>Replacement lineage</h2>
-          {t.lineage.length <= 1 ? (
-            <p className="muted">This tree has not been replaced and does not replace another tree.</p>
-          ) : (
+        {hasLineage && <section className="card">
+          {t.lineage.length > 1 && <h2>Replacements</h2>}
+          {t.lineage.length > 1 && (
             <ol className="timeline">
               {t.lineage.map((l: any) => (
                 <li key={l.id}>
@@ -104,7 +104,7 @@ export function TreeDetailPage() {
           )}
           {t.physical_id_history.length > 0 && (
             <>
-              <h3 style={{ marginTop: 16 }}>ID corrections</h3>
+              <h3 style={{ marginTop: t.lineage.length > 1 ? 16 : 0 }}>ID corrections</h3>
               <ul style={{ paddingLeft: 18, margin: 0 }}>
                 {t.physical_id_history.map((h: any) => (
                   <li key={h.id}>
@@ -115,7 +115,7 @@ export function TreeDetailPage() {
               </ul>
             </>
           )}
-        </section>
+        </section>}
       </div>
 
       {SHOW_HEIGHT && (
@@ -135,8 +135,8 @@ export function TreeDetailPage() {
       )}
 
       <section className="card">
-        <CardHeader title="Observation history" description="Newest first. Superseded entries were replaced by a correction and are kept for the record." />
-        {observations.length === 0 && <div className="empty">No observations recorded yet.</div>}
+        <CardHeader title="Visits" />
+        {observations.length === 0 && <div className="empty">No visits yet.</div>}
         <ol className="timeline">
           {observations.map((o: any) => {
             const photos = media.filter((m: any) => m.observation_id === o.id);
@@ -146,13 +146,12 @@ export function TreeDetailPage() {
                 <div className="row">
                   <StatusPill code={o.status_code} name={o.status_name} />
                   <strong>{fmtDateTime(o.observed_at)}</strong>
-                  <span className="pill" title="Visit type">{visitTypeLabel(o.visit_type)}</span>
-                  {o.is_initial && <span className="pill">Registration</span>}
+                  {(o.visit_type ?? 'VISIT') !== 'VISIT' && <span className="pill" title="Visit type">{visitTypeLabel(o.visit_type)}</span>}
                   {o.is_amendment && <span className="pill warning">Correction</span>}
                   {o.superseded && <span className="pill">Superseded by a correction</span>}
                 </div>
-                <div className="muted">
-                  Recorded by <strong className="subtle">{o.recorded_by_name ?? 'unknown'}</strong> on {fmtDateTime(o.recorded_at ?? o.observed_at)} · synced {fmtDateTime(o.synced_at)}
+                <div className="muted" title={`Recorded ${fmtDateTime(o.recorded_at ?? o.observed_at)} · synced ${fmtDateTime(o.synced_at)}`}>
+                  {o.recorded_by_name ?? 'Unknown'}
                 </div>
                 {(SHOW_HEIGHT || extras.length > 0) && (
                 <dl className="obs-meta">
@@ -227,9 +226,9 @@ function customEntries(values: Record<string, unknown> | null | undefined, defs:
 
 function CustomValues({ values, defs, empty }: { values: Record<string, unknown> | null | undefined; defs: CustomField[]; empty: string }) {
   const entries = customEntries(values, defs);
-  if (entries.length === 0) return <p className="muted" style={{ margin: 0 }}>{empty}</p>;
+  if (entries.length === 0) return empty ? <p className="muted" style={{ margin: 0 }}>{empty}</p> : null;
   return (
-    <dl className="kv">
+    <dl className="kv" style={{ marginTop: 6 }}>
       {entries.map(([label, value]) => (
         <div key={label} style={{ display: 'contents' }}>
           <dt>{label}</dt>
@@ -255,12 +254,19 @@ function useInView<T extends Element>() {
   return { ref, inView };
 }
 
-function useViewUrl(media: any, enabled = true) {
+/**
+ * Signed photo URL: `thumb` (~320 px) for galleries, `full` only in the lightbox. Signed URLs live a few
+ * minutes, so results are cached for 4 minutes and then fetched again.
+ */
+function useViewUrl(media: any, size: 'thumb' | 'full', enabled = true) {
   return useQuery({
-    queryKey: ['media-url', media.id],
-    queryFn: () => api.get<{ url: string; expires_in: number }>(`/media/${media.id}/view-url`),
+    queryKey: ['media-url', media.id, size],
+    queryFn: () => api.get<{ url: string; size?: 'thumb' | 'full' }>(`/media/${media.id}/view-url${size === 'thumb' ? '?size=thumb' : ''}`),
     enabled: enabled && media.upload_state === 'VERIFIED',
     staleTime: 240_000,
+    gcTime: 240_000,
+    // A signed URL must not be shown past its lifetime: no placeholder from another photo.
+    placeholderData: undefined,
   });
 }
 
@@ -277,7 +283,7 @@ function Thumbs({ media, onOpen }: { media: any[]; onOpen: (index: number) => vo
 
 function Thumb({ media, onOpen }: { media: any; onOpen: () => void }) {
   const { ref, inView } = useInView<HTMLButtonElement>();
-  const url = useViewUrl(media, inView);
+  const url = useViewUrl(media, 'thumb', inView);
   if (media.upload_state !== 'VERIFIED') {
     return (
       <span className="thumb placeholder" title={`Captured ${fmtDateTime(media.captured_at)}`}>
@@ -299,7 +305,9 @@ function Lightbox({ media, index: initial, observation, onClose }: { media: any[
   const [index, setIndex] = useState(initial);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const m = media[index];
-  const url = useViewUrl(m);
+  const url = useViewUrl(m, 'full');
+  // The thumbnail is usually cached already: show it while the full-size photo loads.
+  const thumb = useQueryClient().getQueryData<{ url: string }>(['media-url', m.id, 'thumb']);
   const go = useCallback((d: number) => (setSize(null), setIndex((i) => (i + d + media.length) % media.length)), [media.length]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -323,7 +331,13 @@ function Lightbox({ media, index: initial, observation, onClose }: { media: any[
       {m.upload_state !== 'VERIFIED' ? (
         <div className="lightbox-caption">This photo is still uploading.</div>
       ) : !url.data ? (
-        <div className="lightbox-caption">{url.isError ? 'The photo could not be loaded.' : 'Loading photo…'}</div>
+        thumb && !url.isError ? (
+          <div className="lightbox-frame">
+            <img src={thumb.url} alt="" className="lightbox-preview" />
+          </div>
+        ) : (
+          <div className="lightbox-caption">{url.isError ? 'The photo could not be loaded.' : 'Loading photo…'}</div>
+        )
       ) : (
         <div className="lightbox-frame">
           <img
@@ -392,7 +406,7 @@ function CorrectSerial({ tree, onClose }: { tree: any; onClose: () => void }) {
   return (
     <Modal title="Correct the serial number" onClose={onClose}>
       <form className="stack" onSubmit={(e) => (e.preventDefault(), save.mutate())}>
-        <p className="subtle" style={{ margin: 0 }}>Use this when the registered serial does not match the physical label. The previous ID is kept in the tree’s history and the change is audited.</p>
+        <p className="muted" style={{ margin: 0 }}>Use when the serial does not match the physical label. The old ID is kept in the history.</p>
         <ErrorNotice error={save.error} />
         <div className="id-preview">{prefix}<span className="serial">{serial.padStart(tree.serial_number.length, '0')}</span></div>
         <Field label="Serial"><input required inputMode="numeric" value={serial} onChange={(e) => setSerial(e.target.value)} /></Field>

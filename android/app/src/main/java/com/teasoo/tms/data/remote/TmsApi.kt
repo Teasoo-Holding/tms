@@ -20,7 +20,7 @@ interface TmsApi {
     @POST("api/v1/media/upload-sessions") suspend fun uploadSession(@Body body: UploadSessionRequest): UploadSessionResponse
     @POST("api/v1/media/{id}/complete") suspend fun completeUpload(@Path("id") mediaId: String): MediaVerificationDto
     /** Short-lived link to a verified photo (any device's), for viewing. */
-    @GET("api/v1/media/{id}/view-url") suspend fun mediaViewUrl(@Path("id") mediaId: String): ViewUrlDto
+    @GET("api/v1/media/{id}/view-url") suspend fun mediaViewUrl(@Path("id") mediaId: String, @Query("size") size: String? = null): ViewUrlDto
 
     // Oversight: online-only views for administrators (and the read-only summary for executives).
     @GET("api/v1/reports/summary") suspend fun summary(@Query("project_id") projectId: String?): ReportSummary

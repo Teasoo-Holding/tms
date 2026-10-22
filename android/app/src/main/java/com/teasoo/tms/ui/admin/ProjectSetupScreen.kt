@@ -11,7 +11,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -132,7 +132,35 @@ class ProjectSetupViewModel @Inject constructor(
 
     fun revoke(assignment: AdminAssignmentDto, onDone: () -> Unit) =
         save("Assignment removed", onDone, ::refresh) { api.revokeAssignment(assignment.id) }
+
+    fun updateVendor(v: AdminVendorDto, request: VendorRequest, onDone: () -> Unit = {}) =
+        save("${request.name} saved", onDone, ::refresh) { api.updateVendor(v.id, request.toPatchBody()) }
+
+    fun setSectorActive(s: AdminSectorDto, active: Boolean, onDone: () -> Unit = {}) =
+        save(if (active) "${s.name} activated" else "${s.name} deactivated", onDone, ::refresh) { api.updateSector(s.id, s.toRequest().copy(active = active).toAreaPatch()) }
+
+    fun setSubSectorActive(s: AdminSubSectorDto, active: Boolean, onDone: () -> Unit = {}) =
+        save(if (active) "${s.name} activated" else "${s.name} deactivated", onDone, ::refresh) { api.updateSubSector(s.id, s.toRequest().copy(active = active).toAreaPatch()) }
+
+    // ---------------------------------------------------------------- deletes (409 explains why, e.g. trees exist)
+
+    fun deleteYear(y: AdminPlantingYearDto, onDone: () -> Unit) =
+        save("${y.yearLabel} deleted", onDone, ::refresh) { api.deletePlantingYear(y.id) }
+
+    fun deleteSector(s: AdminSectorDto, onDone: () -> Unit) = save("${s.name} deleted", onDone, ::refresh) { api.deleteSector(s.id) }
+
+    fun deleteSubSector(s: AdminSubSectorDto, onDone: () -> Unit) = save("${s.name} deleted", onDone, ::refresh) { api.deleteSubSector(s.id) }
+
+    fun deleteScheme(s: AdminSchemeDto, onDone: () -> Unit) = save("Format version ${s.version} deleted", onDone, ::refresh) { api.deleteScheme(s.id) }
+
+    fun deleteField(f: AdminCustomFieldDto, onDone: () -> Unit) = save("“${f.label}” deleted", onDone, ::refresh) { api.deleteCustomField(f.id) }
+
+    fun deleteYearVendor(link: AdminYearVendorDto, onDone: () -> Unit) =
+        save("${link.vendorName ?: "Vendor"} deleted from this year", onDone, ::refresh) { api.deleteYearVendor(link.id) }
 }
+
+internal fun AdminSectorDto.toRequest() = AreaRequest(name, shortCode, description, referenceLatitude, referenceLongitude, active)
+internal fun AdminSubSectorDto.toRequest() = AreaRequest(name, shortCode, description, referenceLatitude, referenceLongitude, active)
 
 enum class SetupTab(val title: String, val perYear: Boolean = false) {
     DETAILS("Details"),
@@ -145,7 +173,7 @@ enum class SetupTab(val title: String, val perYear: Boolean = false) {
 }
 
 @Composable
-fun ProjectSetupScreen(onBack: () -> Unit, vm: ProjectSetupViewModel = hiltViewModel()) {
+fun ProjectSetupScreen(onBack: () -> Unit, onShare: () -> Unit = {}, vm: ProjectSetupViewModel = hiltViewModel()) {
     val project = collect(vm.project)
     val loading = collect(vm.loading)
     val error = collect(vm.error)
@@ -160,7 +188,10 @@ fun ProjectSetupScreen(onBack: () -> Unit, vm: ProjectSetupViewModel = hiltViewM
         subtitle = project?.let { "${it.shortCode} · ${projectStatusLabel(it.status)}" },
         onBack = onBack,
         snackbar = snackbar,
-        actions = { IconButton(onClick = { vm.refresh() }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh") } },
+        actions = {
+            IconButton(onClick = onShare) { Icon(Icons.Default.Share, "Share with client") }
+            IconButton(onClick = { vm.refresh() }, enabled = !loading) { Icon(Icons.Default.Refresh, "Refresh") }
+        },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             ScrollableTabRow(selectedTabIndex = tab.ordinal, edgePadding = 8.dp) {
@@ -198,11 +229,7 @@ fun ProjectSetupScreen(onBack: () -> Unit, vm: ProjectSetupViewModel = hiltViewM
 /** Shown by the per-year sections while the project has no planting year. */
 @Composable
 internal fun NoYearState(onAddYear: () -> Unit) {
-    EmptyState(
-        Icons.Default.CalendarMonth, "Add a planting year first",
-        "Each planting year has its own surveyed area, vendors and ID format. Add the year (for example 2025) to start.",
-        "Add planting year", onAddYear,
-    )
+    EmptyState(Icons.Default.CalendarMonth, "No planting year yet", actionLabel = "Add planting year", onAction = onAddYear)
 }
 
 // ---------------------------------------------------------------- details
@@ -219,10 +246,8 @@ private fun DetailsTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: Pro
         description = initial.description?.ifBlank { null }, location = initial.location?.ifBlank { null },
     )
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionHeader("Project details")
         ProjectFields(state, creating = false, originalCode = p.shortCode)
-        BoldValue("Tree ID uniqueness", if (p.physicalIdUniqueness == "GLOBAL") "Across all projects" else "Within this project")
-        Text("Fixed when the project was created.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        BoldValue("Tree IDs unique", if (p.physicalIdUniqueness == "GLOBAL") "Across all projects" else "Within this project")
         formError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Button(
             onClick = { vm.saveDetails(state.toRequest(false)) }, enabled = changed && state.valid && !saving,
@@ -239,43 +264,47 @@ private fun PlantingYearsTab(p: ProjectDetailDto, vm: ProjectSetupViewModel, onA
     val saving = collect(vm.saving)
     val formError = collect(vm.formError)
     var editing by remember { mutableStateOf<AdminPlantingYearDto?>(null) }
+    val actions = rememberItemActions()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionHeader(
-            "Planting years",
-            supporting = "Each year has its own surveyed area, vendors and ID format. Close a year when planting ends; reopen it to allow back-entry of late records.",
-            action = { if (p.plantingYears.isNotEmpty()) TextButton(onClick = onAddYear, modifier = Modifier.heightIn(min = 48.dp)) { Icon(Icons.Default.Add, null); Text("Add") } },
-        )
         if (p.plantingYears.isEmpty()) {
-            EmptyState(Icons.Default.CalendarMonth, "No planting years", "Add the year (or season) trees are planted in, for example 2025. Its label can be part of tree IDs.",
-                "Add planting year", onAddYear)
+            EmptyState(Icons.Default.CalendarMonth, "No planting years", actionLabel = "Add planting year", onAction = onAddYear)
+        } else {
+            FilledTonalButton(onClick = onAddYear, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add planting year")
+            }
         }
         p.yearsNewestFirst().forEach { y ->
             val vendors = p.linkedVendors(y.id).size
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(y.yearLabel, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                (if (y.startDate == null && y.endDate == null) "No dates set" else "${formatIsoDate(y.startDate)} – ${formatIsoDate(y.endDate)}") +
-                                    " · $vendors vendor${if (vendors == 1) "" else "s"}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        TextButton(onClick = { vm.clearFormError(); editing = y }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Edit dates") }
-                    }
-                    SwitchRow(
-                        if (y.active) "Open for registration" else "Closed",
-                        y.active,
-                        { open -> vm.updateYear(y, PlantingYearPatch(y.startDate, y.endDate, open)) },
-                        supporting = if (y.active) "Officers can register and back-enter trees" else "Reopen to allow back-entry",
-                        enabled = !saving,
+            val edit = { vm.clearFormError(); editing = y }
+            ActionItem(
+                onClick = edit,
+                onActions = {
+                    actions.open(
+                        y.yearLabel, onEdit = edit, editLabel = "Edit dates", active = y.active,
+                        onSetActive = { open -> vm.updateYear(y, PlantingYearPatch(y.startDate, y.endDate, open)) },
+                        activeLabels = "Reopen" to "Close",
+                        delete = PendingDelete(
+                            y.yearLabel, detail = "Its areas, vendor links and formats are deleted too.",
+                            run = { done -> vm.deleteYear(y, done) },
+                            deactivate = { done: () -> Unit -> vm.updateYear(y, PlantingYearPatch(y.startDate, y.endDate, false), done); Unit }.takeIf { y.active },
+                        ),
+                    )
+                },
+            ) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    ItemTitle(y.yearLabel, tag = { if (!y.active) Tag("Closed", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant) })
+                    ItemSubtitle(
+                        listOfNotNull(
+                            "${formatIsoDate(y.startDate)} – ${formatIsoDate(y.endDate)}".takeIf { y.startDate != null || y.endDate != null },
+                            "$vendors vendor${if (vendors == 1) "" else "s"}",
+                        ).joinToString(" · "),
                     )
                 }
             }
         }
         Spacer(Modifier.height(24.dp))
     }
+    ItemActionsHost(actions, vm)
 
     editing?.let { y ->
         var start by remember(y) { mutableStateOf(y.startDate) }
@@ -285,11 +314,6 @@ private fun PlantingYearsTab(p: ProjectDetailDto, vm: ProjectSetupViewModel, onA
             onConfirm = { vm.updateYear(y, PlantingYearPatch(start, end, y.active)) { editing = null } },
             onDismiss = { editing = null },
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Info, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("The label is part of registered tree IDs and cannot change.", style = MaterialTheme.typography.bodySmall)
-            }
             IsoDateField("Start date", start, { start = it })
             IsoDateField("End date", end, { end = it })
         }
@@ -310,11 +334,10 @@ internal fun AddYearDialog(vm: ProjectSetupViewModel, onDismiss: () -> Unit) {
         onConfirm = { vm.addYear(PlantingYearRequest(label.trim(), start, end, open), onDismiss) },
         onDismiss = onDismiss,
     ) {
-        CodeInput(label, { label = it }, label = "Year label", supporting = "e.g. 2025 or 2025A. Can be part of tree IDs; cannot be changed later.")
+        CodeInput(label, { label = it }, label = "Year", supporting = "e.g. 2025. Can’t change later.")
         IsoDateField("Start date (optional)", start, { start = it })
         IsoDateField("End date (optional)", end, { end = it })
         SwitchRow("Open for registration", open, { open = it })
-        Hint("Next: map this year's survey under Areas, then add its vendors.")
     }
 }
 

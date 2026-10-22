@@ -155,6 +155,7 @@ data class BootstrapResponse(
     @SerialName("serial_allocations") val serialAllocations: List<SerialAllocationDto>,
     @SerialName("custom_fields") val customFields: List<CustomFieldDto> = emptyList(),
     @SerialName("planting_year_vendors") val plantingYearVendors: List<PlantingYearVendorDto> = emptyList(),
+    @SerialName("data_generation") val dataGeneration: Long = 1,
 )
 
 // ---------------------------------------------------------------- field records
@@ -229,7 +230,8 @@ data class MobileTreesResponse(
     @SerialName("next_after_id") val nextAfterId: String? = null,
 )
 
-@Serializable data class ChangeDto(val seq: Long, @SerialName("entity_type") val entityType: String, val data: JsonObject)
+/** [deleted] = the row was removed on the server (data holds only its id). */
+@Serializable data class ChangeDto(val seq: Long, @SerialName("entity_type") val entityType: String, val data: JsonObject, val deleted: Boolean = false)
 
 @Serializable
 data class ChangesResponse(
@@ -237,6 +239,8 @@ data class ChangesResponse(
     @SerialName("next_cursor") val nextCursor: String,
     @SerialName("has_more") val hasMore: Boolean,
     @SerialName("assignment_fingerprint") val assignmentFingerprint: String,
+    /** Changes when an administrator clears all data. */
+    @SerialName("data_generation") val dataGeneration: Long = 1,
 )
 
 @Serializable

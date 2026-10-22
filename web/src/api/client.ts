@@ -5,6 +5,8 @@ const API_ORIGIN = String(import.meta.env.VITE_API_BASE ?? '')
   .replace(/\/+$/, '')
   .replace(/\/api(\/v1)?$/, '');
 const BASE = `${API_ORIGIN}/api/v1`;
+/** Absolute-or-relative URL of an API path, e.g. for public links that need no token. */
+export const apiUrl = (path: string) => BASE + path;
 const STORAGE_KEY = 'tms.session';
 
 export interface SessionUser {
@@ -119,9 +121,6 @@ async function raw(method: string, path: string, body: unknown, authed: boolean,
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (authed && session) headers.Authorization = `Bearer ${session.access_token}`;
   const res = await send(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  if (res.status === 401 && authed && retry && session) {
-    if (await refresh()) return raw(method, path, body, authed, false);
-  }
   const text = await res.text();
   let data: any = null;
   try {
@@ -129,6 +128,10 @@ async function raw(method: string, path: string, body: unknown, authed: boolean,
   } catch {
     // A non-JSON body (e.g. an HTML page from a misconfigured proxy) is reported as a failed request below.
     if (res.ok) throw new ApiError(res.status, 'BAD_RESPONSE', `The server at ${describeBase()} returned an unexpected response. Check VITE_API_BASE and the /api proxy.`);
+  }
+  // An expired access token is refreshed once; a wrong password re-entered for confirmation is not a session problem.
+  if (res.status === 401 && authed && retry && session && data?.code !== 'PASSWORD_INCORRECT') {
+    if (await refresh()) return raw(method, path, body, authed, false);
   }
   if (!res.ok) {
     throw new ApiError(res.status, data?.code ?? 'ERROR', data?.message ?? `Request failed (${res.status})`, data?.details, data);
@@ -140,6 +143,7 @@ export const api = {
   get: <T = any>(path: string) => raw('GET', path, undefined, true) as Promise<T>,
   post: <T = any>(path: string, body?: unknown) => raw('POST', path, body ?? {}, true) as Promise<T>,
   patch: <T = any>(path: string, body: unknown) => raw('PATCH', path, body, true) as Promise<T>,
+  del: <T = any>(path: string) => raw('DELETE', path, undefined, true) as Promise<T>,
   /** Downloads an authenticated file (exports). */
   async download(path: string, filename: string) {
     const go = () => send(BASE + path, { headers: { Authorization: `Bearer ${session?.access_token}` } });
@@ -149,9 +153,14 @@ export const api = {
     const url = URL.createObjectURL(await res.blob());
     const a = Object.assign(document.createElement('a'), { href: url, download: filename });
     a.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
 };
+
+/** Unauthenticated GET for public pages (client share links): never sends the session token. */
+export async function publicGet<T = any>(path: string): Promise<T> {
+  return raw('GET', path, undefined, false);
+}
 
 export function qs(params: Record<string, string | number | undefined | null>) {
   const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '');

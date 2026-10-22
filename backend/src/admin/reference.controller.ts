@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Req } from '@nestjs/common';
 import { Request } from 'express';
 import { z, ZodObject, ZodRawShape } from 'zod';
 import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
 import { AuditService } from '../common/audit.service';
-import { badRequest, notFound } from '../common/errors';
+import { badRequest, conflict, notFound } from '../common/errors';
 import { parse, shortCode } from '../common/validation';
 import { Db, isUniqueViolation } from '../database/db.service';
 
@@ -44,12 +44,26 @@ interface Resource {
   order: string;
   /** Fields that must not change once set, because they are part of registered identities. */
   immutable?: string[];
+  /** SQL counting the records that still use the row ($1 = id); a row in use cannot be deleted. */
+  usage: string;
+  /** Rows to remove along with it (links that only exist for this row). */
+  cascade?: string[];
 }
 
 const RESOURCES: Record<string, Resource> = {
-  'tree-species': { table: 'tree_species', entity: 'species', schema: SpeciesBody, order: 'scientific_name' },
-  'tree-statuses': { table: 'tree_statuses', entity: 'status', schema: StatusBody, order: 'sort_order, name', immutable: ['code'] },
-  vendors: { table: 'vendors', entity: 'vendor', schema: VendorBody, order: 'name' },
+  'tree-species': {
+    table: 'tree_species', entity: 'species', schema: SpeciesBody, order: 'scientific_name',
+    usage: 'SELECT count(*)::int AS n FROM trees WHERE species_id = $1',
+  },
+  'tree-statuses': {
+    table: 'tree_statuses', entity: 'status', schema: StatusBody, order: 'sort_order, name', immutable: ['code'],
+    usage: `SELECT (SELECT count(*) FROM trees WHERE current_status_id = $1) + (SELECT count(*) FROM tree_observations WHERE observed_status_id = $1) AS n`,
+  },
+  vendors: {
+    table: 'vendors', entity: 'vendor', schema: VendorBody, order: 'name',
+    usage: `SELECT (SELECT count(*) FROM trees WHERE vendor_id = $1) + (SELECT count(*) FROM tree_id_schemes WHERE vendor_id = $1) AS n`,
+    cascade: ['DELETE FROM planting_year_vendors WHERE vendor_id = $1'],
+  },
 };
 
 const PATHS = Object.keys(RESOURCES);
@@ -106,6 +120,24 @@ export class ReferenceController {
       // Vendor short-code changes do not rewrite registered tree IDs; their snapshots keep the old code.
       await this.audit.record({ actorId: user.id, action: `${r.entity}.update`, entityType: r.entity, entityId: id, before, after }, tx);
       return after;
+    });
+  }
+
+  /** Deletes an entry nothing refers to; one in use must be deactivated instead, so history keeps its meaning. */
+  @Roles('ADMIN')
+  @Delete(PATHS.map((p) => `${p}/:id`))
+  async remove(@CurrentUser() user: AuthUser, @Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+    const r = this.resource(req);
+    return this.db.tx(async (tx) => {
+      const before = await this.db.one(tx, `SELECT * FROM ${r.table} WHERE id = $1 FOR UPDATE`, [id]);
+      if (!before) throw notFound(r.entity);
+      const { rows } = await tx.query(r.usage, [id]);
+      const n = Number(rows[0].n);
+      if (n > 0) throw conflict('IN_USE', `It is used by ${n} record${n === 1 ? '' : 's'}. Deactivate it instead.`, { count: n });
+      for (const sql of r.cascade ?? []) await tx.query(sql, [id]);
+      await tx.query(`DELETE FROM ${r.table} WHERE id = $1`, [id]);
+      await this.audit.record({ actorId: user.id, action: `${r.entity}.delete`, entityType: r.entity, entityId: id, before }, tx);
+      return { deleted: true };
     });
   }
 }

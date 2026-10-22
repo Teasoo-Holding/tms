@@ -2,6 +2,7 @@ import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { auth } from './api/client';
 import { useAuth } from './auth';
 import { TooltipProvider } from './charts/Tooltip';
 import { Layout } from './components/Layout';
@@ -12,6 +13,8 @@ import { LoginPage } from './pages/Login';
 import { ProjectDetailPage } from './pages/ProjectDetail';
 import { ProjectsPage } from './pages/Projects';
 import { ReferencePage } from './pages/Reference';
+import { SettingsPage } from './pages/Settings';
+import { SharePage } from './pages/Share';
 import { TreeDetailPage } from './pages/TreeDetail';
 import { TreesPage } from './pages/Trees';
 import { UsersPage } from './pages/Users';
@@ -27,13 +30,24 @@ const queryClient: QueryClient = new QueryClient({
   }),
 });
 
+/** Client share links (/share/:token) are public: they render without signing in. */
+function Root() {
+  return (
+    <Routes>
+      <Route path="/share/:token" element={<SharePage />} />
+      <Route path="*" element={<App />} />
+    </Routes>
+  );
+}
+
 function App() {
   const user = useAuth();
   if (!user) return <LoginPage />;
   if (user.role === 'FIELD_OFFICER') {
     return (
       <div className="main">
-        <div className="notice">Field officers use the Android app. This web portal is for administrators and executives.</div>
+        <div className="notice">Field officers use the Android app.</div>
+        <button style={{ marginTop: 12 }} onClick={() => auth.logout()}>Sign out</button>
       </div>
     );
   }
@@ -51,6 +65,7 @@ function App() {
         {admin && <Route path="reference" element={<ReferencePage />} />}
         {admin && <Route path="users" element={<UsersPage />} />}
         {admin && <Route path="audit" element={<AuditPage />} />}
+        {admin && <Route path="settings" element={<SettingsPage />} />}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
@@ -62,7 +77,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <BrowserRouter>
-          <App />
+          <Root />
         </BrowserRouter>
       </TooltipProvider>
     </QueryClientProvider>

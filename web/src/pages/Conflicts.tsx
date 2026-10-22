@@ -33,10 +33,7 @@ export function ConflictsPage() {
   const conflicts = useQuery({ queryKey: ['conflicts', status], queryFn: () => api.get<any[]>(`/conflicts${qs({ status })}`) });
   return (
     <div>
-      <PageHeader
-        title="Sync conflicts"
-        subtitle="Submissions that collided at sync are never overwritten. Both records stay intact until you decide; every resolution is audited and reaches devices on their next sync."
-      />
+      <PageHeader title="Conflicts" />
       <Tabs tabs={[['OPEN', 'Open'], ['RESOLVED', 'Resolved']]} value={status} onChange={setStatus} />
       <ErrorNotice error={conflicts.error} />
       <div className="card table-wrap">
@@ -56,7 +53,7 @@ export function ConflictsPage() {
             ))}
           </tbody>
         </table>
-        {conflicts.data?.length === 0 && <EmptyState title={status === 'OPEN' ? 'No open conflicts' : 'Nothing resolved yet'}>{status === 'OPEN' ? 'All synced records are consistent.' : undefined}</EmptyState>}
+        {conflicts.data?.length === 0 && <EmptyState title={status === 'OPEN' ? 'No open conflicts' : 'Nothing resolved yet'} />}
       </div>
       {selected && <ConflictReview id={selected} onClose={() => setSelected(null)} />}
     </div>
