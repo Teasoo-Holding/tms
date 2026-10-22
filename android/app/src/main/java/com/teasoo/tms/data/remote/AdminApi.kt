@@ -3,6 +3,7 @@ package com.teasoo.tms.data.remote
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
@@ -81,6 +82,33 @@ interface AdminApi {
         @Query("before_id") beforeId: Long? = null,
         @Query("limit") limit: Int = 50,
     ): List<AuditEntryDto>
+
+    // ---------------------------------------------------------------- deletes
+    // Each returns {deleted: true}, or 409 {code: IN_USE | HAS_TREES, message} suggesting deactivation instead.
+    @DELETE("api/v1/tree-species/{id}") suspend fun deleteSpecies(@Path("id") id: String): JsonElement
+    @DELETE("api/v1/tree-statuses/{id}") suspend fun deleteStatus(@Path("id") id: String): JsonElement
+    @DELETE("api/v1/vendors/{id}") suspend fun deleteVendor(@Path("id") id: String): JsonElement
+    /** Only a project without trees; its configuration goes with it. */
+    @DELETE("api/v1/projects/{id}") suspend fun deleteProject(@Path("id") id: String): JsonElement
+    /** With its sectors, sub-sectors, vendor links and year formats; refused if it has trees. */
+    @DELETE("api/v1/planting-years/{id}") suspend fun deletePlantingYear(@Path("id") id: String): JsonElement
+    @DELETE("api/v1/sectors/{id}") suspend fun deleteSector(@Path("id") id: String): JsonElement
+    @DELETE("api/v1/sub-sectors/{id}") suspend fun deleteSubSector(@Path("id") id: String): JsonElement
+    /** An unused format version. */
+    @DELETE("api/v1/tree-id-schemes/{id}") suspend fun deleteScheme(@Path("id") id: String): JsonElement
+    /** Refused once values exist. */
+    @DELETE("api/v1/custom-fields/{id}") suspend fun deleteCustomField(@Path("id") id: String): JsonElement
+    @DELETE("api/v1/planting-year-vendors/{id}") suspend fun deleteYearVendor(@Path("id") id: String): JsonElement
+
+    // ---------------------------------------------------------------- clear data
+    /** 400 CONFIRMATION_REQUIRED, 401 PASSWORD_INCORRECT. */
+    @POST("api/v1/admin/clear-data") suspend fun clearData(@Body body: ClearDataRequest): ClearDataResult
+
+    // ---------------------------------------------------------------- client share links
+    @GET("api/v1/projects/{id}/share-links") suspend fun shareLinks(@Path("id") projectId: String): List<ShareLinkDto>
+    /** The token is returned once only. */
+    @POST("api/v1/projects/{id}/share-links") suspend fun createShareLink(@Path("id") projectId: String, @Body body: ShareLinkRequest): CreatedShareLinkDto
+    @POST("api/v1/share-links/{id}/revoke") suspend fun revokeShareLink(@Path("id") id: String): JsonElement
 
     // ---------------------------------------------------------------- analytics
     @GET("api/v1/reports/summary")

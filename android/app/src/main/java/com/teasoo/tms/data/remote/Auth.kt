@@ -31,6 +31,8 @@ class TokenAuthenticator(private val session: SessionStore, private val plainCli
 
     override fun authenticate(route: Route?, response: Response): Request? {
         if (response.request.url.encodedPath.contains("/auth/")) return null
+        // A wrong password on a confirmed action is not an expired session: never refresh and resend it.
+        if (response.request.url.encodedPath.endsWith("/admin/clear-data")) return null
         if (responseCount(response) > 1) return null
         synchronized(lock) {
             val failedToken = response.request.header("Authorization")?.removePrefix("Bearer ")

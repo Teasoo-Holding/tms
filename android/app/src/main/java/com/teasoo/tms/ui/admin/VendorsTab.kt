@@ -29,84 +29,87 @@ internal fun VendorsTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: Pr
     val formError = collect(vm.formError)
     var adding by remember { mutableStateOf(false) }
     var unlinking by remember { mutableStateOf<AdminYearVendorDto?>(null) }
+    var editing by remember { mutableStateOf<AdminVendorDto?>(null) }
+    val actions = rememberItemActions()
 
     if (year == null) { NoYearState(onAddYear); return }
     val linked = p.linkedVendors(year.id)
     val previous = p.plantingYearVendors.filter { !it.active && it.plantingYearId == year.id && linked.none { l -> l.vendorId == it.vendorId } }
+    val add = { vm.clearFormError(); adding = true }
+    fun vendorOf(link: AdminYearVendorDto) = allVendors.firstOrNull { it.id == link.vendorId }
+    fun deleteLink(link: AdminYearVendorDto) = PendingDelete(
+        "${link.vendorName ?: "vendor"} from ${year.yearLabel}", detail = "The vendor itself is kept.",
+        run = { done -> vm.deleteYearVendor(link, done) },
+        deactivate = { done: () -> Unit -> vm.unlinkVendor(link, done); Unit }.takeIf { link.active },
+    )
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionHeader(
-            "Vendors planting in ${year.yearLabel}",
-            supporting = "Each vendor plants across the year's whole area. A vendor can have its own tree ID format (set it under ID format).",
-            action = {
-                if (linked.isNotEmpty()) TextButton(onClick = { vm.clearFormError(); adding = true }, modifier = Modifier.heightIn(min = 48.dp)) {
-                    Icon(Icons.Default.Add, null); Text("Add vendor")
-                }
-            },
-        )
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (linked.isEmpty()) {
-            EmptyState(
-                Icons.Default.Storefront, "No vendors for ${year.yearLabel} yet",
-                "Add the companies planting trees this year. Pick an existing vendor or create a new one with a short code.",
-                "Add vendor", { vm.clearFormError(); adding = true },
-            )
+            EmptyState(Icons.Default.Storefront, "No vendors for ${year.yearLabel} yet", actionLabel = "Add vendor", onAction = add)
+        } else {
+            FilledTonalButton(onClick = add, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add vendor")
+            }
         }
         linked.forEach { link ->
             val scheme = p.schemes.effectiveFor(link.vendorId, year.id)
             val samples = idSamples(p, year, link.vendorShortCode, areas)
             val usesVendorCode = scheme?.components?.any { it.type == "VENDOR_CODE" } == true
-            OutlinedCard(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(link.vendorName ?: "Vendor", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                link.vendorShortCode?.let { "Code $it" } ?: "No short code",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (link.vendorShortCode == null && usesVendorCode) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        TextButton(onClick = { vm.clearFormError(); unlinking = link }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Unlink") }
+            val vendor = vendorOf(link)
+            val edit = vendor?.let { v -> { vm.clearFormError(); editing = v } }
+            ActionItem(
+                onClick = edit,
+                onActions = {
+                    actions.open(
+                        link.vendorName ?: "Vendor", onEdit = edit, active = true,
+                        onSetActive = { vm.clearFormError(); unlinking = link },
+                        activeLabels = "Add back" to "Remove from ${year.yearLabel}",
+                        delete = deleteLink(link),
+                    )
+                },
+            ) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    ItemTitle(link.vendorName ?: "Vendor")
+                    if (link.vendorShortCode == null && usesVendorCode) {
+                        Text("No short code – tap to add one", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    } else {
+                        ItemSubtitle(link.vendorShortCode.orEmpty())
                     }
                     if (scheme == null) {
-                        Hint("No ID format yet. Set one under ID format before officers register trees.")
+                        Text("No ID format yet", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     } else {
-                        Text("Example tree ID", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
                             previewId(scheme.components, scheme.separator, scheme.serialWidth, samples, 1),
-                            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium,
+                            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.primary,
                         )
-                        Hint(
-                            when (scheme.scopeKind()) {
-                                FormatScope.VENDOR_YEAR -> "Uses its own format for ${year.yearLabel}"
-                                FormatScope.VENDOR -> "Uses its own format (all years)"
-                                FormatScope.YEAR -> "Uses the ${year.yearLabel} format"
-                                FormatScope.DEFAULT -> "Uses the project default format"
-                            },
-                        )
-                    }
-                    if (link.vendorShortCode == null && usesVendorCode) {
-                        Text("The ID format includes the vendor code. Give this vendor a short code under Reference data.",
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
         }
         if (previous.isNotEmpty()) {
-            SectionHeader("Removed from ${year.yearLabel}", supporting = "Their trees are kept. Add one back if it plants again this year.")
+            SectionHeader("Removed from ${year.yearLabel}")
             previous.forEach { link ->
-                OutlinedCard(Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(start = 16.dp, end = 8.dp).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(link.vendorName ?: "Vendor", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                        TextButton(onClick = { vm.linkVendor(year, link.vendorId, link.vendorName ?: "Vendor") {} }, enabled = !saving,
-                            modifier = Modifier.heightIn(min = 48.dp)) { Text("Add back") }
+                val addBack = { vm.linkVendor(year, link.vendorId, link.vendorName ?: "Vendor") {}; Unit }
+                ActionItem(
+                    onClick = addBack,
+                    onActions = {
+                        actions.open(
+                            link.vendorName ?: "Vendor", active = false, onSetActive = { addBack() },
+                            activeLabels = "Add back" to "Remove", delete = deleteLink(link),
+                        )
+                    },
+                ) {
+                    Row(Modifier.padding(horizontal = 16.dp).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(link.vendorName ?: "Vendor", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Add back", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }
         }
         Spacer(Modifier.height(24.dp))
     }
+    ItemActionsHost(actions, vm)
 
     if (adding) {
         val available = allVendors.filter { v -> v.active && linked.none { it.vendorId == v.id } }.sortedBy { it.name.lowercase() }
@@ -117,11 +120,12 @@ internal fun VendorsTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: Pr
             onDismiss = { adding = false },
         )
     }
+    editing?.let { v -> VendorDialog(v, saving, formError, { vm.updateVendor(v, it) { editing = null } }, { editing = null }) }
     unlinking?.let { link ->
         ConfirmDialog(
-            "Unlink ${link.vendorName ?: "this vendor"}?",
-            "${link.vendorName ?: "The vendor"} will no longer be offered for new trees in ${year.yearLabel}. Trees it already planted keep their records and IDs.",
-            "Unlink", saving, formError, destructive = true,
+            "Remove ${link.vendorName ?: "this vendor"} from ${year.yearLabel}?",
+            "Its trees keep their IDs.",
+            "Remove", saving, formError, destructive = true,
             onConfirm = { vm.unlinkVendor(link) { unlinking = null } },
             onDismiss = { unlinking = null },
         )
@@ -151,13 +155,12 @@ private fun AddVendorDialog(
     ) {
         ChoiceChips(null, listOf(false, true), creating, { if (it) "New vendor" else "Existing vendor" }, { creating = it })
         if (!creating) {
-            if (available.isEmpty()) Hint("Every vendor is already linked to ${year.yearLabel}. Create a new one instead.")
+            if (available.isEmpty()) Hint("All vendors are already added.")
             Picker("Vendor", available, picked, { v -> v.name + (v.shortCode?.let { " ($it)" } ?: "") }, { picked = it })
-            picked?.let { if (it.shortCode.isNullOrBlank()) Hint("This vendor has no short code. Add one under Reference data if tree IDs include the vendor code.") }
+
         } else {
-            TextInput(name, { name = it }, "Vendor name", supporting = "e.g. Green Earth Nurseries")
-            CodeInput(code, { code = it }, label = "Short code", supporting = "Used in tree IDs, e.g. GEN or V03. Letters and digits.")
-            Hint("You can add contact details later under Reference data.")
+            TextInput(name, { name = it }, "Vendor name")
+            CodeInput(code, { code = it }, label = "Short code", supporting = "e.g. GEN")
         }
     }
 }

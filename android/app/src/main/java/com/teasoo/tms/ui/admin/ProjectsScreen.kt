@@ -19,6 +19,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.teasoo.tms.data.remote.AdminApi
 import com.teasoo.tms.data.remote.AdminProjectDto
 import com.teasoo.tms.data.remote.ProjectRequest
+import com.teasoo.tms.data.remote.toPatchBody
 import com.teasoo.tms.ui.theme.StatusColors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -37,6 +38,13 @@ class ProjectsViewModel @Inject constructor(@ApplicationContext context: Context
         var created: AdminProjectDto? = null
         save("Project created", onDone = { created?.let { onCreated(it.id) } }, reload = ::refresh) { created = api.createProject(request) }
     }
+
+    fun setStatus(p: AdminProjectDto, status: String, onDone: () -> Unit = {}) =
+        save("${p.name}: ${projectStatusLabel(status).lowercase()}", onDone, ::refresh) {
+            api.updateProject(p.id, ProjectRequest(p.name, p.shortCode, p.description, p.location, p.startDate, p.endDate, status).toPatchBody())
+        }
+
+    fun delete(p: AdminProjectDto, onDone: () -> Unit) = save("${p.name} deleted", onDone, ::refresh) { api.deleteProject(p.id) }
 }
 
 @Composable
@@ -46,6 +54,7 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenProject: (String) -> Unit, vm: Proj
     val error = collect(vm.error)
     val snackbar = remember { SnackbarHostState() }
     var creating by rememberSaveable { mutableStateOf(false) }
+    val actions = rememberItemActions()
     CollectMessages(vm, snackbar)
 
     AdminScaffold(
@@ -64,14 +73,26 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenProject: (String) -> Unit, vm: Proj
         AdminLoadState(loading, error, projects != null, onRetry = { vm.refresh() }, modifier = Modifier.padding(padding)) {
             val list = projects.orEmpty()
             if (list.isEmpty()) {
-                EmptyState(
-                    Icons.Default.Forest, "No projects yet",
-                    "A project holds its planting years, tree ID format, areas and officers. Create one to get started.",
-                    "New project", { vm.clearFormError(); creating = true },
-                )
+                EmptyState(Icons.Default.Forest, "No projects yet", actionLabel = "New project", onAction = { vm.clearFormError(); creating = true })
             } else {
                 LazyColumn(contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(list, key = { it.id }) { p -> ProjectCard(p) { onOpenProject(p.id) } }
+                    items(list, key = { it.id }) { p ->
+                        ProjectCard(p, onClick = { onOpenProject(p.id) }, onActions = {
+                            val archived = p.status == "ARCHIVED"
+                            actions.open(
+                                p.name, onEdit = { onOpenProject(p.id) }, editLabel = "Open",
+                                active = !archived, onSetActive = { on -> vm.setStatus(p, if (on) "ACTIVE" else "ARCHIVED") },
+                                activeLabels = "Restore" to "Archive",
+                                delete = PendingDelete(
+                                    p.name,
+                                    detail = if (p.treeCount > 0) "It has ${"%,d".format(p.treeCount)} trees, so it can’t be deleted. Archive it instead."
+                                    else "Its years, areas, formats and fields are deleted too.",
+                                    run = { done -> vm.delete(p, done) },
+                                    deactivate = { done: () -> Unit -> vm.setStatus(p, "ARCHIVED", done); Unit }.takeIf { !archived },
+                                ),
+                            )
+                        })
+                    }
                 }
             }
         }
@@ -85,11 +106,12 @@ fun ProjectsScreen(onBack: () -> Unit, onOpenProject: (String) -> Unit, vm: Proj
         onSave = { req -> vm.create(req) { id -> creating = false; onOpenProject(id) } },
         onDismiss = { creating = false },
     )
+    ItemActionsHost(actions, vm)
 }
 
 @Composable
-private fun ProjectCard(p: AdminProjectDto, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+private fun ProjectCard(p: AdminProjectDto, onClick: () -> Unit, onActions: () -> Unit) {
+    ActionItem(onClick = onClick, onActions = onActions, tonal = true) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(p.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -98,7 +120,7 @@ private fun ProjectCard(p: AdminProjectDto, onClick: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(p.shortCode, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
                 Text("${"%,d".format(p.treeCount)} trees", style = MaterialTheme.typography.bodyMedium)
-                p.location?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 1) }
+                p.location?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
             }
         }
     }
@@ -140,24 +162,18 @@ fun ProjectFields(state: ProjectFormState, creating: Boolean, originalCode: Stri
     TextInput(state.name, { state.name = it }, "Project name")
     CodeInput(
         state.shortCode, { state.shortCode = it },
-        supporting = if (!creating && originalCode != null && state.shortCode != originalCode)
-            "New tree IDs will use ${state.shortCode.ifBlank { "…" }}. Trees already registered keep their IDs."
-        else "Letters and digits, up to 16. Appears in tree IDs, e.g. T4L",
+        supporting = if (!creating && originalCode != null && state.shortCode != originalCode) "Existing tree IDs keep the old code." else null,
     )
     TextInput(state.description, { state.description = it }, "Description (optional)", singleLine = false, minLines = 2)
     TextInput(state.location, { state.location = it }, "Location (optional)")
     IsoDateField("Start date (optional)", state.startDate, { state.startDate = it })
     IsoDateField("End date (optional)", state.endDate, { state.endDate = it })
-    if (!state.datesValid) Text("The end date must be on or after the start date.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+    if (!state.datesValid) Text("End date is before start date.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     ChoiceChips("Status", PROJECT_STATUSES, state.status, ::projectStatusLabel, { state.status = it })
     if (creating) {
         ChoiceChips(
-            "Tree ID uniqueness", listOf("PROJECT", "GLOBAL"), state.uniqueness,
+            "Tree IDs unique (can’t change later)", listOf("PROJECT", "GLOBAL"), state.uniqueness,
             { if (it == "GLOBAL") "Across all projects" else "Within this project" }, { state.uniqueness = it },
-        )
-        Text(
-            "Decides whether a tree ID may repeat in another project. It cannot be changed later.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

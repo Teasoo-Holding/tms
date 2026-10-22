@@ -10,6 +10,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,6 +23,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -49,7 +54,7 @@ import java.time.format.FormatStyle
 
 // ---------------------------------------------------------------- errors
 
-const val OFFLINE_MESSAGE = "You’re offline. Administration needs a connection to the server; field work keeps working offline."
+const val OFFLINE_MESSAGE = "You’re offline. Connect to the internet and try again."
 
 /** Friendly text for a failed admin call, including the server’s own validation messages. */
 fun adminErrorMessage(e: Throwable): String = when (e) {
@@ -57,6 +62,7 @@ fun adminErrorMessage(e: Throwable): String = when (e) {
     is HttpException -> {
         val body = runCatching { e.response()?.errorBody()?.string()?.let { TmsJson.parseToJsonElement(it).jsonObject } }.getOrNull()
         val message = body?.get("message")?.let { (it as? JsonPrimitive)?.contentOrNull }
+        val code = body?.get("code")?.let { (it as? JsonPrimitive)?.contentOrNull }
         val details = (body?.get("details") as? JsonArray)?.mapNotNull { d ->
             when (d) {
                 is JsonPrimitive -> d.contentOrNull?.let { SCHEME_PROBLEMS[it] ?: it }
@@ -69,6 +75,8 @@ fun adminErrorMessage(e: Throwable): String = when (e) {
             }
         }.orEmpty()
         when {
+            // A wrong password on a confirmed action (clear data) is not an expired session.
+            code == "PASSWORD_INCORRECT" -> "Your password is incorrect."
             e.code() == 401 -> "Your session has expired. Sign in again."
             e.code() == 403 -> message ?: "Only administrators can do this."
             e.code() >= 500 -> "The server had a problem (${e.code()}). Try again in a moment."
@@ -223,14 +231,13 @@ fun ErrorState(message: String, onRetry: () -> Unit, modifier: Modifier = Modifi
     ) {
         Icon(if (offline) Icons.Default.CloudOff else Icons.Default.ErrorOutline, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(if (offline) "Can’t reach the server" else "Something went wrong", style = MaterialTheme.typography.titleMedium)
-        Text(if (offline) "Administration needs a connection. Field work keeps working offline; try again when you’re connected." else message,
-            style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+        if (!offline) Text(message, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
         Button(onClick = onRetry, modifier = Modifier.heightIn(min = 48.dp)) { Text("Retry") }
     }
 }
 
 @Composable
-fun EmptyState(icon: ImageVector, title: String, body: String, actionLabel: String? = null, onAction: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+fun EmptyState(icon: ImageVector, title: String, body: String? = null, actionLabel: String? = null, onAction: (() -> Unit)? = null, modifier: Modifier = Modifier) {
     Column(
         modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -238,7 +245,7 @@ fun EmptyState(icon: ImageVector, title: String, body: String, actionLabel: Stri
     ) {
         Icon(icon, contentDescription = null, modifier = Modifier.size(44.dp), tint = MaterialTheme.colorScheme.primary)
         Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-        Text(body, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        body?.let { Text(it, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         if (actionLabel != null && onAction != null) {
             Button(onClick = onAction, modifier = Modifier.heightIn(min = 48.dp)) { Text(actionLabel) }
         }
@@ -319,7 +326,7 @@ fun ConfirmDialog(title: String, body: String, confirmLabel: String, saving: Boo
         onDismissRequest = { if (!saving) onDismiss() },
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(body)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
@@ -355,9 +362,27 @@ fun TextInput(
     )
 }
 
+/** Password with a show/hide toggle. */
+@Composable
+fun PasswordField(value: String, onChange: (String) -> Unit, label: String, modifier: Modifier = Modifier, supporting: String? = null, isError: Boolean = false, enabled: Boolean = true) {
+    var visible by remember { mutableStateOf(false) }
+    OutlinedTextField(
+        value, onChange, label = { Text(label) }, singleLine = true, enabled = enabled, isError = isError,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+        trailingIcon = {
+            IconButton(onClick = { visible = !visible }) {
+                Icon(if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility, if (visible) "Hide password" else "Show password")
+            }
+        },
+        supportingText = supporting?.let { { Text(it) } },
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
 /** Short code input: letters and digits only, upper-cased, at most [max] characters. */
 @Composable
-fun CodeInput(value: String, onChange: (String) -> Unit, label: String = "Short code", supporting: String? = "Letters and digits, up to 16", max: Int = 16, enabled: Boolean = true, allowUnderscore: Boolean = false) {
+fun CodeInput(value: String, onChange: (String) -> Unit, label: String = "Short code", supporting: String? = null, max: Int = 16, enabled: Boolean = true, allowUnderscore: Boolean = false) {
     TextInput(
         value, { raw -> onChange(raw.uppercase().filter { it in 'A'..'Z' || it in '0'..'9' || (allowUnderscore && it == '_') }.take(max)) },
         label, supporting = supporting, enabled = enabled,

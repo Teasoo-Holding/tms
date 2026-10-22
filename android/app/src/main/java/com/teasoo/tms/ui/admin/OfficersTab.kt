@@ -35,14 +35,12 @@ internal fun OfficersTab(vm: ProjectSetupViewModel) {
     var revoking by remember { mutableStateOf<AdminAssignmentDto?>(null) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionHeader(
-            "Officers",
-            supporting = "Who works on this project. Assign a field officer to the whole project, one sector or one sub-sector; their phone downloads only that area. " +
-                "Clients and sponsors (executives) are assigned to the whole project to see its dashboard.",
-            action = { if (assignments.isNotEmpty()) TextButton(onClick = { vm.clearFormError(); adding = true }) { Icon(Icons.Default.Add, null); Text("Assign") } },
-        )
         if (assignments.isEmpty()) {
-            EmptyState(Icons.Default.GroupAdd, "No one assigned", "Assign field officers so they can record trees in this project.", "Assign officer", { vm.clearFormError(); adding = true })
+            EmptyState(Icons.Default.GroupAdd, "No one assigned", actionLabel = "Assign", onAction = { vm.clearFormError(); adding = true })
+        } else {
+            FilledTonalButton(onClick = { vm.clearFormError(); adding = true }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Assign")
+            }
         }
         assignments.groupBy { it.userId }.forEach { (_, list) ->
             val first = list.first()
@@ -68,7 +66,7 @@ internal fun OfficersTab(vm: ProjectSetupViewModel) {
     revoking?.let { a ->
         ConfirmDialog(
             "Remove assignment?",
-            "${a.userName ?: "This person"} will no longer see ${scopeText(a).lowercase()} on their phone after their next sync. Records they already made are kept.",
+            "${a.userName ?: "This person"} loses access to ${scopeText(a).lowercase()}. Their records are kept.",
             "Remove", saving, formError, destructive = true,
             onConfirm = { vm.revoke(a) { revoking = null } }, onDismiss = { revoking = null },
         )
@@ -111,20 +109,19 @@ private fun AssignDialog(
         },
         onDismiss = onDismiss,
     ) {
-        if (users.isEmpty()) Hint("No active people to assign. Create one under Users first.")
+        if (users.isEmpty()) Hint("No active users. Add one under Users.")
         Picker(
             "Person", users.sortedWith(compareBy({ it.role == "EXECUTIVE" }, { it.fullName.lowercase() })), user,
             { "${it.fullName} (${if (it.role == "EXECUTIVE") "Client / sponsor" else roleLabel(it.role)})" },
             { user = it; if (it.role == "EXECUTIVE") { level = "PROJECT"; sector = null; sub = null } },
         )
-        if (executive) Hint("Clients and sponsors see this project's dashboard (read only). Teasoo management already sees every project.")
         if (!executive) ChoiceChips(
             "Covers", listOf("PROJECT", "SECTOR", "SUB_SECTOR"), level,
             { when (it) { "SECTOR" -> "A sector"; "SUB_SECTOR" -> "A sub-sector"; else -> "Whole project" } },
             { level = it; if (it == "PROJECT") { sector = null; sub = null } },
         )
         if (level != "PROJECT") {
-            if (activeSectors.isEmpty()) Hint("This project has no active sectors yet. Add them under Areas.")
+            if (activeSectors.isEmpty()) Hint("No sectors yet.")
             Picker("Sector", activeSectors, sector, ::sectorLabel, { sector = it; sub = null })
         }
         if (level == "SUB_SECTOR") {

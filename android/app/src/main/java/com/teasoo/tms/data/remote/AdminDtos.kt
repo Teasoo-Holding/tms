@@ -484,6 +484,55 @@ data class AuditEntryDto(
     @SerialName("created_at") val createdAt: String,
 )
 
+// ---------------------------------------------------------------- clear data
+
+/** [scope] is FIELD_DATA (trees, visits, photos, sync history) or EVERYTHING (also projects and reference data). */
+@Serializable
+data class ClearDataRequest(
+    val scope: String,
+    val confirm: String,
+    val password: String,
+)
+
+@Serializable
+data class ClearDataResult(
+    val scope: String = "",
+    @Serializable(with = LenientInt::class) val trees: Int = 0,
+    @Serializable(with = LenientInt::class) val visits: Int = 0,
+    @Serializable(with = LenientInt::class) val photos: Int = 0,
+    @Serializable(with = LenientInt::class) val projects: Int = 0,
+    @Serializable(with = LenientLong::class) @SerialName("data_generation") val dataGeneration: Long = 0,
+)
+
+// ---------------------------------------------------------------- client share links
+
+@Serializable
+data class ShareLinkDto(
+    val id: String,
+    val label: String? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
+    @SerialName("revoked_at") val revokedAt: String? = null,
+    @SerialName("last_used_at") val lastUsedAt: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("created_by_name") val createdByName: String? = null,
+)
+
+@Serializable
+data class ShareLinkRequest(
+    val label: String? = null,
+    @SerialName("expires_in_days") val expiresInDays: Int? = null,
+)
+
+@Serializable
+data class CreatedShareLinkDto(
+    val id: String,
+    val label: String? = null,
+    @SerialName("expires_at") val expiresAt: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    val token: String,
+    val path: String? = null,
+)
+
 // ---------------------------------------------------------------- analytics (reports/summary)
 
 @Serializable

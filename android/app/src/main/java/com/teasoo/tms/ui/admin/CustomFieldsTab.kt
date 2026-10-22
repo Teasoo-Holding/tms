@@ -31,7 +31,7 @@ fun fieldTypeLabel(t: String) = when (t) {
 
 private fun appliesToLabel(a: String) = if (a == "OBSERVATION") "At each visit" else "When registering a tree"
 
-private const val STICKY_HELP = "Remember during a field session: the value is filled in again for the next tree until the officer changes it. Good for things that stay the same for a batch, like a nursery batch number."
+private const val STICKY_HELP = "Pre-fills the last answer for the next tree"
 
 @Composable
 internal fun CustomFieldsTab(vm: ProjectSetupViewModel) {
@@ -40,28 +40,36 @@ internal fun CustomFieldsTab(vm: ProjectSetupViewModel) {
     val formError = collect(vm.formError)
     var editing by remember { mutableStateOf<AdminCustomFieldDto?>(null) }
     var adding by remember { mutableStateOf<String?>(null) } // applies_to of the new field
+    val actions = rememberItemActions()
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        SectionHeader("Custom fields", supporting = "Optional extra questions officers answer in the app, for example Nursery batch number or Seedling source.")
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (fields.isEmpty()) {
-            EmptyState(
-                Icons.AutoMirrored.Filled.PlaylistAdd, "No custom fields",
-                "Add a field such as “Nursery batch number” (text, remembered during a field session) or “Seedling source” (a choice list).",
-                "Add field", { vm.clearFormError(); adding = "TREE" },
-            )
+            EmptyState(Icons.AutoMirrored.Filled.PlaylistAdd, "No custom fields", actionLabel = "Add field", onAction = { vm.clearFormError(); adding = "TREE" })
         } else {
             listOf("TREE", "OBSERVATION").forEach { applies ->
                 val list = fields.filter { it.appliesTo == applies }.sortedWith(compareBy({ !it.active }, { it.sortOrder }, { it.label }))
                 SectionHeader(
                     appliesToLabel(applies),
-                    action = { TextButton(onClick = { vm.clearFormError(); adding = applies }) { Icon(Icons.Default.Add, null); Text("Add") } },
+                    action = { TextButton(onClick = { vm.clearFormError(); adding = applies }, modifier = Modifier.heightIn(min = 48.dp)) { Icon(Icons.Default.Add, null); Text("Add") } },
                 )
-                if (list.isEmpty()) Hint(if (applies == "TREE") "No registration fields." else "No visit fields.")
-                list.forEach { f -> FieldCard(f, onEdit = { vm.clearFormError(); editing = f }, onToggle = { on -> vm.updateField(f.id, f.toPatch().copy(active = on)) }, enabled = !saving) }
+                list.forEach { f ->
+                    val edit = { vm.clearFormError(); editing = f }
+                    FieldCard(f, onEdit = edit, onActions = {
+                        actions.open(
+                            f.label, onEdit = edit, active = f.active,
+                            onSetActive = { on -> vm.updateField(f.id, f.toPatch().copy(active = on)) },
+                            delete = PendingDelete(
+                                "“${f.label}”", run = { done -> vm.deleteField(f, done) },
+                                deactivate = { done: () -> Unit -> vm.updateField(f.id, f.toPatch().copy(active = false), done); Unit }.takeIf { f.active },
+                            ),
+                        )
+                    })
+                }
             }
         }
         Spacer(Modifier.height(24.dp))
     }
+    ItemActionsHost(actions, vm)
 
     adding?.let { applies ->
         FieldDialog(null, applies, saving, formError,
@@ -76,19 +84,11 @@ internal fun CustomFieldsTab(vm: ProjectSetupViewModel) {
 private fun AdminCustomFieldDto.toPatch() = CustomFieldPatch(label, options, required, sticky, helpText, sortOrder, active)
 
 @Composable
-private fun FieldCard(f: AdminCustomFieldDto, onEdit: () -> Unit, onToggle: (Boolean) -> Unit, enabled: Boolean) {
-    OutlinedCard(onClick = onEdit, modifier = Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(f.label, style = MaterialTheme.typography.titleSmall)
-                Text(
-                    listOfNotNull(fieldTypeLabel(f.fieldType), "Required".takeIf { f.required }, "Remembered in session".takeIf { f.sticky }).joinToString(" · "),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                if (f.fieldType == "SELECT" && f.options.isNotEmpty()) Text(f.options.joinToString(", "), style = MaterialTheme.typography.bodySmall, maxLines = 2)
-                Text(f.key, style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.outline)
-            }
-            Switch(checked = f.active, onCheckedChange = onToggle, enabled = enabled)
+private fun FieldCard(f: AdminCustomFieldDto, onEdit: () -> Unit, onActions: () -> Unit) {
+    ActionItem(onClick = onEdit, onActions = onActions) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            ItemTitle(f.label, f.active)
+            ItemSubtitle(listOfNotNull(fieldTypeLabel(f.fieldType), "Required".takeIf { f.required }, "Remembered".takeIf { f.sticky }).joinToString(" · "))
         }
     }
 }
@@ -129,23 +129,21 @@ private fun FieldDialog(
         if (existing == null) {
             ChoiceChips("Asked", listOf("TREE", "OBSERVATION"), appliesTo, ::appliesToLabel, { appliesTo = it })
         } else BoldValue("Asked", appliesToLabel(existing.appliesTo))
-        TextInput(label, { label = it }, "Label", supporting = "What officers see, e.g. Nursery batch number")
+        TextInput(label, { label = it }, "Label")
         if (existing == null) {
-            ChoiceChips("Type", FIELD_TYPES, type, ::fieldTypeLabel, { type = it })
-            Hint("The type cannot be changed after the field is created.")
+            ChoiceChips("Type (can’t change later)", FIELD_TYPES, type, ::fieldTypeLabel, { type = it })
         } else {
             BoldValue("Type", fieldTypeLabel(existing.fieldType))
-            BoldValue("Key", existing.key)
         }
         if (type == "SELECT") {
             TextInput(options, { options = it }, "Choices, one per line", singleLine = false, minLines = 3,
                 supporting = if (optionList.isEmpty()) "Add at least one choice" else "${optionList.size} choices", isError = optionList.isEmpty())
         }
-        SwitchRow("Required", required, { required = it }, supporting = "Officers must answer before saving")
-        SwitchRow("Remember during a field session", sticky, { sticky = it }, supporting = STICKY_HELP)
+        SwitchRow("Required", required, { required = it })
+        SwitchRow("Remember last answer", sticky, { sticky = it }, supporting = STICKY_HELP)
         TextInput(help, { help = it }, "Help text (optional)", singleLine = false)
-        TextInput(order, { order = it.filter { c -> c.isDigit() || c == '-' }.take(6) }, "Sort order", supporting = "Lower numbers appear first",
+        TextInput(order, { order = it.filter { c -> c.isDigit() || c == '-' }.take(6) }, "Sort order",
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-        SwitchRow("Active", active, { active = it }, supporting = if (active) "Shown in the app" else "Hidden; answers already recorded are kept")
+        SwitchRow("Active", active, { active = it })
     }
 }
