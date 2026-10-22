@@ -10,6 +10,7 @@ import javax.inject.Inject
 @HiltAndroidApp
 class TmsApplication : Application(), Configuration.Provider {
     @Inject lateinit var workerFactory: HiltWorkerFactory
+    @Inject lateinit var backups: com.teasoo.tms.data.repo.LocalBackups
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder().setWorkerFactory(workerFactory).build()
@@ -17,5 +18,6 @@ class TmsApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         SyncScheduler.schedulePeriodic(this)
+        backups.start()
     }
 }

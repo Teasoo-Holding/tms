@@ -26,7 +26,8 @@ import javax.inject.Singleton
 class BackupExporter @Inject constructor(private val db: TmsDatabase, private val session: SessionStore) {
     data class Summary(val operations: Int, val trees: Int, val observations: Int, val photos: Int)
 
-    suspend fun export(out: OutputStream): Summary = withContext(Dispatchers.IO) {
+    /** [includePhotos] false gives the light backup: records only (a few KB per tree). */
+    suspend fun export(out: OutputStream, includePhotos: Boolean = true): Summary = withContext(Dispatchers.IO) {
         val ops = db.outbox().pendingList()
         val trees = db.trees().unsynced()
         val observations = db.observations().unsynced()
@@ -42,6 +43,7 @@ class BackupExporter @Inject constructor(private val db: TmsDatabase, private va
                 "manifest.json",
                 buildJsonObject {
                     put("format", "tms-field-backup/1")
+                    put("includes_photos", includePhotos)
                     put("created_at", Instant.now().toString())
                     put("app_version", BuildConfig.VERSION_NAME)
                     put("device_id", session.deviceId())
@@ -113,6 +115,7 @@ class BackupExporter @Inject constructor(private val db: TmsDatabase, private va
                 ),
             )
             for (m in media) {
+                if (!includePhotos) break
                 val f = m.localPath?.let(::File)?.takeIf { it.exists() } ?: continue
                 zip.putNextEntry(ZipEntry("photos/${m.id}.jpg"))
                 f.inputStream().use { it.copyTo(zip) }

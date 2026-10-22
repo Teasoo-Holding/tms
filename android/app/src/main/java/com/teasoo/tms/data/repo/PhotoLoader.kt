@@ -30,27 +30,35 @@ class PhotoLoader @Inject constructor(
     @Named("upload") private val plain: OkHttpClient,
 ) {
     private val cacheDir = File(context.cacheDir, "remote-photos").apply { mkdirs() }
-    private val memory = LruCache<String, ImageBitmap>(32)
+    private val memory = LruCache<String, ImageBitmap>(48)
+
+    private companion object {
+        const val THUMB_MAX = 400
+    }
 
     /** Decoded image no larger than [maxPx] on its long edge, or null when it cannot be shown (offline, still uploading). */
     suspend fun load(m: MediaEntity, maxPx: Int): ImageBitmap? = withContext(Dispatchers.IO) {
         val key = "${m.id}:$maxPx"
         memory.get(key)?.let { return@withContext it }
-        val file = localFile(m) ?: download(m) ?: return@withContext null
+        // Lists use the server's small copy (~20 KB); the full photo is fetched only when opened.
+        val thumb = maxPx <= THUMB_MAX
+        val file = localFile(m) ?: (if (thumb) cached(m, true) ?: download(m, true) else null) ?: cached(m, false) ?: download(m, false) ?: return@withContext null
         decode(file, maxPx)?.also { memory.put(key, it) }
     }
 
-    private fun localFile(m: MediaEntity): File? =
-        m.localPath?.let(::File)?.takeIf { it.exists() } ?: File(cacheDir, "${m.id}.jpg").takeIf { it.exists() }
+    private fun localFile(m: MediaEntity): File? = m.localPath?.let(::File)?.takeIf { it.exists() }
 
-    private suspend fun download(m: MediaEntity): File? {
+    private fun cacheFile(m: MediaEntity, thumb: Boolean) = File(cacheDir, if (thumb) "${m.id}.thumb.jpg" else "${m.id}.jpg")
+    private fun cached(m: MediaEntity, thumb: Boolean) = cacheFile(m, thumb).takeIf { it.exists() }
+
+    private suspend fun download(m: MediaEntity, thumb: Boolean): File? {
         if (m.state != MediaState.VERIFIED) return null
-        val url = runCatching { api.mediaViewUrl(m.id).url }.getOrNull() ?: return null
+        val url = runCatching { api.mediaViewUrl(m.id, if (thumb) "thumb" else null).url }.getOrNull() ?: return null
         return runCatching {
             plain.newCall(Request.Builder().url(url).build()).execute().use { res ->
                 if (!res.isSuccessful) return null
-                val target = File(cacheDir, "${m.id}.jpg")
-                val tmp = File(cacheDir, "${m.id}.part")
+                val target = cacheFile(m, thumb)
+                val tmp = File(cacheDir, "${m.id}.${if (thumb) "t" else "f"}.part")
                 tmp.outputStream().use { out -> res.body!!.byteStream().copyTo(out) }
                 tmp.renameTo(target)
                 target

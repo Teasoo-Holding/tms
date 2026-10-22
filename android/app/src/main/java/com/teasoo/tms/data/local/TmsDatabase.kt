@@ -37,4 +37,6 @@ object Keys {
     const val SELECTED_PROJECT = "ui.project"
     /** Owner of any unsynced records; another officer cannot sign in until they are synced. */
     const val LAST_USER = "session.last_user"
+    /** Server data generation last seen; a change means an administrator cleared the data. */
+    const val DATA_GENERATION = "sync.data_generation"
 }

@@ -14,6 +14,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.Instant
 import javax.inject.Inject
@@ -45,6 +47,7 @@ class SyncEngine @Inject constructor(
         // Executives have read-only, online reporting; there is no field data to push or download.
         if (current.user.role == "EXECUTIVE") return SyncOutcome.Success
         val outcome = try {
+            checkDataGeneration()
             push()
             uploadMedia()
             pull()
@@ -214,13 +217,38 @@ class SyncEngine @Inject constructor(
     }
 
     /** Deletes local copies only when every deletion condition holds. Unsynced photos are never purged. */
+    /** Called when the server's data was cleared by an administrator. Saves a full backup first. */
+    internal var onReset: suspend () -> Unit = {}
+
+    /**
+     * When an administrator clears all data, every phone must start afresh: otherwise queued records
+     * from before would be sent again. A full backup (records and photos) is written before the reset.
+     */
+    internal suspend fun checkDataGeneration() {
+        val generation = api.changes(db.kv().get(Keys.CURSOR) ?: "0", 1).dataGeneration.toString()
+        val seen = db.kv().get(Keys.DATA_GENERATION)
+        if (seen != null && seen != generation) {
+            runCatching { onReset() }
+            val files = db.media().all().mapNotNull { it.localPath }
+            withContext(Dispatchers.IO) { db.clearAllTables() }
+            files.forEach { File(it).delete() }
+        }
+        if (seen != generation) db.kv().put(KeyValueEntity(Keys.DATA_GENERATION, generation))
+    }
+
     /** Verified photos stay on the phone as a second copy this long, unless storage runs low. */
     internal var retentionDays = 30L
     internal var freeBytes: () -> Long = { android.os.StatFs(android.os.Environment.getDataDirectory().path).availableBytes }
 
-    internal suspend fun cleanupMedia() {
+    /**
+     * Removes local copies of photos the server has verified. [now] = true is the officer's
+     * "Free up space": the 30-day second copy is given up, but never a photo not yet verified.
+     * Returns the bytes freed.
+     */
+    internal suspend fun cleanupMedia(now: Boolean = false): Long {
+        var freed = 0L
         val keepAfter = Instant.now().minus(java.time.Duration.ofDays(retentionDays))
-        val storageLow = freeBytes() < com.teasoo.tms.data.repo.PhotoStore.LOW_STORAGE_BYTES
+        val storageLow = now || freeBytes() < com.teasoo.tms.data.repo.PhotoStore.LOW_STORAGE_BYTES
         for (m in db.media().verifiedWithLocalCopy()) {
             val captured = runCatching { Instant.parse(m.capturedAt) }.getOrDefault(Instant.EPOCH)
             if (!storageLow && captured.isAfter(keepAfter)) continue
@@ -233,8 +261,13 @@ class SyncEngine @Inject constructor(
             )
             if (!MediaDeletionPolicy.mayDelete(facts)) continue
             val file = File(m.localPath!!)
-            if (!file.exists() || file.delete()) db.media().markOffloaded(m.id, Instant.now().toString())
+            val size = file.length()
+            if (!file.exists() || file.delete()) {
+                db.media().markOffloaded(m.id, Instant.now().toString())
+                freed += size
+            }
         }
+        return freed
     }
 
     // ------------------------------------------------------------------ pull

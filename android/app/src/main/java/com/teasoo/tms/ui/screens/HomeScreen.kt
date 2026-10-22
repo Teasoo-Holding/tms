@@ -7,6 +7,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -79,7 +81,6 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
     val ctx by fs.context.collectAsStateWithLifecycle()
     val trees by fs.treesThisSession.collectAsStateWithLifecycle()
     val observations by fs.observationsThisSession.collectAsStateWithLifecycle()
-    val context = LocalContext.current
 
     // Search and the area map follow the session's project.
     LaunchedEffect(ctx?.session?.projectId) { ctx?.session?.projectId?.let { vm.selectProject(it) } }
@@ -87,120 +88,96 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Column {
-                        Text("TMS Field")
-                        Text("${session.user.fullName} · ${roleLabel(session.user.role)}", style = MaterialTheme.typography.labelMedium)
-                    }
-                },
+                title = { Text(ctx?.project?.name ?: "TMS Field", maxLines = 1) },
                 actions = { AccountMenu(session, vm) },
             )
         },
     ) { padding ->
         Column(
-            Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()),
+            Modifier.padding(padding).padding(horizontal = 20.dp, vertical = 8.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (sync.lowStorage) Notice("Storage is running low. Sync to offload verified photos, or free up space on the device.", MaterialTheme.colorScheme.errorContainer)
-
+            if (sync.lowStorage) Notice("Phone storage is low. Open “Ready to send” → Free up space.", MaterialTheme.colorScheme.errorContainer)
             val c = ctx
             when {
                 projects.isEmpty() -> Notice(
-                    if (sync.lastSuccess == null) "Downloading your projects… Stay connected for the first sync."
-                    else if (isAdmin) "No projects yet. Create one under Administration → Projects below."
-                    else "You are not assigned to any project yet. Ask an administrator.",
+                    when {
+                        sync.lastSuccess == null -> "Connect to the internet to download your projects."
+                        isAdmin -> "No projects yet. Create one in Administration."
+                        else -> "No project assigned to you yet."
+                    },
                 )
-                c == null -> ElevatedCard(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Going to the field?", style = MaterialTheme.typography.titleMedium)
-                        Text("Pick the project, planting year and sector once. Everything you record today is filed under them until you change.",
-                            style = MaterialTheme.typography.bodyMedium)
-                        Button(onClick = { nav.navigate(Routes.SESSION_SETUP) }, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Start field session")
+                c == null -> PrimaryPill(Icons.Default.PlayArrow, "Start field session") { nav.navigate(Routes.SESSION_SETUP) }
+                else -> {
+                    // One line saying where the officer is working; tap to change.
+                    Surface(onClick = { nav.navigate(Routes.SESSION_SETUP) }, shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(c.title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                                if (trees + observations > 0) Text("$trees registered · $observations visits today", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Icon(Icons.Default.Edit, contentDescription = "Change session", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                }
-                else -> SessionContextCard(
-                    ctx = c, trees = trees, observations = observations,
-                    onSwitchSubSector = fs::switchSubSector,
-                    onChange = { nav.navigate(Routes.SESSION_SETUP) },
-                    onEnd = { fs.end() },
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        BigAction(Icons.Default.AddCircle, "Register trees", Modifier.weight(1f), enabled = !c.stale) { nav.navigate(Routes.SESSION_REGISTER) }
-                        BigAction(Icons.Default.Checklist, "Visit trees", Modifier.weight(1f), enabled = !c.stale) { nav.navigate(Routes.SESSION_VISIT) }
-                    }
+                    if (c.stale) Notice("This session's area was changed by an administrator. Tap above to choose again.", MaterialTheme.colorScheme.errorContainer)
+                    SubSectorChips(c, fs::switchSubSector)
+                    PrimaryPill(Icons.Default.Add, "Register trees", enabled = !c.stale) { nav.navigate(Routes.SESSION_REGISTER) }
+                    Pill(Icons.Default.Checklist, "Visit trees", enabled = !c.stale) { nav.navigate(Routes.SESSION_VISIT) }
                 }
             }
-
-            SyncCard(vm, session, onDetails = { nav.navigate(Routes.SYNC) })
-
             if (projects.isNotEmpty()) {
-                HomeAction(Icons.Default.History, "My visits", "Everything you recorded, newest first, with sync status") { nav.navigate(Routes.MY_VISITS) }
-                HomeAction(Icons.Default.Search, "Find any tree", "Search across the project: observe, edit, or plant a replacement") { nav.navigate(Routes.TREES) }
-                HomeAction(Icons.Default.Map, "Area map", "Sector and sub-sector boundaries") { nav.navigate(Routes.MAP) }
+                Pill(Icons.Default.History, "My visits") { nav.navigate(Routes.MY_VISITS) }
+                Pill(
+                    Icons.AutoMirrored.Filled.Send, "Ready to send",
+                    count = (sync.pendingOperations + sync.unsentPhotos).takeIf { it > 0 },
+                    alert = sync.needsAttention > 0,
+                ) { nav.navigate(Routes.SYNC) }
+                Pill(Icons.Default.Search, "Find a tree") { nav.navigate(Routes.TREES) }
+                Pill(Icons.Default.Map, "Map") { nav.navigate(Routes.MAP) }
             }
-
-            if (isAdmin) {
-                Text("Administration", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-                Text("Set up projects, ID formats, areas, custom fields, users and assignments here or in the web portal. These need a connection.",
-                    style = MaterialTheme.typography.bodySmall)
-                ADMIN_ENTRIES.forEach { e -> HomeAction(e.icon, e.title, e.subtitle) { nav.navigate(e.route) } }
-                HomeAction(Icons.Default.Warning, "Conflicts", "Resolve duplicate tree IDs reported by sync") { nav.navigate(Routes.ADMIN_CONFLICTS) }
-                if (BuildConfig.PORTAL_URL.isNotBlank()) {
-                    HomeAction(Icons.Default.OpenInBrowser, "Open web portal", "Configuration, users, reports and exports") { openPortal(context) }
-                }
-            }
+            if (isAdmin) Pill(Icons.Default.AdminPanelSettings, "Administration") { nav.navigate(com.teasoo.tms.ui.admin.AdminRoutes.HUB) }
+            if (c != null) TextButton(onClick = { fs.end() }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("End session") }
+            SyncFooter(vm)
         }
     }
 }
 
+/** Last sync and a sync button, nothing more. */
 @Composable
-private fun SyncCard(vm: AppViewModel, session: SessionState.Active, onDetails: () -> Unit) {
+private fun SyncFooter(vm: AppViewModel) {
     val sync by vm.sync.collectAsStateWithLifecycle()
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        if (sync.pendingOperations == 0 && sync.unsentPhotos == 0) "All sent"
-                        else "${sync.pendingOperations} records · ${sync.unsentPhotos} photos to send",
-                        style = MaterialTheme.typography.titleSmall,
-                    )
-                    Text("Last sync ${formatInstant(sync.lastSuccess)}", style = MaterialTheme.typography.bodySmall)
-                }
-                FilledTonalButton(onClick = vm::syncNow, enabled = !sync.running) { Text(if (sync.running) "Syncing…" else "Sync") }
-            }
-            if (sync.needsAttention > 0) Text("${sync.needsAttention} items need attention (conflicts or rejections).", color = MaterialTheme.colorScheme.error)
-            if (sync.failedPhotos > 0) Text("${sync.failedPhotos} photos failed verification and will be re-sent.", style = MaterialTheme.typography.bodySmall)
-            sync.lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Offline access until ${formatInstant(session.offlineValidUntil.toString())}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                TextButton(onClick = onDetails) { Text("Details") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun BigAction(icon: ImageVector, label: String, modifier: Modifier, enabled: Boolean, onClick: () -> Unit) {
-    Button(onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 72.dp), contentPadding = PaddingValues(12.dp)) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, contentDescription = null)
-            Text(label)
-        }
-    }
-}
-
-@Composable
-private fun HomeAction(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        ListItem(
-            headlineContent = { Text(title) },
-            supportingContent = { Text(subtitle) },
-            leadingContent = { Icon(icon, contentDescription = null) },
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+        Text(
+            if (sync.running) "Syncing…" else "Synced ${formatInstant(sync.lastSuccess)}",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        IconButton(onClick = vm::syncNow, enabled = !sync.running) { Icon(Icons.Default.Sync, contentDescription = "Sync now") }
+    }
+}
+
+/** The one main action on the screen: a large filled pill. */
+@Composable
+private fun PrimaryPill(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Button(onClick = onClick, enabled = enabled, shape = CircleShape, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
+        Icon(icon, contentDescription = null)
+        Spacer(Modifier.width(12.dp))
+        Text(label, style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+/** A large rounded option with an icon, a label and an optional count. */
+@Composable
+private fun Pill(icon: ImageVector, label: String, count: Int? = null, alert: Boolean = false, enabled: Boolean = true, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick, enabled = enabled, shape = CircleShape, tonalElevation = 2.dp, shadowElevation = 1.dp,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp),
+    ) {
+        Row(Modifier.padding(horizontal = 24.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
+            Spacer(Modifier.width(20.dp))
+            Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            if (alert) Icon(Icons.Default.Error, contentDescription = "Needs attention", tint = MaterialTheme.colorScheme.error)
+            count?.let { Text("$it", style = MaterialTheme.typography.titleMedium) }
+        }
     }
 }

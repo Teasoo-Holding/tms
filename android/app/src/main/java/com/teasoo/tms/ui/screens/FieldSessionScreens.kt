@@ -256,20 +256,18 @@ fun SessionSetupScreen(onStarted: () -> Unit, onBack: () -> Unit, vm: SessionSet
     LaunchedEffect(mySubs) { if (subSectorId == null && mySubs.size == 1) vm.subSectorId.value = mySubs[0].id }
 
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Set up today’s session") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
+        TopAppBar(title = { Text("Field session") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
     }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Choose these once. Every tree you register or visit will use them until you change them. You can switch sub-sector at any time as you move.",
-                style = MaterialTheme.typography.bodyMedium)
             Picker("Project", projects, projects.find { it.id == projectId }, { "${it.name} (${it.shortCode})" }, { vm.selectProject(it.id) })
             Picker("Planting year", years, years.find { it.id == yearId }, { it.yearLabel + if (it.active) "" else " (closed – back-entry)" }, { vm.selectYear(it.id) },
-                enabled = projectId != null, supportingText = "The cohort on the labels, not necessarily this year")
+                enabled = projectId != null, supportingText = null)
             if (vendorNeeded) {
                 Picker("Vendor", vendors, vendors.find { it.id == vendorId }, { listOfNotNull(it.shortCode, it.name).joinToString(" · ") }, { vm.vendorId.value = it.id },
-                    enabled = yearId != null, supportingText = "Whose trees you are tagging today; their tag format is used")
+                    enabled = yearId != null, supportingText = null)
             }
             Picker("Sector", mySectors, mySectors.find { it.id == sectorId }, { "${it.shortCode} · ${it.name}" }, { vm.selectSector(it.id) }, enabled = yearId != null,
-                supportingText = "From this year’s land survey")
+                supportingText = null)
             Picker("Starting sub-sector", mySubs, mySubs.find { it.id == subSectorId }, { "${it.shortCode} · ${it.name}" }, { vm.subSectorId.value = it.id }, enabled = sectorId != null)
             if (yearId != null && mySectors.isEmpty()) Notice("No surveyed areas for this planting year on this device yet. Sync, or ask an administrator to add this year's sectors.")
             VisitTypeSelector(visitType) { vm.visitType.value = it }

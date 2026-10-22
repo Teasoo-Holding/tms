@@ -257,7 +257,6 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
                 value = f.customId,
                 onValueChange = { v -> vm.update { it.copy(customId = v.take(64)) } },
                 label = { Text("New tree ID") },
-                supportingText = { Text("Letters, digits and - _ / . — must not be used by another tree.") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             ) else when (val p = prefix) {
@@ -269,8 +268,7 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
                         OutlinedTextField(
                             value = f.serial,
                             onValueChange = { v -> vm.update { it.copy(serial = v.filter(Char::isDigit).take(info.serialWidth)) } },
-                            label = { Text("Serial number on the label") },
-                            supportingText = { Text("Digits only, up to ${info.serialWidth}. Leading zeros are added for you.") },
+                            label = { Text("Tree number") },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                             singleLine = true,
                             isError = check != null && check !is SerialCheck.Ok,
@@ -282,9 +280,6 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
                             is SerialCheck.LocalDuplicate -> Text("${c.physicalId} is already registered on this device. Check the label.", color = MaterialTheme.colorScheme.error)
                             is SerialCheck.Ok -> Text("Tree ID: ${c.assembled.physicalId}", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                             null -> {}
-                        }
-                        if (check is SerialCheck.Ok) {
-                            Text("Other devices that are offline cannot be checked; the server confirms uniqueness when you sync.", style = MaterialTheme.typography.bodySmall)
                         }
                     },
                     onFailure = { Text(it.message ?: "The ID format is unavailable.", color = MaterialTheme.colorScheme.error) },
@@ -298,7 +293,6 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
             DateField("Planted on", f.plantedOn, { d -> vm.update { it.copy(plantedOn = d) } })
             OutlinedTextField(f.remarks, { v -> vm.update { it.copy(remarks = v) } }, label = { Text("Observation remarks") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(f.notes, { v -> vm.update { it.copy(notes = v) } }, label = { Text("Tree notes") }, modifier = Modifier.fillMaxWidth())
-            Text("No GPS is recorded for the tree; its location is the sub-sector.", style = MaterialTheme.typography.bodySmall)
 
             PhotoRow(f.photos, onAdd = { camera = true }, onRemove = vm::removePhoto, required = photoMissing)
             val treeFieldDefs by vm.treeFieldDefs.collectAsStateWithLifecycle()

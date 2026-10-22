@@ -13,6 +13,8 @@ import com.teasoo.tms.sync.SyncEngine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
+import com.teasoo.tms.data.remote.ChangeDto
+import com.teasoo.tms.data.remote.ChangesResponse
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.*
@@ -307,6 +309,70 @@ class LocalStoreTest {
         assertEquals("REPL-0001", payload["custom_physical_id"]!!.jsonPrimitive.content)
         // Not for ordinary registrations, and not twice.
         assertTrue(runCatching { trees.register(newTree("1202").copy(customPhysicalId = "X-1", confirmedPhysicalId = "X-1"), user) }.exceptionOrNull() is RegistrationException)
+    }
+
+    @Test
+    fun serverDeletionsRemoveConfigurationFromThePhone() = runBlocking {
+        val tomb = ChangesResponse(
+            changes = listOf(ChangeDto(1, "species", buildJsonObject { put("id", "sp1") }, deleted = true)),
+            nextCursor = "1", hasMore = false, assignmentFingerprint = "x",
+        )
+        ReferenceRepository(db).applyChanges(tomb)
+        assertTrue(db.reference().species().first().none { it.id == "sp1" })
+    }
+
+    @Test
+    fun aClearedServerResetsThePhoneAfterABackup() = runBlocking {
+        val generation = java.util.concurrent.atomic.AtomicLong(1)
+        val api = Proxy.newProxyInstance(TmsApi::class.java.classLoader, arrayOf(TmsApi::class.java)) { _, m, _ ->
+            if (m.name == "changes") ChangesResponse(emptyList(), "0", false, "x", dataGeneration = generation.get()) else error("no network in tests")
+        } as TmsApi
+        val e = SyncEngine(db, api, SessionStore(context), ReferenceRepository(db), OkHttpClient())
+        var backedUp = 0
+        e.onReset = { backedUp++ }
+        e.checkDataGeneration() // first contact: remembers generation 1
+        trees.register(newTree("1301"), user)
+        e.checkDataGeneration()
+        assertEquals(1, db.trees().count("p1").first())
+        generation.set(2) // an administrator cleared all data
+        e.checkDataGeneration()
+        assertEquals(1, backedUp)
+        assertEquals(0, db.trees().count("p1").first())
+        assertTrue(db.outbox().pendingList().isEmpty())
+        assertEquals("2", db.kv().get(Keys.DATA_GENERATION))
+    }
+
+    @Test
+    fun freeUpSpaceGivesUpTheSecondCopyButNeverUnsentPhotos() = runBlocking {
+        val sent = photo()
+        val unsent = photo()
+        val id = trees.register(newTree("1401", listOf(sent, unsent)), user)
+        val media = db.media().forTree(id).first()
+        val verified = media.first { it.localPath == sent.file.absolutePath }
+        db.media().upsert(
+            verified.copy(state = MediaState.VERIFIED, serverChecksum = verified.checksumSha256, serverByteSize = verified.byteSize,
+                remoteVerifiedAt = "2026-01-01T00:00:00Z", associationVerifiedAt = "2026-01-01T00:00:00Z", ackPersistedAt = "2026-01-01T00:00:00Z"),
+        )
+        db.outbox().pendingList().forEach { db.outbox().delete(it.operationId) }
+        engine.retentionDays = 30
+        engine.freeBytes = { Long.MAX_VALUE }
+        assertTrue(engine.cleanupMedia(now = true) > 0)
+        assertFalse(sent.file.exists())
+        assertTrue(unsent.file.exists())
+    }
+
+    @Test
+    fun aBackupFileRestoresQueuedRecords() = runBlocking {
+        trees.register(newTree("1501"), user)
+        val file = File.createTempFile("backup", ".zip")
+        file.outputStream().use { BackupExporter(db, SessionStore(context)).export(it, includePhotos = false) }
+        val ops = db.outbox().pendingList()
+        ops.forEach { db.outbox().delete(it.operationId) }
+        val restored = LocalBackups(context, db, BackupExporter(db, SessionStore(context)), PhotoStore(context)).restore(android.net.Uri.fromFile(file))
+        assertEquals(1, restored.operations)
+        assertEquals(ops.map { it.operationId }, db.outbox().pendingList().map { it.operationId })
+        // Restoring again adds nothing.
+        assertEquals(0, LocalBackups(context, db, BackupExporter(db, SessionStore(context)), PhotoStore(context)).restore(android.net.Uri.fromFile(file)).operations)
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.teasoo.tms.data.local.*
 import com.teasoo.tms.data.remote.*
 import com.teasoo.tms.domain.TreeIdAssembler
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -23,8 +24,11 @@ class ReferenceRepository @Inject constructor(private val db: TmsDatabase) {
         ref.upsertSubSectors(b.subSectors.map { it.toEntity() })
         ref.pruneSubSectors(b.subSectors.map { it.id })
         ref.upsertSpecies(b.species.map { it.toEntity() })
+        ref.pruneSpecies(b.species.map { it.id })
         ref.upsertStatuses(b.statuses.map { it.toEntity() })
+        ref.pruneStatuses(b.statuses.map { it.id })
         ref.upsertVendors(b.vendors.map { it.toEntity() })
+        ref.pruneVendors(b.vendors.map { it.id })
         ref.clearAssignments()
         ref.upsertAssignments(b.assignments.map { it.toEntity() })
         ref.clearAllocations()
@@ -44,8 +48,26 @@ class ReferenceRepository @Inject constructor(private val db: TmsDatabase) {
 
     /** Applies one page of the change feed and advances the cursor in the same transaction. */
     suspend fun applyChanges(page: ChangesResponse) = db.withTransaction {
-        for (c in page.changes) applyChange(c.entityType, c.data)
+        for (c in page.changes) if (c.deleted) applyDeletion(c.entityType, c.data["id"]!!.jsonPrimitive.content) else applyChange(c.entityType, c.data)
         db.kv().put(KeyValueEntity(Keys.CURSOR, page.nextCursor))
+    }
+
+    /** The server deleted configuration nothing depends on any more; drop it here too. */
+    private suspend fun applyDeletion(type: String, id: String) {
+        when (type) {
+            "project" -> ref.deleteProject(id)
+            "planting_year" -> ref.deleteYear(id)
+            "tree_id_scheme" -> ref.deleteScheme(id)
+            "sector" -> ref.deleteSector(id)
+            "sub_sector" -> ref.deleteSubSector(id)
+            "species" -> ref.deleteSpecies(id)
+            "status" -> ref.deleteStatus(id)
+            "vendor" -> ref.deleteVendor(id)
+            "assignment" -> ref.deleteAssignment(id)
+            "serial_allocation" -> ref.deleteAllocation(id)
+            "custom_field" -> ref.deleteCustomField(id)
+            "planting_year_vendor" -> ref.deleteYearVendor(id)
+        }
     }
 
     private suspend fun applyChange(type: String, data: JsonObject) {

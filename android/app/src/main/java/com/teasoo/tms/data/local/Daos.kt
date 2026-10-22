@@ -53,6 +53,23 @@ interface ReferenceDao {
     @Query("SELECT * FROM vendors ORDER BY name") fun vendors(): Flow<List<VendorEntity>>
     @Query("SELECT * FROM vendors WHERE id = :id") suspend fun vendor(id: String): VendorEntity?
 
+    // Tombstones from the server (an administrator deleted the row).
+    @Query("DELETE FROM projects WHERE id = :id") suspend fun deleteProject(id: String)
+    @Query("DELETE FROM planting_years WHERE id = :id") suspend fun deleteYear(id: String)
+    @Query("DELETE FROM id_schemes WHERE id = :id") suspend fun deleteScheme(id: String)
+    @Query("DELETE FROM sectors WHERE id = :id") suspend fun deleteSector(id: String)
+    @Query("DELETE FROM sub_sectors WHERE id = :id") suspend fun deleteSubSector(id: String)
+    @Query("DELETE FROM species WHERE id = :id") suspend fun deleteSpecies(id: String)
+    @Query("DELETE FROM statuses WHERE id = :id") suspend fun deleteStatus(id: String)
+    @Query("DELETE FROM vendors WHERE id = :id") suspend fun deleteVendor(id: String)
+    @Query("DELETE FROM assignments WHERE id = :id") suspend fun deleteAssignment(id: String)
+    @Query("DELETE FROM serial_allocations WHERE id = :id") suspend fun deleteAllocation(id: String)
+    @Query("DELETE FROM custom_fields WHERE id = :id") suspend fun deleteCustomField(id: String)
+    @Query("DELETE FROM planting_year_vendors WHERE id = :id") suspend fun deleteYearVendor(id: String)
+    @Query("DELETE FROM species WHERE id NOT IN (:keep)") suspend fun pruneSpecies(keep: List<String>)
+    @Query("DELETE FROM statuses WHERE id NOT IN (:keep)") suspend fun pruneStatuses(keep: List<String>)
+    @Query("DELETE FROM vendors WHERE id NOT IN (:keep)") suspend fun pruneVendors(keep: List<String>)
+
     @Upsert suspend fun upsertCustomFields(rows: List<CustomFieldEntity>)
     @Query("DELETE FROM custom_fields WHERE id NOT IN (:keep)") suspend fun pruneCustomFields(keep: List<String>)
     /** Active fields for a form, in the administrator's order. */
@@ -252,6 +269,7 @@ interface MediaDao {
     suspend fun dueForUpload(now: Long): List<MediaEntity>
     @Query("SELECT * FROM media WHERE state = 'VERIFIED' AND localPath IS NOT NULL") suspend fun verifiedWithLocalCopy(): List<MediaEntity>
     @Query("SELECT * FROM media WHERE state <> 'VERIFIED' AND localPath IS NOT NULL ORDER BY capturedAt") suspend fun unsent(): List<MediaEntity>
+    @Query("SELECT * FROM media") suspend fun all(): List<MediaEntity>
     @Query("SELECT count(*) FROM media WHERE state <> 'VERIFIED' AND localPath IS NOT NULL") fun pendingCount(): Flow<Int>
     @Query("SELECT count(*) FROM media WHERE state = 'FAILED'") fun failedCount(): Flow<Int>
     @Query("UPDATE media SET localPath = NULL, localDeletedAt = :at WHERE id = :id") suspend fun markOffloaded(id: String, at: String)
@@ -267,6 +285,7 @@ interface OutboxDao {
     suspend fun unsentUpdateFor(entityId: String): OutboxEntity?
     @Query("UPDATE outbox SET payloadJson = :payload, clientRecordedAt = :at WHERE seq = :seq") suspend fun replacePayload(seq: Long, payload: String, at: String)
     @Query("DELETE FROM outbox WHERE operationId = :operationId") suspend fun delete(operationId: String)
+    @Query("SELECT * FROM outbox WHERE operationId = :operationId") suspend fun byOperationId(operationId: String): OutboxEntity?
     @Query("UPDATE outbox SET state = :state, resultCode = :code, lastError = :message WHERE operationId = :operationId")
     suspend fun finish(operationId: String, state: String, code: String?, message: String?)
     @Query("UPDATE outbox SET attempts = attempts + 1, nextAttemptAt = :next, lastError = :error WHERE operationId = :operationId")

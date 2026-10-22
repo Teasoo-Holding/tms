@@ -13,8 +13,9 @@ class SyncWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted params: WorkerParameters,
     private val engine: SyncEngine,
+    private val backups: com.teasoo.tms.data.repo.LocalBackups,
 ) : CoroutineWorker(context, params) {
-    override suspend fun doWork(): Result = when (engine.run()) {
+    override suspend fun doWork(): Result = when (engine.apply { onReset = { backups.writeSnapshot("before-reset") } }.run()) {
         SyncOutcome.Success -> Result.success()
         is SyncOutcome.Retry -> Result.retry()
         is SyncOutcome.Blocked -> Result.failure()
