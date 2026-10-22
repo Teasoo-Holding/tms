@@ -1,3 +1,4 @@
+import { DeletionController } from './deletion.controller';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { GeographyController } from './geography.controller';
@@ -7,6 +8,6 @@ import { UsersController } from './users.controller';
 
 @Module({
   imports: [AuthModule],
-  controllers: [ProjectsController, GeographyController, ReferenceController, UsersController],
+  controllers: [ProjectsController, GeographyController, ReferenceController, UsersController, DeletionController],
 })
 export class AdminModule {}

@@ -29,8 +29,8 @@ export class MediaController {
   }
 
   @Get(':id/view-url')
-  view(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.media.viewUrl(user, id);
+  view(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Query('size') size?: string) {
+    return this.media.viewUrl(user, id, size === 'thumb' ? 'thumb' : 'full');
   }
 
   // ---- development-only local storage endpoints (signed URLs, mirrors S3 presigned PUT/GET)

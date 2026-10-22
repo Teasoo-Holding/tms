@@ -18,6 +18,8 @@ export const UploadSessionBody = z.object({
   local_filename: z.string().max(255).nullish(),
 });
 
+const THUMB_PX = 320;
+
 @Injectable()
 export class MediaService {
   constructor(private readonly db: Db, private readonly access: AccessService, @Inject(OBJECT_STORAGE) private readonly storage: ObjectStorage) {}
@@ -99,7 +101,23 @@ export class MediaService {
         WHERE id = $1 RETURNING *`,
       [mediaId],
     );
+    // Make the small copy in the background; the device's verification does not wait for it.
+    if (verified?.upload_state === 'VERIFIED') void this.makeThumbnail(verified).catch(() => undefined);
     return this.verificationResult(verified);
+  }
+
+  /**
+   * A ≈320 px JPEG (≈15–30 KB) for lists, galleries and slow connections; the original (≤1600 px, ≈300 KB)
+   * is fetched only when a photo is opened full screen.
+   */
+  async makeThumbnail(media: any) {
+    if (media.thumb_key || !media.object_key) return;
+    const sharp = (await import('sharp')).default;
+    const original = await this.storage.getObject(media.object_key);
+    const thumb = await sharp(original).rotate().resize(THUMB_PX, THUMB_PX, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 70, mozjpeg: true }).toBuffer();
+    const key = `${media.object_key}.thumb.jpg`;
+    await this.storage.putObject(key, thumb, 'image/jpeg');
+    await this.db.query('UPDATE tree_media SET thumb_key = $2 WHERE id = $1', [media.id, key]);
   }
 
   private verificationResult(m: any) {
@@ -118,7 +136,8 @@ export class MediaService {
     };
   }
 
-  async viewUrl(user: AuthUser, mediaId: string) {
+  /** [size] 'thumb' returns the small copy when it exists (made on demand for older photos). */
+  async viewUrl(user: AuthUser, mediaId: string, size: 'thumb' | 'full' = 'full') {
     const media = await this.db.one(
       this.db,
       `SELECT m.*, t.project_id, t.sector_id, t.sub_sector_id FROM tree_media m JOIN trees t ON t.id = m.tree_id WHERE m.id = $1`,
@@ -127,6 +146,11 @@ export class MediaService {
     if (!media) throw notFound('Photo');
     await this.access.assertArea(user, media.project_id, media.sector_id, media.sub_sector_id);
     if (media.upload_state !== 'VERIFIED') throw new AppError(409, 'MEDIA_NOT_AVAILABLE', 'This photo has not finished uploading.');
-    return { url: await this.storage.createDownloadUrl(media.object_key), expires_in: 300 };
+    if (size === 'thumb') {
+      if (!media.thumb_key) await this.makeThumbnail(media).catch(() => undefined);
+      const fresh = await this.db.one(this.db, 'SELECT thumb_key FROM tree_media WHERE id = $1', [mediaId]);
+      if (fresh?.thumb_key) return { url: await this.storage.createDownloadUrl(fresh.thumb_key), expires_in: 300, size: 'thumb' };
+    }
+    return { url: await this.storage.createDownloadUrl(media.object_key), expires_in: 300, size: 'full' };
   }
 }

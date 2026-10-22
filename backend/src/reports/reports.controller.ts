@@ -6,9 +6,12 @@ import { AuthUser, CurrentUser } from '../common/auth.decorators';
 import { AuditService } from '../common/audit.service';
 import { parse } from '../common/validation';
 import { ReportsService } from './reports.service';
+import { addSheet, configurationSheets, csvCell } from './workbook';
+import { Db } from '../database/db.service';
+import { Roles } from '../common/auth.decorators';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const Filter = z.object({
+export const Filter = z.object({
   project_id: z.string().uuid().optional(),
   planting_year_id: z.string().uuid().optional(),
   sector_id: z.string().uuid().optional(),
@@ -20,7 +23,7 @@ const Filter = z.object({
   to: day.optional(),
   overdue_days: z.coerce.number().int().min(1).max(3650).default(90),
 });
-const VisitFilter = Filter.extend({
+export const VisitFilter = Filter.extend({
   recorded_by: z.string().uuid().optional(),
   visit_type: z.enum(['VISIT', 'FIRST_INSTANCE', 'PLANTING', 'MAINTENANCE']).optional(),
   q: z.string().max(100).optional(),
@@ -28,17 +31,10 @@ const VisitFilter = Filter.extend({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-function csvCell(v: unknown): string {
-  if (v === null || v === undefined) return '';
-  let s = v instanceof Date ? v.toISOString() : String(v);
-  // Neutralise spreadsheet formula injection.
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
 
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reports: ReportsService, private readonly audit: AuditService) {}
+  constructor(private readonly reports: ReportsService, private readonly audit: AuditService, private readonly db: Db) {}
 
   @Get('summary')
   summary(@CurrentUser() user: AuthUser, @Query() query: unknown) {
@@ -75,6 +71,32 @@ export class ReportsController {
     const header = rows.length ? Object.keys(rows[0]) : ['physical_tree_id'];
     res.write('﻿' + header.join(',') + '\n');
     for (const r of rows) res.write(header.map((h) => csvCell(r[h])).join(',') + '\n');
+    res.end();
+  }
+
+  /** Everything in one workbook (respecting the filters): configuration, trees, visits and the summary. */
+  @Roles('ADMIN')
+  @Get('export.xlsx')
+  async exportAll(@CurrentUser() user: AuthUser, @Query() query: unknown, @Res() res: Response) {
+    const f = parse(VisitFilter, query);
+    const [summary, trees, visits, config] = await Promise.all([
+      this.reports.summary(user, f),
+      this.reports.treeRows(user, f),
+      this.reports.visitRows(user, f, 1_000_000, 0),
+      configurationSheets(this.db, f.project_id ? [f.project_id] : null),
+    ]);
+    const wb = new ExcelJS.Workbook();
+    wb.created = new Date();
+    addSheet(wb, 'Summary', [{ generated_at: summary.generated_at, last_server_sync_at: summary.last_server_sync_at, ...summary.totals }]);
+    addSheet(wb, 'By status', summary.by_status);
+    addSheet(wb, 'By sector', summary.sector_share);
+    addSheet(wb, 'Trees', trees);
+    addSheet(wb, 'Visits', visits.items);
+    for (const [name, rows] of Object.entries(config)) addSheet(wb, name, rows);
+    await this.audit.record({ actorId: user.id, action: 'export.xlsx', entityType: 'report', projectId: f.project_id, metadata: { kind: 'all', trees: trees.length, visits: visits.items.length } });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="tms-export-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    await wb.xlsx.write(res);
     res.end();
   }
 
