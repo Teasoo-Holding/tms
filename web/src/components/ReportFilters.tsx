@@ -40,8 +40,8 @@ export function useReportFilters(extraKeys: string[] = []) {
     setParams(next, { replace: true });
   };
   const values = Object.fromEntries(allKeys.map((k) => [k, get(k)])) as Record<string, string>;
-  const active = allKeys.some((k) => !!get(k));
-  return { get, set, update, reset, values, active };
+  const count = allKeys.filter((k) => !!get(k)).length;
+  return { get, set, update, reset, values, active: count > 0, count };
 }
 export type ReportFiltersState = ReturnType<typeof useReportFilters>;
 
@@ -58,14 +58,28 @@ function presetRange(preset: string): { from: string; to: string } {
 }
 const PRESETS: [string, string][] = [['7', 'Last 7 days'], ['30', '30 days'], ['90', '90 days'], ['year', 'This year'], ['all', 'All time']];
 
-export function ReportFilters({ f, showOverdue = false, dateNote, children }: {
+/** The single "Filters" button that opens the filter panel; shows how many filters are active. */
+export function FiltersButton({ count, open, onToggle }: { count: number; open: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" className={`no-print${count ? ' has-count' : ''}`} aria-expanded={open} onClick={onToggle}>
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+        <path d="M4 5h16l-6 8v5l-4 2v-7z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+      Filters
+      {count > 0 && <span className="count">{count}</span>}
+    </button>
+  );
+}
+
+export function ReportFilters({ f, showOverdue = false, dateNote, children, onClose }: {
   f: ReportFiltersState;
   /** Show the "overdue after" selector (dashboard only). */
   showOverdue?: boolean;
-  /** One-line explanation of what the date range filters. */
-  dateNote: ReactNode;
-  /** Page-specific filters, appended to the bar. */
+  /** Short note on what the date range filters (only where it prevents misreading). */
+  dateNote?: ReactNode;
+  /** Page-specific filters, appended to the panel. */
   children?: ReactNode;
+  onClose?: () => void;
 }) {
   const projectId = f.get('project_id');
   const sectorId = f.get('sector_id');
@@ -109,7 +123,14 @@ export function ReportFilters({ f, showOverdue = false, dateNote, children }: {
   );
 
   return (
-    <div className="stack" style={{ gap: 8 }}>
+    <section className="card filter-panel no-print" aria-label="Filters">
+      <div className="row" role="group" aria-label="Period" style={{ marginBottom: 12 }}>
+        {PRESETS.map(([k, label]) => (
+          <button key={k} type="button" className={`chip${activePreset === k ? ' on' : ''}`} aria-pressed={activePreset === k} onClick={() => f.update(presetRange(k))}>
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="filters" style={{ marginBottom: 0 }}>
         {select('project_id', 'Project', (projects.data ?? []).map((p) => [p.id, p.name]), 'All my projects')}
         {select('planting_year_id', 'Planting year', (project.data?.planting_years ?? []).map((y: any) => [y.id, y.year_label]), 'All years', !projectId)}
@@ -117,17 +138,12 @@ export function ReportFilters({ f, showOverdue = false, dateNote, children }: {
         {select('sector_id', 'Sector', sectors.map((s) => [s.id, `${s.short_code} · ${s.name}${yearId && s.planting_year_id == null ? ' (older setup)' : ''}`]), 'All sectors', !projectId)}
         {select('sub_sector_id', 'Sub-sector', subSectors.map((s) => [s.id, `${s.short_code} · ${s.name}`]), 'All sub-sectors', !sectorId)}
         {select('species_id', 'Species', (species.data ?? []).map((s) => [s.id, s.common_name ?? s.scientific_name]), 'All species')}
-        {select(
-          'status_id',
-          'Current status',
-          (statuses.data ?? []).map((s) => [s.id, s.active === false ? `${s.name} (old)` : s.name]),
-          'Any status',
-        )}
-        <label className="field" style={{ minWidth: 0 }}>
+        {select('status_id', 'Current status', (statuses.data ?? []).map((s) => [s.id, s.active === false ? `${s.name} (old)` : s.name]), 'Any status')}
+        <label className="field">
           From
           <input type="date" value={from} max={to || undefined} onChange={(e) => f.set('from', e.target.value)} />
         </label>
-        <label className="field" style={{ minWidth: 0 }}>
+        <label className="field">
           To
           <input type="date" value={to} min={from || undefined} onChange={(e) => f.set('to', e.target.value)} />
         </label>
@@ -136,30 +152,18 @@ export function ReportFilters({ f, showOverdue = false, dateNote, children }: {
             Overdue after
             <select value={f.get('overdue_days') || '90'} onChange={(e) => f.set('overdue_days', e.target.value === '90' ? '' : e.target.value)}>
               {[30, 60, 90, 180, 365].map((d) => (
-                <option key={d} value={d}>{d} days without observation</option>
+                <option key={d} value={d}>{d} days</option>
               ))}
             </select>
           </label>
         )}
         {children}
-        <button type="button" onClick={f.reset} disabled={!f.active}>Reset filters</button>
       </div>
-      <div className="row" role="group" aria-label="Date range presets">
-        <span className="muted">Period:</span>
-        {PRESETS.map(([k, label]) => (
-          <button
-            key={k}
-            type="button"
-            className={activePreset === k ? 'primary' : ''}
-            aria-pressed={activePreset === k}
-            style={{ padding: '3px 10px', fontSize: 13 }}
-            onClick={() => f.update(presetRange(k))}
-          >
-            {label}
-          </button>
-        ))}
-        <span className="muted">{dateNote}</span>
+      {dateNote && <p className="muted" style={{ margin: '10px 0 0' }}>{dateNote}</p>}
+      <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+        <button type="button" onClick={f.reset} disabled={!f.active}>Clear all</button>
+        {onClose && <button type="button" className="primary" onClick={onClose}>Done</button>}
       </div>
-    </div>
+    </section>
   );
 }

@@ -1,63 +1,72 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useIsAdmin } from '../auth';
-import { clean, EmptyState, ErrorNotice, Field, fmtDate, fmtNum, Modal, PageHeader, useForm } from '../components/ui';
+import { clean, EmptyState, ErrorNotice, Field, fmtNum, Modal, PageHeader, RowMenu, useDelete, useForm } from '../components/ui';
 
 export function ProjectsPage() {
   const isAdmin = useIsAdmin();
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<any | null>(null);
+  const del = useDelete();
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
   return (
     <div>
-      <PageHeader
-        title="Projects & areas"
-        subtitle="Each project has its own planting years, tree ID format, sectors, officers and custom fields. Open a project to set these up."
-        actions={
-          isAdmin && (
-            <button className="primary" onClick={() => setCreating(true)}>
-              + New project
-            </button>
-          )
-        }
-      />
+      <PageHeader title="Projects" actions={isAdmin && <button className="primary" onClick={() => setCreating(true)}>+ New project</button>} />
       <ErrorNotice error={projects.error} />
       <div className="card table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Project</th>
-              <th>Code</th>
-              <th>Status</th>
-              <th>Location</th>
-              <th>Dates</th>
-              <th className="num">Registered trees</th>
-            </tr>
-          </thead>
-          <tbody>
-            {projects.data?.map((p) => (
-              <tr key={p.id} className="clickable" onClick={() => navigate(`/projects/${p.id}`)}>
-                <td><a href={`/projects/${p.id}`} onClick={(e) => e.preventDefault()}>{p.name}</a></td>
-                <td className="mono">{p.short_code}</td>
-                <td><span className="pill">{p.status.toLowerCase()}</span></td>
-                <td>{p.location ?? '—'}</td>
-                <td>{fmtDate(p.start_date)} – {fmtDate(p.end_date)}</td>
-                <td className="num">{fmtNum(p.tree_count)}</td>
+        {!!projects.data?.length && (
+          <table>
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Status</th>
+                <th className="num">Trees</th>
+                {isAdmin && <th className="actions" />}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {projects.data.map((p) => (
+                <tr key={p.id} className="clickable" onClick={() => navigate(`/projects/${p.id}`)}>
+                  <td>
+                    <Link to={`/projects/${p.id}`} onClick={(e) => e.stopPropagation()}>{p.name}</Link>
+                    <div className="muted">
+                      <span className="mono">{p.short_code}</span>
+                      {p.location && ` · ${p.location}`}
+                    </div>
+                  </td>
+                  <td><span className="pill">{p.status.toLowerCase()}</span></td>
+                  <td className="num">{fmtNum(p.tree_count)}</td>
+                  {isAdmin && (
+                    <td className="actions">
+                      <RowMenu
+                        items={[
+                          { label: 'Edit', onClick: () => setEditing(p) },
+                          {
+                            label: 'Delete',
+                            danger: true,
+                            onClick: () => del.ask({ what: 'project', name: p.name, path: `/projects/${p.id}`, note: 'Only a project without trees can be deleted. All its setup is removed.' }),
+                          },
+                        ]}
+                      />
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
         {projects.data?.length === 0 && (
-          <EmptyState
-            title="No projects yet"
-            action={isAdmin && <button className="primary" onClick={() => setCreating(true)}>Create your first project</button>}
-          >
-            {isAdmin ? 'Create a project, then follow the setup checklist: planting years, ID format, areas, officers.' : 'Ask an administrator to assign you to a project.'}
+          <EmptyState title="No projects yet" action={isAdmin && <button className="primary" onClick={() => setCreating(true)}>+ New project</button>}>
+            {!isAdmin && 'Ask an administrator to give you access.'}
           </EmptyState>
         )}
+        {projects.isLoading && <div className="empty">Loading…</div>}
       </div>
+      {del.dialog}
+      {editing && <ProjectForm project={editing} onClose={() => setEditing(null)} />}
       {creating && <ProjectForm onClose={() => setCreating(false)} onSaved={(p) => navigate(`/projects/${p.id}`, { state: { created: true } })} />}
     </div>
   );
@@ -117,7 +126,6 @@ export function ProjectForm({ project, onClose, onSaved }: { project?: any; onCl
         ) : (
           <p className="muted">Physical IDs are unique {project.physical_id_uniqueness === 'GLOBAL' ? 'across all projects' : 'within this project'}.</p>
         )}
-        {!project && <p className="muted" style={{ margin: 0 }}>New projects start as drafts. After saving, a checklist guides you through planting years, the tree ID format, areas, officers and optional custom fields.</p>}
         {codeChanged && <div className="notice warning">Changing the short code affects new registrations only. Existing tree IDs keep the code they were registered with.</div>}
         <div className="form-actions">
           <button type="button" onClick={onClose}>Cancel</button>

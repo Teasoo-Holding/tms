@@ -277,23 +277,14 @@ export function AuditPage() {
   if (!full) {
     return (
       <div>
-        <PageHeader
-          title="Audit log"
-          subtitle="The latest activity: field work, setup changes and access. Entries cannot be edited or deleted."
-          actions={<button onClick={showFull}>See full log</button>}
-        />
+        <PageHeader title="Audit log" actions={<button onClick={showFull}>Search the full log</button>} />
         <ErrorNotice error={recent.error} />
         <div className={`card flush ${recent.isFetching && recent.data ? 'refetching' : ''}`}>
           {rows.length > 0 && <EntryList rows={rows} open={open} onToggle={toggle} />}
           {rows.length === 0 && !recent.isLoading && <EmptyState title="No entries yet" />}
           {recent.isLoading && <div className="empty">Loading…</div>}
         </div>
-        {rows.length > 0 && (
-          <div className="row" style={{ marginTop: 12 }}>
-            <span className="muted">Latest {rows.length} entries.</span>
-            <button className="link" onClick={showFull}>See full log, with date, person and activity filters</button>
-          </div>
-        )}
+
       </div>
     );
   }
@@ -302,8 +293,7 @@ export function AuditPage() {
     <div>
       <PageHeader
         crumbs={<button className="link" onClick={showRecent}>← Recent activity</button>}
-        title="Audit log"
-        subtitle={actor ? <>Everything <strong>{actor.full_name}</strong> did in the system, newest first.</> : 'Who did what and when: field work, setup changes and access. Entries cannot be edited or deleted.'}
+        title={actor ? actor.full_name : 'Audit log'}
         actions={<button onClick={exportCsv} disabled={rows.length === 0}>Export CSV{rows.length ? ` (${rows.length})` : ''}</button>}
       />
       <div className="filters">

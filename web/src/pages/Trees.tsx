@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { FiltersButton } from '../components/ReportFilters';
 import { api, qs } from '../api/client';
-import { EmptyState, ErrorNotice, fmtDate, fmtNum, PageHeader, RecordStatePill, StatusPill } from '../components/ui';
+import { EmptyState, ErrorNotice, fmtNum, PageHeader, RecordStatePill, StatusPill } from '../components/ui';
 
 const PAGE = 50;
 
@@ -20,6 +21,9 @@ export function TreesPage() {
     setParams(next, { replace: true });
   };
   const [q, setQ] = useState(get('q'));
+  // Keep the search box in step with the URL (back/forward, links).
+  useEffect(() => setQ(get('q')), [params.get('q')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
   const projectId = get('project_id');
   const project = useQuery({ queryKey: ['project', projectId], queryFn: () => api.get(`/projects/${projectId}`), enabled: !!projectId });
@@ -44,50 +48,67 @@ export function TreesPage() {
     </label>
   );
 
+  const filterKeys = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'record_state'];
+  const filterCount = filterKeys.filter((k) => get(k)).length;
+  const clearFilters = () => {
+    const next = new URLSearchParams(params);
+    [...filterKeys, 'offset'].forEach((k) => next.delete(k));
+    setParams(next, { replace: true });
+  };
+
   return (
     <div>
-      <PageHeader
-        title="Trees"
-        subtitle="The tree registry. Filter by project, area, species or status, or search by the ID on the label; open a tree for its history and photos."
-        actions={trees.data && <span className="pill">{fmtNum(trees.data.total)} matching</span>}
-      />
-      <form className="filters" onSubmit={(e) => (e.preventDefault(), set('q', q.trim()))}>
-        <label className="field">
-          Tree ID
-          <input type="search" placeholder="e.g. T4L-2024-000123" value={q} onChange={(e) => setQ(e.target.value)} onBlur={() => set('q', q.trim())} />
-        </label>
-        {select('project_id', 'Project', (projects.data ?? []).map((p) => [p.id, p.name]), 'All projects')}
-        {select('planting_year_id', 'Planting year', (project.data?.planting_years ?? []).map((y: any) => [y.id, y.year_label]), 'All years', !projectId)}
-        {select('sector_id', 'Sector', (areas.data ?? []).map((s) => [s.id, `${s.short_code} · ${s.name}`]), 'All sectors', !projectId)}
-        {select('sub_sector_id', 'Sub-sector', subSectors.map((s: any) => [s.id, `${s.short_code} · ${s.name}`]), 'All sub-sectors', !get('sector_id'))}
-        {select('species_id', 'Species', (species.data ?? []).map((s) => [s.id, s.common_name ?? s.scientific_name]), 'All species')}
-        {select('status_id', 'Current status', (statuses.data ?? []).map((s) => [s.id, s.name]), 'Any status')}
-        {select('record_state', 'Record', [['CONFLICT', 'In conflict'], ['REJECTED', 'Rejected']], 'Registry (active)')}
-      </form>
+      <PageHeader title="Trees" actions={trees.data && <span className="pill">{fmtNum(trees.data.total)}</span>} />
+      <div className="toolbar">
+        <form className="search" role="search" onSubmit={(e) => (e.preventDefault(), set('q', q.trim()))}>
+          <input type="search" aria-label="Search by tree ID" placeholder="Search tree ID" value={q} onChange={(e) => setQ(e.target.value)} onBlur={() => q.trim() !== get('q') && set('q', q.trim())} />
+        </form>
+        <FiltersButton count={filterCount} open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} />
+      </div>
+      {filtersOpen && (
+        <section className="card filter-panel">
+          <div className="filters" style={{ marginBottom: 0 }}>
+            {select('project_id', 'Project', (projects.data ?? []).map((p) => [p.id, p.name]), 'All projects')}
+            {select('planting_year_id', 'Planting year', (project.data?.planting_years ?? []).map((y: any) => [y.id, y.year_label]), 'All years', !projectId)}
+            {select('sector_id', 'Sector', (areas.data ?? []).map((s) => [s.id, `${s.short_code} · ${s.name}`]), 'All sectors', !projectId)}
+            {select('sub_sector_id', 'Sub-sector', subSectors.map((s: any) => [s.id, `${s.short_code} · ${s.name}`]), 'All sub-sectors', !get('sector_id'))}
+            {select('species_id', 'Species', (species.data ?? []).map((s) => [s.id, s.common_name ?? s.scientific_name]), 'All species')}
+            {select('status_id', 'Current status', (statuses.data ?? []).map((s) => [s.id, s.name]), 'Any status')}
+            {select('record_state', 'Record', [['CONFLICT', 'In conflict'], ['REJECTED', 'Rejected']], 'Registry (active)')}
+          </div>
+          <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+            <button type="button" onClick={clearFilters} disabled={!filterCount}>Clear all</button>
+            <button type="button" className="primary" onClick={() => setFiltersOpen(false)}>Done</button>
+          </div>
+        </section>
+      )}
       <ErrorNotice error={trees.error} />
       <div className={`card table-wrap tall ${trees.isFetching ? 'refetching' : ''}`}>
-        <table>
-          <thead>
-            <tr><th>Tree ID</th><th>Planting year</th><th>Area</th><th>Species</th><th>Status</th><th>Last observed</th><th>Replaces</th></tr>
-          </thead>
-          <tbody>
-            {trees.data?.items.map((t: any) => (
-              <tr key={t.id} className="clickable" onClick={() => navigate(`/trees/${t.id}`)}>
-                <td className="mono">{t.physical_tree_id} <RecordStatePill state={t.record_state} /></td>
-                <td>{t.year_label}</td>
-                <td>{t.sector_code} / {t.sub_sector_code}</td>
-                <td>{t.species_common_name ?? t.species_name}</td>
-                <td><StatusPill code={t.status_code} name={t.status_name} /></td>
-                <td>{fmtDate(t.last_observed_at)}</td>
-                <td className="mono">{t.replaces_physical_id ?? ''}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {trees.data?.items.length === 0 && <EmptyState title="No trees match these filters">Clear a filter or check the tree ID. Trees appear after field devices sync.</EmptyState>}
+        {!!trees.data?.items.length && (
+          <table>
+            <thead>
+              <tr><th>Tree ID</th><th>Status</th><th className="hide-sm">Species</th><th className="hide-sm">Area</th></tr>
+            </thead>
+            <tbody>
+              {trees.data.items.map((t: any) => (
+                <tr key={t.id} className="clickable" onClick={() => navigate(`/trees/${t.id}`)}>
+                  <td className="mono">
+                    <Link to={`/trees/${t.id}`} onClick={(e) => e.stopPropagation()}>{t.physical_tree_id}</Link> <RecordStatePill state={t.record_state} />
+                    <div className="muted show-sm">{t.species_common_name ?? t.species_name} · {t.sector_code}/{t.sub_sector_code}</div>
+                  </td>
+                  <td><StatusPill code={t.status_code} name={t.status_name} /></td>
+                  <td className="hide-sm">{t.species_common_name ?? t.species_name}</td>
+                  <td className="hide-sm nowrap">{t.sector_code} / {t.sub_sector_code}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {trees.data?.items.length === 0 && <EmptyState title="No trees found">{filterCount || get('q') ? 'Clear a filter or check the tree ID.' : undefined}</EmptyState>}
+        {trees.isLoading && <div className="empty">Loading…</div>}
       </div>
       {trees.data && trees.data.total > PAGE && (
-        <div className="row" style={{ marginTop: 12 }}>
+        <div className="pager">
           <button disabled={offset === 0} onClick={() => set('offset', String(Math.max(0, offset - PAGE)))}>Previous</button>
           <span className="muted">{offset + 1}–{Math.min(offset + PAGE, trees.data.total)} of {fmtNum(trees.data.total)}</span>
           <button disabled={offset + PAGE >= trees.data.total} onClick={() => set('offset', String(offset + PAGE))}>Next</button>

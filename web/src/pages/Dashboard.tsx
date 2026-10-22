@@ -1,16 +1,26 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { api, qs } from '../api/client';
+import { useIsAdmin } from '../auth';
 import { ChartCard, Donut, GroupedColumns, HBarChart, Legend, LineChart, LineSeries, SERIES, StackedBars, StackedColumns, StatTile } from '../charts/charts';
-import { ReportFilters, useReportFilters } from '../components/ReportFilters';
-import { deadShare, ShareArea, ShareLegend, ShareMap } from '../components/ShareMap';
-import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime } from '../components/ui';
+import { AreaShareView } from '../components/AreaShare';
+import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
+import { ShareArea } from '../components/ShareMap';
+import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime, RowMenu, SimpleTable, todayStamp } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 
-export const DATE_NOTE = `Dates: tree counts cover trees registered in the period; visit charts (observations, ${SHOW_HEIGHT ? 'growth, ' : ''}weekly activity) cover visits in the period.`;
+export { SimpleTable };
+export const DATE_NOTE = 'Tree counts use the registration date; visit charts use the visit date.';
 
 export function DashboardPage() {
   const f = useReportFilters();
+  const isAdmin = useIsAdmin();
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
+  const projectName = projects.data?.find((p) => p.id === f.get('project_id'))?.name;
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [more, setMore] = useState(false);
+  const [exportError, setExportError] = useState<unknown>(null);
+  const [exporting, setExporting] = useState(false);
   const projectId = f.get('project_id');
   const yearId = f.get('planting_year_id');
   // With a planting year chosen, areas show only that year's survey (plus older areas not tied to a year).
@@ -25,6 +35,18 @@ export function DashboardPage() {
   const filter = qs({ ...f.values, overdue_days: f.get('overdue_days') || 90 });
   const summary = useQuery({ queryKey: ['summary', filter], queryFn: () => api.get(`/reports/summary${filter}`) });
   const s = summary.data;
+  const exportFilter = qs(f.values);
+  const download = async (path: string, name: string) => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      await api.download(path, name);
+    } catch (e) {
+      setExportError(e);
+    } finally {
+      setExporting(false);
+    }
+  };
   const hasRange = !!(f.get('from') || f.get('to'));
 
   // Colour follows the status entity (its configured order), not its rank in this result.
@@ -79,297 +101,213 @@ export function DashboardPage() {
     <SimpleTable head={[label, ...mix.series.map((x) => x.label)]} rows={mix.categories.map((c) => [c, ...mix.series.map((x) => fmtNum(mix.value(c, x.key)))])} />
   );
 
+  const coverage: ShareArea[] = s ? s.area_coverage.filter((r: any) => inYear(r.sector_id)) : [];
+
   return (
     <div className="stack">
       <PageHeader
         title="Dashboard"
-        subtitle={`Registered trees, their latest recorded status${SHOW_HEIGHT ? ', growth' : ''} and field activity across the projects you can see.`}
         actions={
           <>
-            <button onClick={() => api.download(`/reports/trees.csv${filter}`, 'trees.csv')}>Export CSV</button>
-            <button onClick={() => api.download(`/reports/trees.xlsx${filter}`, 'trees.xlsx')}>Export Excel</button>
+            <FiltersButton count={f.count} open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} />
+            <button className="primary no-print" disabled={exporting} onClick={() => download(`/reports/export.xlsx${exportFilter}`, `tms-export-${todayStamp()}.xlsx`)}>
+              {exporting ? 'Preparing…' : 'Export all (Excel)'}
+            </button>
+            <button className="no-print" onClick={() => window.print()}>Print report</button>
+            <RowMenu
+              label="More exports"
+              items={[
+                { label: 'Trees (CSV)', onClick: () => download(`/reports/trees.csv${filter}`, 'trees.csv') },
+                { label: 'Trees (Excel)', onClick: () => download(`/reports/trees.xlsx${filter}`, 'trees.xlsx') },
+              ]}
+            />
           </>
         }
       />
 
-      <ReportFilters f={f} showOverdue dateNote={DATE_NOTE} />
+      <p className="print-only muted" style={{ margin: 0 }}>
+        {[projectName ?? 'All projects', f.get('from') || f.get('to') ? `${f.get('from') || '…'} to ${f.get('to') || 'today'}` : null, `printed ${fmtDateTime(new Date().toISOString())}`]
+          .filter(Boolean)
+          .join(' · ')}
+      </p>
 
-      <ErrorNotice error={summary.error} />
-      {summary.isLoading && <div className="card empty">Loading the dashboard…</div>}
+      {filtersOpen && <ReportFilters f={f} showOverdue dateNote={DATE_NOTE} onClose={() => setFiltersOpen(false)} />}
+
+      <ErrorNotice error={summary.error ?? exportError} />
+      {summary.isLoading && <div className="card empty">Loading…</div>}
       {s && (
         <div className={`stack ${summary.isFetching ? 'refetching' : ''}`}>
           <div className="grid stats">
-            <StatTile label="Planting events" value={fmtNum(s.totals.planting_events)} foot="Original + replacement trees" />
-            <StatTile label="Original trees" value={fmtNum(s.totals.original_trees)} />
-            <StatTile label="Replacement trees" value={fmtNum(s.totals.replacement_trees)} foot="Counted separately, never as survivors" />
-            <StatTile label="Dead or missing" value={fmtNum(s.totals.terminal_status_trees)} foot="Confirmed by an observation" />
-            <StatTile label="Unknown / overdue" value={fmtNum(s.totals.overdue_unknown_trees)} foot={`No observation in ${s.overdue_days} days`} />
-            <StatTile label="Open conflicts" value={fmtNum(s.data_completeness.open_conflicts)} foot="Awaiting administrator review" />
+            <StatTile label="Trees planted" value={fmtNum(s.totals.planting_events)} foot={s.totals.replacement_trees ? `incl. ${fmtNum(s.totals.replacement_trees)} replacements` : undefined} />
+            <StatTile label="Dead or missing" value={fmtNum(s.totals.terminal_status_trees)} />
+            <StatTile label="Overdue" value={fmtNum(s.totals.overdue_unknown_trees)} foot={`No visit in ${s.overdue_days} days`} />
+            {isAdmin && <StatTile label="Open conflicts" value={fmtNum(s.data_completeness.open_conflicts)} />}
           </div>
-
-          <p className="muted" style={{ margin: 0 }}>
-            Data as of the latest server sync: <strong>{fmtDateTime(s.last_server_sync_at)}</strong> ({relativeTime(s.last_server_sync_at)}). Records still on field devices are
-            not included until they sync.
-          </p>
 
           <div className="grid charts">
             <ChartCard
               title="Current status"
-              subtitle="Latest effective observation per tree. Not a survival rate."
-              empty={s.by_status.length === 0 && 'No trees registered yet.'}
+              empty={s.by_status.length === 0 && 'No trees yet.'}
               table={<SimpleTable head={['Status', 'Trees']} rows={s.by_status.map((r: any) => [r.name, fmtNum(r.count)])} />}
             >
               <Donut data={s.by_status.map((r: any) => ({ label: r.name, value: r.count, color: colorOf(r.code) }))} />
             </ChartCard>
-            {SHOW_HEIGHT && (
             <ChartCard
-              title="Average height over time"
-              subtitle="Monthly mean of the latest height measurement per tree; the five most-measured species."
-              empty={growthSeries.length === 0 && 'No heights recorded yet. Heights entered or measured on photos during visits appear here.'}
-              legend={<Legend items={growthSeries.map((g) => ({ label: g.label, color: g.color }))} />}
-              table={
-                <SimpleTable
-                  head={['Month', ...growthSeries.map((g) => `${g.label} (cm)`)]}
-                  rows={growthMonths.map((m) => [
-                    m,
-                    ...growthSeries.map((g) => {
-                      const r = growth.find((x) => x.month === m && x.species_id === g.key);
-                      return r ? `${r.avg_height_cm} (n=${r.measured_trees})` : '—';
-                    }),
-                  ])}
-                />
-              }
-            >
-              <LineChart series={growthSeries} unit="cm" xFormat={fmtMonth} ariaLabel="Average tree height by month and species" />
-            </ChartCard>
-            )}
-            <ChartCard
-              title="Weekly field activity"
-              subtitle={`Trees registered and follow-up observations per week, ${hasRange ? 'in the selected period (up to 52 weeks)' : 'last 12 weeks'}.`}
-              empty={activityEmpty && `No registrations or observations ${hasRange ? 'in the selected period' : 'in the last 12 weeks'}.`}
-              legend={<Legend items={activitySeries} />}
-              table={<SimpleTable head={['Week of', 'Registered', 'Observations']} rows={activity.map((w) => [fmtWeek(w.week), fmtNum(w.registrations), fmtNum(w.observations)])} />}
-            >
-              <GroupedColumns categories={activity.map((w) => w.week)} series={activitySeries} values={(c, k) => activity.find((w) => w.week === c)?.[k] ?? 0} formatCategory={fmtWeek} />
-            </ChartCard>
-            <ChartCard
-              title="Planting events by planting year"
-              empty={s.by_planting_year.length === 0 && 'No trees registered yet.'}
-              table={<SimpleTable head={['Planting year', 'Original', 'Replacement']} rows={s.by_planting_year.map((r: any) => [r.name, fmtNum(r.original_trees), fmtNum(r.replacement_trees)])} />}
-              legend={<Legend items={yearSeries} />}
-            >
-              <StackedColumns
-                categories={s.by_planting_year.map((r: any) => r.name)}
-                series={yearSeries}
-                values={(c, k) => s.by_planting_year.find((r: any) => r.name === c)?.[k] ?? 0}
-              />
-            </ChartCard>
-            <ChartCard
-              title="Status mix by sector"
-              subtitle="Share of each sector's trees in each current status."
-              empty={bySectorMix.categories.length === 0 && 'No trees registered yet.'}
+              title="Status by sector"
+              empty={bySectorMix.categories.length === 0 && 'No trees yet.'}
               legend={<Legend items={bySectorMix.series} />}
               table={mixTable(bySectorMix, 'Sector')}
             >
               <StackedBars categories={bySectorMix.categories} series={bySectorMix.series} values={bySectorMix.value} normalize />
             </ChartCard>
-            <ChartCard
-              title="Status mix by species"
-              subtitle="Share of each species' trees in each current status."
-              empty={bySpeciesMix.categories.length === 0 && 'No trees registered yet.'}
-              legend={<Legend items={bySpeciesMix.series} />}
-              table={mixTable(bySpeciesMix, 'Species')}
-            >
-              <StackedBars categories={bySpeciesMix.categories} series={bySpeciesMix.series} values={bySpeciesMix.value} normalize />
-            </ChartCard>
           </div>
 
-          <ChartCard
-            title="Observations by month and recorded status"
-            subtitle={`Effective observations ${f.get('from') ? 'in the selected period' : 'in the last 12 months'} (corrected entries replace the originals).`}
-            empty={months.length === 0 && `No observations ${f.get('from') ? 'in the selected period' : 'in the last 12 months'}.`}
-            legend={<Legend items={trendStatuses.map((st) => ({ label: st.name, color: colorOf(st.code) }))} />}
-            table={
-              <SimpleTable
-                head={['Month', ...trendStatuses.map((st) => st.name)]}
-                rows={months.map((m) => [m, ...trendStatuses.map((st) => fmtNum(trendValue(m, st.code)))])}
-              />
-            }
-          >
-            <StackedColumns
-              categories={months}
-              series={trendStatuses.map((st) => ({ key: st.code, label: st.name, color: colorOf(st.code) }))}
-              values={trendValue}
-            />
+          {projectId && <AreaShareCard projectId={projectId} rows={coverage} sectors={(s.sector_share ?? []).filter((r: any) => inYear(r.id))} />}
+
+          <ChartCard title="Trees by species" empty={s.by_species.length === 0 && 'No trees yet.'} table={<SimpleTable head={['Species', 'Trees']} rows={s.by_species.map((r: any) => [r.name, fmtNum(r.count)])} />}>
+            <HBarChart data={s.by_species.map((r: any) => ({ label: r.common_name ?? r.name, value: r.count }))} />
           </ChartCard>
 
-          {projectId && (
-            <AreaShareCard
-              projectId={projectId}
-              rows={s.area_coverage.filter((r: any) => inYear(r.sector_id))}
-              sectors={(s.sector_share ?? []).filter((r: any) => inYear(r.id))}
-            />
+          <p className="muted" style={{ margin: 0 }} title={fmtDateTime(s.last_server_sync_at)}>
+            Last sync {relativeTime(s.last_server_sync_at)}. Records still on phones appear after they sync.
+          </p>
+
+          <div className="more-toggle no-print">
+            <button onClick={() => setMore((v) => !v)} aria-expanded={more}>
+              {more ? 'Fewer charts' : 'More charts'}
+            </button>
+          </div>
+
+          {more && (
+            <div className="stack">
+              <div className="grid charts">
+                {SHOW_HEIGHT && (
+                  <ChartCard
+                    title="Average height"
+                    empty={growthSeries.length === 0 && 'No heights recorded yet.'}
+                    legend={<Legend items={growthSeries.map((g) => ({ label: g.label, color: g.color }))} />}
+                    table={
+                      <SimpleTable
+                        head={['Month', ...growthSeries.map((g) => `${g.label} (cm)`)]}
+                        rows={growthMonths.map((m) => [
+                          m,
+                          ...growthSeries.map((g) => {
+                            const r = growth.find((x) => x.month === m && x.species_id === g.key);
+                            return r ? `${r.avg_height_cm} (n=${r.measured_trees})` : '—';
+                          }),
+                        ])}
+                      />
+                    }
+                  >
+                    <LineChart series={growthSeries} unit="cm" xFormat={fmtMonth} ariaLabel="Average tree height by month and species" />
+                  </ChartCard>
+                )}
+                <ChartCard
+                  title="Weekly field activity"
+                  subtitle={hasRange ? undefined : 'Last 12 weeks'}
+                  empty={activityEmpty && 'No activity in this period.'}
+                  legend={<Legend items={activitySeries} />}
+                  table={<SimpleTable head={['Week of', 'Registered', 'Observations']} rows={activity.map((w) => [fmtWeek(w.week), fmtNum(w.registrations), fmtNum(w.observations)])} />}
+                >
+                  <GroupedColumns categories={activity.map((w) => w.week)} series={activitySeries} values={(c, k) => activity.find((w) => w.week === c)?.[k] ?? 0} formatCategory={fmtWeek} />
+                </ChartCard>
+                <ChartCard
+                  title="By planting year"
+                  empty={s.by_planting_year.length === 0 && 'No trees yet.'}
+                  table={<SimpleTable head={['Planting year', 'Original', 'Replacement']} rows={s.by_planting_year.map((r: any) => [r.name, fmtNum(r.original_trees), fmtNum(r.replacement_trees)])} />}
+                  legend={<Legend items={yearSeries} />}
+                >
+                  <StackedColumns categories={s.by_planting_year.map((r: any) => r.name)} series={yearSeries} values={(c, k) => s.by_planting_year.find((r: any) => r.name === c)?.[k] ?? 0} />
+                </ChartCard>
+                <ChartCard
+                  title="Status by species"
+                  empty={bySpeciesMix.categories.length === 0 && 'No trees yet.'}
+                  legend={<Legend items={bySpeciesMix.series} />}
+                  table={mixTable(bySpeciesMix, 'Species')}
+                >
+                  <StackedBars categories={bySpeciesMix.categories} series={bySpeciesMix.series} values={bySpeciesMix.value} normalize />
+                </ChartCard>
+                <ChartCard title="Trees by sector" empty={s.by_sector.length === 0 && 'No trees yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [`${r.short_code} · ${r.name}`, fmtNum(r.count)])} />}>
+                  <HBarChart data={s.by_sector.map((r: any) => ({ label: `${r.short_code} · ${r.name}`, value: r.count }))} />
+                </ChartCard>
+              </div>
+
+              <ChartCard
+                title="Visits by month and status"
+                subtitle={f.get('from') ? undefined : 'Last 12 months'}
+                empty={months.length === 0 && 'No visits in this period.'}
+                legend={<Legend items={trendStatuses.map((st) => ({ label: st.name, color: colorOf(st.code) }))} />}
+                table={<SimpleTable head={['Month', ...trendStatuses.map((st) => st.name)]} rows={months.map((m) => [m, ...trendStatuses.map((st) => fmtNum(trendValue(m, st.code)))])} />}
+              >
+                <StackedColumns categories={months} series={trendStatuses.map((st) => ({ key: st.code, label: st.name, color: colorOf(st.code) }))} values={trendValue} />
+              </ChartCard>
+
+              <div className="grid cols-2">
+                <section className="card">
+                  <CardHeader title="Data gaps" />
+                  <SimpleTable
+                    head={['Check', 'Count']}
+                    numeric={[1]}
+                    rows={[
+                      ['Never visited', fmtNum(s.data_completeness.never_observed)],
+                      ['No planted date', fmtNum(s.data_completeness.missing_planted_on)],
+                      ['Photos not yet uploaded', fmtNum(s.data_completeness.trees_with_unverified_photos)],
+                      ['Open conflicts', fmtNum(s.data_completeness.open_conflicts)],
+                      ['Phones not synced in 7 days', fmtNum(s.data_completeness.devices_not_synced_7_days)],
+                    ]}
+                  />
+                </section>
+                <section className="card">
+                  <CardHeader title="Area coverage" />
+                  <SimpleTable
+                    head={['Sub-sector', 'Hectares', 'Trees', 'Trees / ha']}
+                    numeric={[1, 2, 3]}
+                    rows={coverage.map((r: any) => [
+                      `${r.sector_code}/${r.short_code} · ${r.name}`,
+                      r.area_hectares ?? '—',
+                      fmtNum(r.registered_trees),
+                      r.area_hectares ? (r.registered_trees / r.area_hectares).toFixed(1) : '—',
+                    ])}
+                  />
+                </section>
+              </div>
+
+              {s.officer_activity && (
+                <section className="card">
+                  <CardHeader title="Field officers, last 30 days" />
+                  <SimpleTable
+                    head={['Officer', 'Registered', 'Visits', 'Last sync']}
+                    numeric={[1, 2]}
+                    rows={s.officer_activity.map((r: any) => [r.full_name, fmtNum(r.trees_registered_30d), fmtNum(r.observations_30d), relativeTime(r.last_sync_at)])}
+                  />
+                </section>
+              )}
+
+              <ul className="muted" style={{ margin: 0 }}>
+                {s.notes.map((n: string) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+            </div>
           )}
-
-          <div className="grid charts">
-            <ChartCard title="Registered trees by sector" empty={s.by_sector.length === 0 && 'No trees registered yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [`${r.short_code} · ${r.name}`, fmtNum(r.count)])} />}>
-              <HBarChart data={s.by_sector.map((r: any) => ({ label: `${r.short_code} · ${r.name}`, value: r.count }))} />
-            </ChartCard>
-            <ChartCard title="Registered trees by species" empty={s.by_species.length === 0 && 'No trees registered yet.'} table={<SimpleTable head={['Species', 'Trees']} rows={s.by_species.map((r: any) => [r.name, fmtNum(r.count)])} />}>
-              <HBarChart data={s.by_species.map((r: any) => ({ label: r.common_name ?? r.name, value: r.count }))} />
-            </ChartCard>
-          </div>
-
-          <div className="grid cols-2">
-            <section className="card">
-              <CardHeader title="Area coverage" description="From administrator-defined sub-sector boundaries; trees have no individual positions." />
-              <SimpleTable
-                head={['Sub-sector', 'Area (ha)', 'Trees', 'Trees / ha']}
-                numeric={[1, 2, 3]}
-                rows={s.area_coverage.filter((r: any) => inYear(r.sector_id)).map((r: any) => [
-                  `${r.sector_code}/${r.short_code} · ${r.name}`,
-                  r.area_hectares ?? '—',
-                  fmtNum(r.registered_trees),
-                  r.area_hectares ? (r.registered_trees / r.area_hectares).toFixed(1) : '—',
-                ])}
-              />
-            </section>
-            <section className="card">
-              <CardHeader title="Data completeness" description="Gaps worth following up with field teams." />
-              <SimpleTable
-                head={['Check', 'Count']}
-                numeric={[1]}
-                rows={[
-                  ['Trees never observed', fmtNum(s.data_completeness.never_observed)],
-                  ['Trees missing planted date', fmtNum(s.data_completeness.missing_planted_on)],
-                  ['Trees with photos not yet verified', fmtNum(s.data_completeness.trees_with_unverified_photos)],
-                  ['Open sync conflicts', fmtNum(s.data_completeness.open_conflicts)],
-                  ['Devices not synced in 7 days', fmtNum(s.data_completeness.devices_not_synced_7_days)],
-                ]}
-              />
-            </section>
-          </div>
-
-          <section className="card">
-            <CardHeader title="Field officer activity" description="Last 30 days." />
-            <SimpleTable
-              head={['Officer', 'Trees registered', 'Observations', 'Last device sync']}
-              numeric={[1, 2]}
-              rows={s.officer_activity.map((r: any) => [r.full_name, fmtNum(r.trees_registered_30d), fmtNum(r.observations_30d), relativeTime(r.last_sync_at)])}
-            />
-          </section>
-
-          <ul className="muted" style={{ margin: 0 }}>
-            {s.notes.map((n: string) => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
         </div>
       )}
     </div>
   );
 }
 
-const SHARE_SERIES = [
-  { key: 'alive_trees', label: 'Alive', color: 'var(--status-good)' },
-  { key: 'dead_trees', label: 'Dead', color: 'var(--status-critical)' },
-  { key: 'unknown_trees', label: 'Not yet observed', color: 'var(--border-strong)' },
-];
-const pctDead = (r: { alive_trees: number; dead_trees: number }) => {
-  const share = deadShare(r);
-  return share == null ? '—' : `${Math.round(share * 100)}%`;
-};
-
-/** Map and table of alive/dead share per sub-sector and sector, for one project. */
+/** Alive/dead by area for one project: loads the project's boundaries for the map. */
 function AreaShareCard({ projectId, rows, sectors }: { projectId: string; rows: ShareArea[]; sectors: any[] }) {
-  const [mapFailed, setMapFailed] = useState(false);
   const areas = useQuery({ queryKey: ['areas', projectId], queryFn: () => api.get<any[]>(`/projects/${projectId}/areas`) });
   const boundaries = useMemo(() => {
     const m = new Map<string, GeoJSON.Polygon>();
     (areas.data ?? []).forEach((s) => s.sub_sectors?.forEach((ss: any) => ss.boundary && m.set(ss.id, ss.boundary)));
     return m;
   }, [areas.data]);
-  const located = rows.some((r) => (r.latitude != null && r.longitude != null) || boundaries.has(r.id));
-  const sectorLabel = (r: any) => `${r.short_code} · ${r.name}`;
-  return (
-    <section className="card">
-      <CardHeader
-        title="Alive and dead by area"
-        description="Each sub-sector at its reference point, sized by registered trees and coloured by the share of observed trees whose latest visit recorded them dead. Hover or click for figures."
-      />
-      {rows.length === 0 ? (
-        <div className="empty">No sub-sectors for this project or planting year yet.</div>
-      ) : (
-        <div className="stack">
-          {mapFailed || !located ? (
-            <div className="notice">
-              {mapFailed ? 'The map cannot be shown in this browser.' : 'No sub-sector has a reference point or boundary yet.'} The figures below show the same alive/dead share.
-            </div>
-          ) : (
-            <div>
-              <ShareMap areas={rows} boundaries={boundaries} onUnavailable={() => setMapFailed(true)} />
-              <ShareLegend />
-            </div>
-          )}
-          <div className="grid charts">
-            <div>
-              <h3>By sector</h3>
-              <Legend items={SHARE_SERIES} />
-              <StackedBars
-                categories={sectors.map(sectorLabel)}
-                series={SHARE_SERIES}
-                values={(c, k) => sectors.find((x) => sectorLabel(x) === c)?.[k] ?? 0}
-              />
-            </div>
-            <div>
-              <h3>By sub-sector</h3>
-              <div className="table-wrap tall" style={{ maxHeight: 320 }}>
-                <SimpleTable
-                  head={['Sub-sector', 'Trees', 'Alive', 'Dead', 'Not observed', '% dead']}
-                  rows={rows.map((r) => [
-                    `${r.sector_code}/${r.short_code} · ${r.name}`,
-                    fmtNum(r.registered_trees),
-                    fmtNum(r.alive_trees),
-                    fmtNum(r.dead_trees),
-                    fmtNum(r.unknown_trees),
-                    pctDead(r),
-                  ])}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
-  );
+  return <AreaShareView rows={rows} sectors={sectors} boundaries={boundaries} />;
 }
 
 const monthTime = (m: string) => new Date(`${m}-01T00:00:00`).getTime();
 const fmtMonth = (x: number) => new Date(x).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
 const fmtWeek = (w: string) => new Date(`${w}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 
-export function SimpleTable({ head, rows, numeric = [] }: { head: string[]; rows: React.ReactNode[][]; numeric?: number[] }) {
-  if (rows.length === 0) return <div className="empty">No data for these filters.</div>;
-  return (
-    <div className="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            {head.map((h, i) => (
-              <th key={h} className={numeric.includes(i) || (i > 0 && numeric.length === 0) ? 'num' : ''}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, ri) => (
-            <tr key={ri}>
-              {r.map((c, ci) => (
-                <td key={ci} className={numeric.includes(ci) || (ci > 0 && numeric.length === 0) ? 'num' : ''}>{c}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}

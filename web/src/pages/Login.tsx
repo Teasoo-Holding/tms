@@ -22,10 +22,7 @@ export function LoginPage() {
   return (
     <div style={{ minHeight: '100%', display: 'grid', placeItems: 'center', padding: 16 }}>
       <form className="card stack" style={{ width: 'min(380px, 100%)' }} onSubmit={submit}>
-        <div>
-          <h1>Tree Management System</h1>
-          <p className="subtle" style={{ margin: '4px 0 0' }}>Sign in to the administration portal.</p>
-        </div>
+        <h1>Tree Management</h1>
         <ErrorNotice error={error} />
         <Field label="Username, email or phone">
           <input type="text" autoComplete="username" autoCapitalize="none" spellCheck={false} required value={login} onChange={(e) => setLogin(e.target.value)} />

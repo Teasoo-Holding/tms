@@ -106,7 +106,16 @@ export function ShareMap({ areas, boundaries, onUnavailable }: {
     if (!el.current) return;
     let m: maplibregl.Map;
     try {
-      m = new maplibregl.Map({ container: el.current, style: STYLE_URL || BLANK_STYLE, center: [0, 0], zoom: 1, attributionControl: STYLE_URL ? undefined : false });
+      // preserveDrawingBuffer keeps the canvas content so the map appears when the page is printed.
+      m = new maplibregl.Map({
+        container: el.current,
+        style: STYLE_URL || BLANK_STYLE,
+        center: [0, 0],
+        zoom: 1,
+        attributionControl: STYLE_URL ? undefined : false,
+        preserveDrawingBuffer: true,
+        cooperativeGestures: true,
+      });
     } catch {
       setFailed(true);
       onUnavailable?.();
@@ -188,8 +197,8 @@ export function ShareLegend() {
       <span>{swatch(SHARE_COLORS.alive)}Mostly alive</span>
       <span>{swatch(SHARE_COLORS.mid)}About half dead</span>
       <span>{swatch(SHARE_COLORS.dead)}Mostly dead</span>
-      <span>{swatch(SHARE_COLORS.none)}No observed trees</span>
-      <span>Circle size: registered trees · colour: dead share of observed trees</span>
+      <span>{swatch(SHARE_COLORS.none)}Not yet observed</span>
+      <span>Size = trees</span>
     </div>
   );
 }
