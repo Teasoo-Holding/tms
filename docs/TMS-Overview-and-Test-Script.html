@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Teasoo TMS: overview and test script</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  :root { --green: #1d6b45; --ink: #1f2a24; --muted: #5b6b62; --line: #d7e0da; --soft: #f2f6f3; }
+  body { font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: var(--ink); font-size: 10.5pt; line-height: 1.42; margin: 0; }
+  h1 { font-size: 21pt; color: var(--green); margin: 0 0 2mm; }
+  h2 { font-size: 13.5pt; color: var(--green); margin: 7mm 0 2mm; padding-bottom: 1mm; border-bottom: 1.5px solid var(--green); }
+  h3 { font-size: 11pt; margin: 4mm 0 1.5mm; }
+  p { margin: 1mm 0 2mm; }
+  ul { margin: 1mm 0 2mm 5mm; padding-left: 3mm; }
+  li { margin: 0.6mm 0; }
+  .sub { color: var(--muted); font-size: 10pt; margin-bottom: 5mm; }
+  .grid { columns: 2; column-gap: 4mm; }
+  .card { background: var(--soft); border: 1px solid var(--line); border-radius: 3mm; padding: 2.5mm 3.5mm; margin-bottom: 3mm; font-size: 8.9pt; line-height: 1.3; }
+  .card h3 { break-after: avoid; }
+  .card h3 { margin-top: 0; color: var(--green); }
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0 3mm; font-size: 9.5pt; }
+  th, td { border: 1px solid var(--line); padding: 1.6mm 2mm; text-align: left; vertical-align: top; }
+  th { background: var(--soft); }
+  tr { break-inside: avoid; }
+  td.n { width: 8mm; text-align: center; color: var(--muted); }
+  td.ok { width: 12mm; }
+  .box { display: inline-block; width: 3.4mm; height: 3.4mm; border: 1.2px solid var(--ink); border-radius: 0.6mm; }
+  .note { border-left: 3px solid var(--green); background: var(--soft); padding: 2mm 3mm; margin: 2mm 0; }
+  .pb { break-before: page; }
+  h2.pb { margin-top: 0; }
+  .small { font-size: 9pt; color: var(--muted); }
+  code { font-family: Consolas, Menlo, monospace; font-size: 9pt; background: #eef2ef; padding: 0 1mm; border-radius: 1mm; }
+</style>
+</head>
+<body>
+
+<h1>Teasoo Tree Management System (TMS)</h1>
+<div class="sub">Summary of capabilities and a test script · Teasoo Consulting · October 2026</div>
+
+<h2>1. What the system is</h2>
+<p>TMS records every tree planted on Teasoo's reforestation projects and every later visit to it, offline in the field, with no data loss. It has three parts:</p>
+<ul>
+  <li><b>Android app</b>: used by field officers and administrators. Works fully offline after the first sign-in and sends data when the phone has internet.</li>
+  <li><b>Web portal</b> (<code>tms.teasooconsulting.com</code>): used for administration, dashboards, reports and exports. Clients can view their project through a secret share link.</li>
+  <li><b>Cloud server and database</b>: stores records and photos, enforces who can do what, and keeps an audit log of every change.</li>
+</ul>
+<p>Trees have no individual GPS. Each planting year's land survey divides the area into <b>sectors</b> and <b>sub-sectors</b>, recorded by their corner points, and a tree is located by its sector and sub-sector.</p>
+
+<h2>2. Who uses it</h2>
+<table>
+  <tr><th>Role</th><th>What they can do</th></tr>
+  <tr><td><b>Field officer</b></td><td>Register and visit trees in the projects and areas assigned to them, take photos, sync, and back up and restore their phone's data.</td></tr>
+  <tr><td><b>Administrator</b></td><td>Everything a field officer can do, plus set up projects, areas, vendors, ID formats, fields, users and assignments; resolve conflicts; correct IDs; export data; share projects with clients; and clear data.</td></tr>
+  <tr><td><b>Executive</b></td><td>Read-only dashboards and reports. <i>Teasoo management</i> sees all projects; <i>clients and sponsors</i> see only the projects they are assigned to.</td></tr>
+  <tr><td><b>Client by link</b></td><td>No account needed. Opens one project's read-only dashboard, downloads Excel or CSV, and prints or saves it as a PDF.</td></tr>
+</table>
+
+<h2 class="pb">3. Capabilities</h2>
+<div class="grid">
+  <div class="card">
+    <h3>Field work (Android)</h3>
+    <ul>
+      <li><b>Field session:</b> choose project, planting year, vendor, sector and sub-sector once. Switch sub-sector with one tap as you move. Choose the type of visit (Visit, First data collection, At planting, Maintenance).</li>
+      <li><b>Register trees:</b> type only the tree number. The full ID is built from the format, and the next number is suggested. Species and status are remembered from the last tree. A photo is required.</li>
+      <li><b>Known IDs:</b> if a tree number is already registered, the app offers "Record a visit" and shows the tree's last species and status.</li>
+      <li><b>Visit trees:</b> a list of the session area's trees, longest-unvisited first, with search by tree number.</li>
+      <li><b>Visits:</b> Alive or Dead status, a photo, remarks and custom fields. The date and time are stamped automatically.</li>
+      <li><b>Warnings:</b> the app warns if a tree is visited in a different sector than the one it was registered in.</li>
+      <li><b>Tree page:</b> photos, full visit history and who recorded each visit. Corrections are kept as amendments; nothing is overwritten.</li>
+      <li><b>Replanting:</b> plant a replacement for a dead tree. It gets a new ID linked to the old tree; admins can type the ID by hand.</li>
+      <li><b>Other screens:</b> My visits (newest first), Find a tree, Map coloured by alive/dead share.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Offline, sync and safety</h3>
+    <ul>
+      <li><b>Saving:</b> every record is saved on the phone first and sent automatically when there is internet. Sending twice never creates duplicates.</li>
+      <li><b>Duplicate IDs</b> entered on two phones are kept as conflicts for an admin to resolve; neither is overwritten.</li>
+      <li><b>Ready to send:</b> shows records and photos waiting, with Send now.</li>
+      <li><b>Sign-out</b> is blocked while anything is unsent.</li>
+      <li><b>Photos:</b> resized to about 300 KB before saving. The phone deletes its copy only after the server confirms it has the photo, and normally keeps a copy for 30 days. <b>Free up space</b> removes confirmed copies early.</li>
+      <li><b>Light backup:</b> <code>Download/TMS/TMS-backup.zip</code> is kept up to date and survives clearing the app or reinstalling it. <b>Export backup</b> includes photos; <b>Restore</b> puts records back in the queue.</li>
+      <li><b>Data clear:</b> when an admin clears the server data, each phone saves a backup, then resets.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Administration (web and Android)</h3>
+    <ul>
+      <li><b>Projects:</b> each has planting years. Every year has its own surveyed sectors and sub-sectors, entered from corner points (walk to a corner and tap "Use my location").</li>
+      <li><b>Vendors per planting year.</b></li>
+      <li><b>Tree ID formats:</b> fixed parts (project, year, vendor, fixed text) and changing parts (sector, sub-sector, tree number). A format can apply to the whole project, one year or one vendor. Changes affect new trees only.</li>
+      <li><b>Custom fields:</b> extra fields such as a nursery batch number, collected at registration or at every visit. They can be remembered for the rest of the day.</li>
+      <li><b>Reference lists:</b> species, statuses and vendors. Anything can be edited, deactivated or deleted (long-press or swipe on the phone, ⋯ on the web). Items still in use are protected.</li>
+      <li><b>Users:</b> sign in with a username, phone number or email. Admins can reset passwords and assign people to projects or areas. Each user's activity and last sync are shown.</li>
+      <li><b>Conflicts and corrections:</b> resolve duplicate IDs and correct serial numbers. Every change is audited.</li>
+      <li><b>Activity log:</b> the latest 10 entries, or the full log filtered by date, person or activity.</li>
+      <li><b>Clear data:</b> field data only, or everything. Needs the typed confirmation and your password.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Dashboards, reports and sharing</h3>
+    <ul>
+      <li><b>Dashboard:</b> trees planted, alive and dead, not yet visited, status by sector and species, alive/dead map by area, and weekly field activity.</li>
+      <li><b>Filters:</b> project, planting year, vendor, sector, sub-sector, species, status and date range.</li>
+      <li><b>Visits table:</b> every visit, newest first, with a type filter and CSV export.</li>
+      <li><b>Exports:</b> trees as CSV or Excel. <b>Export all</b> gives one Excel workbook containing every trees, visits and configuration sheet. <b>Print report</b> saves the dashboard as a PDF.</li>
+      <li><b>Share with client:</b> creates a secret link for one project, with an optional expiry, which can be revoked at any time. The client sees a read-only dashboard with Excel, CSV and PDF downloads. Staff names are hidden and each use is recorded.</li>
+      <li><b>Photo loading:</b> lists load small thumbnails (about 20 KB); the full photo loads only when opened.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="pb"></div>
+<h2>4. Test script</h2>
+<div class="note">
+  <b>Before you start:</b> an <b>administrator</b> account and a <b>field officer</b> account (ask Teasoo's administrator). The latest TMS Field app installed on an Android phone (8.0 or newer). A computer browser for the web portal. Tick each step when the expected result is seen; note anything different in the margin.<br>
+  <span class="small">Test on a test project. Section F clears data: run it only on a system where that is intended.</span>
+</div>
+
+<h3>A. Sign-in and setup (administrator)</h3>
+<table>
+  <tr><th>#</th><th>Do this</th><th>Expected result</th><th>✓</th></tr>
+  <tr><td class="n">A1</td><td>Open <code>tms.teasooconsulting.com</code> and sign in with your username, email or phone number. Try the eye icon on the password field.</td><td>The dashboard opens. The eye shows and hides the password.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">A2</td><td>Projects → New project (name, short code such as <code>TST</code>).</td><td>The project page opens on the new project.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">A3</td><td>Add planting year <code>2026</code>.</td><td>The year appears in the year selector.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">A4</td><td>Areas → add sector <code>S01</code> with 4 corner points, then sub-sector <code>SS01</code> inside it.</td><td>Outlines are drawn and the sub-sector sits inside the sector. A sub-sector far outside the sector is refused.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">A5</td><td>Vendors → New vendor (e.g. <code>Konam</code>, code <code>KNM</code>) and link it to 2026.</td><td>The vendor is listed for 2026, with an example ID.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">A6</td><td>ID format → create a format: Project, Year, Vendor, Sector, Tree number; width 5.</td><td>The preview shows e.g. <code>TST-2026-KNM-S01-00015</code>.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">A7</td><td>Custom fields → add "Nursery batch" (text, remember during session).</td><td>The field is listed.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">A8</td><td>Officers → assign the field officer to the project. Set the project status to Active.</td><td>The assignment is listed and the project is Active.</td><td class="ok"><span class="box"></span></td></tr>
+</table>
+
+<h3>B. Field work (Android, field officer)</h3>
+<table>
+  <tr><th>#</th><th>Do this</th><th>Expected result</th><th>✓</th></tr>
+  <tr><td class="n">B1</td><td>Sign in on the phone with internet on, then wait for the first sync.</td><td>The home screen shows "Start field session".</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B2</td><td>Turn on <b>airplane mode</b>. Start field session: project, 2026, vendor KNM, S01, SS01, type "Visit".</td><td>The session line shows project · year · sector, with "Register trees" as the main button.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B3</td><td>Register trees: tap the suggested number, take a photo (the shutter button must be visible), choose Alive, enter a nursery batch, then Save and next tree.</td><td>"Saved TST-2026-KNM-S01-00001". The form is ready for the next tree with the batch remembered.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B4</td><td>Register 4 more trees. Try saving one without a photo.</td><td>Saving is blocked until a photo is taken.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B5</td><td>Type an already registered tree number.</td><td>"Already registered" appears with its species and status, plus "Record a visit to this tree".</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B6</td><td>Visit trees → open a tree → choose Dead, add a photo, save.</td><td>The visit is saved. The date and time are stamped automatically (not editable).</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B7</td><td>Tap outside a text field, and use the hide-keyboard button above the keyboard.</td><td>The keyboard closes.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B8</td><td>Try to sign out.</td><td>Blocked: "Sync before signing out".</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B9</td><td>Open My visits, and Ready to send.</td><td>Newest first, each marked as waiting. Ready to send shows the counts.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B10</td><td>On the phone, open the Files app → Download/TMS.</td><td><code>TMS-backup.zip</code> is there.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B11</td><td>Turn airplane mode <b>off</b>, then Ready to send → Send now.</td><td>"Everything is sent". The records show as synced.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B12</td><td>Open a tree page.</td><td>Photos appear as thumbnails and open full-screen. The history shows who recorded each visit and the visit type.</td><td class="ok"><span class="box"></span></td></tr>
+</table>
+
+<h3>C. Replanting and corrections (administrator on Android or web)</h3>
+<table>
+  <tr><th>#</th><th>Do this</th><th>Expected result</th><th>✓</th></tr>
+  <tr><td class="n">C1</td><td>Open the dead tree from B6 → Plant a replacement → switch on "Set ID by hand" and enter <code>TST-R-0001</code>, plus a photo.</td><td>The new tree is saved and linked to the original. The original keeps its history.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">C2</td><td>On a synced tree, use Correct serial number with a reason.</td><td>The ID changes and the old ID is kept in its history and the activity log.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">C3</td><td>Correct an earlier visit (wrong status).</td><td>A correction is added and the original is marked superseded, not deleted.</td><td class="ok"><span class="box"></span></td></tr>
+</table>
+
+<h3>D. Dashboards, exports and sharing (web)</h3>
+<table>
+  <tr><th>#</th><th>Do this</th><th>Expected result</th><th>✓</th></tr>
+  <tr><td class="n">D1</td><td>Dashboard → Filters → choose project, 2026 and vendor KNM.</td><td>Counts match the trees entered (alive and dead), and the area map is coloured.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">D2</td><td>Export all (Excel), then Print report → Save as PDF.</td><td>A workbook with Trees, Visits and setup sheets, and a clean one-page-per-section PDF.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">D3</td><td>Visits → filter type "Visit" → Export CSV.</td><td>Only matching visits, newest first.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">D4</td><td>Project → Share → label "Test client", expiry 30 days → Copy. Open the link in a private browser window.</td><td>The read-only client dashboard opens without login. Excel, CSV and Print work, and no staff names are shown.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">D5</td><td>Revoke the link and reload it.</td><td>"This link is not valid any more."</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">D6</td><td>Audit log, then See full log → filter by the field officer and today's date.</td><td>The latest 10 entries, then that officer's registrations and visits, with device and time.</td><td class="ok"><span class="box"></span></td></tr>
+</table>
+
+<h3>E. Lists and deletion</h3>
+<table>
+  <tr><th>#</th><th>Do this</th><th>Expected result</th><th>✓</th></tr>
+  <tr><td class="n">E1</td><td>Add a species that no tree uses, then delete it (⋯ on the web, or long-press or swipe on the phone).</td><td>It is deleted, and disappears from phones after their next sync.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">E2</td><td>Try deleting the species used by your trees, or sector S01.</td><td>Refused with a count and the advice to deactivate instead.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">E3</td><td>Users → create a user with a username only (no email) and sign in with it on the phone.</td><td>Sign-in works with the username.</td><td class="ok"><span class="box"></span></td></tr>
+</table>
+
+<h3>F. Backup, restore and clearing data (only on a test system)</h3>
+<table>
+  <tr><th>#</th><th>Do this</th><th>Expected result</th><th>✓</th></tr>
+  <tr><td class="n">F1</td><td>Phone: Ready to send → ⋯ → Export backup, then Restore from backup with the same file.</td><td>A zip is saved. The restore reports what it re-queued, and nothing is duplicated after sync.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">F2</td><td>Phone: ⋯ → Free up space.</td><td>Space is freed from photos already confirmed by the server. Unsent photos stay.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">F3</td><td>Web: Settings → Danger zone → Field data only, type <code>DELETE ALL DATA</code> and a <i>wrong</i> password.</td><td>"Your password is incorrect." Nothing is deleted.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">F4</td><td>Repeat with the correct password. Then sync the phone.</td><td>The counts removed are shown. The phone saves a backup, resets, and shows no trees. Projects and users remain.</td><td class="ok"><span class="box"></span></td></tr>
+</table>
+<p class="small">Report issues with the step number, the phone model, a screenshot and the time it happened (shown in the activity log).</p>
+
+</body>
+</html>
