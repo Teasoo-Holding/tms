@@ -52,9 +52,6 @@ internal fun VendorsTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: Pr
             }
         }
         linked.forEach { link ->
-            val scheme = p.schemes.effectiveFor(link.vendorId, year.id)
-            val samples = idSamples(p, year, link.vendorShortCode, areas)
-            val usesVendorCode = scheme?.components?.any { it.type == "VENDOR_CODE" } == true
             val vendor = vendorOf(link)
             val edit = vendor?.let { v -> { vm.clearFormError(); editing = v } }
             ActionItem(
@@ -70,20 +67,7 @@ internal fun VendorsTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: Pr
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ItemTitle(link.vendorName ?: "Vendor")
-                    if (link.vendorShortCode == null && usesVendorCode) {
-                        Text("No short code – tap to add one", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    } else {
-                        ItemSubtitle(link.vendorShortCode.orEmpty())
-                    }
-                    if (scheme == null) {
-                        Text("No ID format yet", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    } else {
-                        Text(
-                            previewId(scheme.components, scheme.separator, scheme.serialWidth, samples, 1),
-                            fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
+                    ItemSubtitle(link.vendorShortCode.orEmpty())
                 }
             }
         }

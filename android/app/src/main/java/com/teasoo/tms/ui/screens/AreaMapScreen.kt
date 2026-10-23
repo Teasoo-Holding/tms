@@ -16,12 +16,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.teasoo.tms.BuildConfig
-import com.teasoo.tms.data.local.AreaShare
 import com.teasoo.tms.data.local.SectorEntity
 import com.teasoo.tms.data.local.SubSectorEntity
 import com.teasoo.tms.data.local.TmsDatabase
 import com.teasoo.tms.ui.AppViewModel
 import com.teasoo.tms.ui.components.Notice
+import com.teasoo.tms.ui.components.Picker
+import androidx.compose.foundation.background
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -31,6 +32,9 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression.eq
+import org.maplibre.android.style.expressions.Expression.get
+import org.maplibre.android.style.expressions.Expression.literal
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
@@ -44,47 +48,92 @@ import javax.inject.Inject
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
-class AreaMapViewModel @Inject constructor(db: TmsDatabase, sessions: com.teasoo.tms.data.repo.FieldSessionRepository) : ViewModel() {
+class AreaMapViewModel @Inject constructor(db: TmsDatabase) : ViewModel() {
+    private val ref = db.reference()
+    val projects = ref.projects().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val projectId = MutableStateFlow<String?>(null)
-    /** The field session's planting year, when it is for this project: its survey is the one shown. */
-    val yearId = combine(projectId, sessions.session) { p, s -> s?.takeIf { it.projectId == p }?.plantingYearId }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val years = projectId.filterNotNull().flatMapLatest { ref.years(it) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    /** Each planting year has its own land survey, so the map shows one year at a time. */
+    val yearId = MutableStateFlow<String?>(null)
     val sectors = combine(projectId.filterNotNull(), yearId) { p, y -> p to y }
-        .flatMapLatest { (p, y) -> if (y == null) db.reference().sectors(p) else db.reference().sectorsForYear(p, y) }
+        .flatMapLatest { (p, y) -> if (y == null) ref.sectors(p) else ref.sectorsForYear(p, y) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val subSectors = projectId.filterNotNull().flatMapLatest { db.reference().subSectors(it) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val subSectors = projectId.filterNotNull().flatMapLatest { ref.subSectors(it) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val shares = projectId.filterNotNull().flatMapLatest { db.trees().shareBySubSector(it) }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun selectProject(id: String) { if (projectId.value != id) { projectId.value = id; yearId.value = null } }
 }
 
-/** Green when mostly alive, through amber, to red when mostly dead; grey when nothing observed yet. */
-internal fun shareColor(share: Double?): String = when {
-    share == null -> "#9e9e9e"
-    share < 0.1 -> "#2e7d32"
-    share < 0.25 -> "#9ccc65"
-    share < 0.5 -> "#ffb300"
-    else -> "#d32f2f"
+/** Trees, area and density for one surveyed area (a sector, or a sub-sector inside it). */
+data class AreaDensity(val id: String, val label: String, val hectares: Double?, val trees: Int, val alive: Int, val dead: Int) {
+    val perHectare: Double? get() = hectares?.takeIf { it > 0 }?.let { trees / it }
+}
+
+/** Area in hectares of a GeoJSON Polygon's outer ring, on the sphere (accurate for plantation-sized areas). */
+internal fun hectares(geoJson: String?): Double? = runCatching {
+    val ring = Polygon.fromJson(geoJson ?: return null).coordinates().firstOrNull() ?: return null
+    if (ring.size < 4) return null
+    val r = 6_378_137.0
+    var sum = 0.0
+    for (i in 0 until ring.size - 1) {
+        val a = ring[i]; val b = ring[i + 1]
+        sum += Math.toRadians(b.longitude() - a.longitude()) * (2 + kotlin.math.sin(Math.toRadians(a.latitude())) + kotlin.math.sin(Math.toRadians(b.latitude())))
+    }
+    kotlin.math.abs(sum * r * r / 2) / 10_000
+}.getOrNull()
+
+/** Five shades of green from sparse to dense, relative to the densest area shown; grey when nothing is recorded. */
+private val DENSITY_SHADES = listOf("#e5f5e0", "#a1d99b", "#74c476", "#31a354", "#006d2c")
+internal fun densityColor(perHa: Double?, max: Double): String = when {
+    perHa == null || perHa <= 0 || max <= 0 -> "#d9d9d9"
+    else -> DENSITY_SHADES[((perHa / max) * DENSITY_SHADES.size).toInt().coerceIn(0, DENSITY_SHADES.lastIndex)]
 }
 
 /**
- * Sector and sub-sector boundaries and their reference points, from the local database (works offline).
- * A licensed basemap is shown only when MAP_STYLE_URL is configured; trees are never drawn as points.
+ * For administrators: each surveyed sector and sub-sector, drawn from its corner points and shaded by how many trees
+ * per hectare have been registered in it. Trees have no GPS of their own, so density is shown per area, not as points.
+ * Works offline from the data on this phone; a licensed basemap is shown only when MAP_STYLE_URL is configured.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AreaMapScreen(app: AppViewModel, onBack: () -> Unit, vm: AreaMapViewModel = hiltViewModel()) {
-    val projectId by app.selectedProjectId.collectAsStateWithLifecycle()
-    LaunchedEffect(projectId) { vm.projectId.value = projectId }
+    val selected by app.selectedProjectId.collectAsStateWithLifecycle()
+    val projects by vm.projects.collectAsStateWithLifecycle()
+    val projectId by vm.projectId.collectAsStateWithLifecycle()
+    LaunchedEffect(selected, projects) { if (projectId == null) (selected ?: projects.firstOrNull()?.id)?.let(vm::selectProject) }
+    val years by vm.years.collectAsStateWithLifecycle()
+    val yearId by vm.yearId.collectAsStateWithLifecycle()
+    // Latest year first by default: the survey being planted now.
+    LaunchedEffect(years) { if (yearId == null) years.maxByOrNull { it.yearLabel }?.let { vm.yearId.value = it.id } }
     val sectors by vm.sectors.collectAsStateWithLifecycle()
-    // Only the sub-sectors of the sectors shown (this year's survey).
     val subs = vm.subSectors.collectAsStateWithLifecycle().value.filter { s -> sectors.any { it.id == s.sectorId } }
     val shares by vm.shares.collectAsStateWithLifecycle()
+    val byId = shares.associateBy { it.subSectorId }
+    val subDensity = subs.associate { ss ->
+        val sh = byId[ss.id]
+        ss.id to AreaDensity(ss.id, "${ss.shortCode} · ${ss.name}", hectares(ss.boundaryJson), sh?.total ?: 0, sh?.alive ?: 0, sh?.dead ?: 0)
+    }
+    val sectorDensity = sectors.associate { sec ->
+        val inside = subs.filter { it.sectorId == sec.id }.mapNotNull { subDensity[it.id] }
+        sec.id to AreaDensity(
+            sec.id, "${sec.shortCode} · ${sec.name}",
+            hectares(sec.boundaryJson) ?: inside.mapNotNull { it.hectares }.takeIf { it.isNotEmpty() }?.sum(),
+            inside.sumOf { it.trees }, inside.sumOf { it.alive }, inside.sumOf { it.dead },
+        )
+    }
+    val maxDensity = (subDensity.values + sectorDensity.values).mapNotNull { it.perHectare }.maxOrNull() ?: 0.0
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Area map") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
+        TopAppBar(title = { Text("Tree density map") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
     }) { padding ->
         Column(Modifier.padding(padding)) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Picker("Project", projects, projects.find { it.id == projectId }, { it.name }, { vm.selectProject(it.id) }, modifier = Modifier.weight(1.4f), supportingText = null)
+                Picker("Planting year", years, years.find { it.id == yearId }, { it.yearLabel }, { vm.yearId.value = it.id }, modifier = Modifier.weight(1f), supportingText = null)
+            }
             if (BuildConfig.MAP_STYLE_URL.isBlank()) {
-                Notice("Showing area boundaries only. A background map appears when the organisation configures licensed map data.", modifier = Modifier.padding(8.dp))
+                Text("Area outlines only (no background map configured).", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp))
             }
             AndroidView(
                 modifier = Modifier.fillMaxWidth().weight(1f),
@@ -104,99 +153,127 @@ fun AreaMapScreen(app: AppViewModel, onBack: () -> Unit, vm: AreaMapViewModel = 
                         })
                     }
                 },
-                update = { view -> view.getMapAsync { map -> map.setStyle(styleBuilder()) { style -> render(map, style, sectors, subs, shares) } } },
+                update = { view ->
+                    view.getMapAsync { map -> map.setStyle(styleBuilder()) { style -> render(map, style, sectors, subs, sectorDensity, subDensity, maxDensity) } }
+                },
             )
-            AreaShareList(sectors, subs, shares, Modifier.fillMaxWidth().weight(0.8f))
+            DensityList(sectors, subs, sectorDensity, subDensity, maxDensity, Modifier.fillMaxWidth().weight(0.9f))
         }
     }
 }
 
 private fun styleBuilder(): Style.Builder =
     if (BuildConfig.MAP_STYLE_URL.isNotBlank()) Style.Builder().fromUri(BuildConfig.MAP_STYLE_URL)
-    else Style.Builder().fromJson("""{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#e9ede6"}}]}""")
+    else Style.Builder().fromJson("""{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#f4f5f1"}}]}""")
 
-private fun render(map: org.maplibre.android.maps.MapLibreMap, style: Style, sectors: List<SectorEntity>, subs: List<SubSectorEntity>, shares: List<AreaShare>) {
+private fun render(
+    map: org.maplibre.android.maps.MapLibreMap,
+    style: Style,
+    sectors: List<SectorEntity>,
+    subs: List<SubSectorEntity>,
+    sectorDensity: Map<String, AreaDensity>,
+    subDensity: Map<String, AreaDensity>,
+    max: Double,
+) {
     val polygons = mutableListOf<Feature>()
     val points = mutableListOf<Feature>()
     val bounds = LatLngBounds.Builder()
     var count = 0
-    val byId = shares.associateBy { it.subSectorId }
-    fun add(kind: String, lat: Double, lon: Double, boundary: String?, share: AreaShare? = null) {
-        points += Feature.fromGeometry(Point.fromLngLat(lon, lat)).apply {
-            addStringProperty("kind", kind)
-            addStringProperty("color", if (kind == "sector") "#2a78d6" else shareColor(share?.deadShare))
-            // Bigger circles for sub-sectors with more trees.
-            addNumberProperty("radius", if (kind == "sector") 5f else 7f + kotlin.math.min(13f, kotlin.math.sqrt((share?.total ?: 0).toFloat())))
-        }
+    fun add(kind: String, lat: Double, lon: Double, boundary: String?, d: AreaDensity?) {
         bounds.include(LatLng(lat, lon)); count++
-        boundary?.let { json ->
-            val polygon = Polygon.fromJson(json)
-            polygons += Feature.fromGeometry(polygon).apply { addStringProperty("kind", kind) }
+        val color = densityColor(d?.perHectare, max)
+        val polygon = boundary?.let { runCatching { Polygon.fromJson(it) }.getOrNull() }
+        if (polygon != null) {
+            polygons += Feature.fromGeometry(polygon).apply { addStringProperty("kind", kind); addStringProperty("color", color) }
             polygon.coordinates().flatten().forEach { bounds.include(LatLng(it.latitude(), it.longitude())); count++ }
+        } else {
+            // No corner points yet: a dot at the reference point, sized by the number of trees.
+            points += Feature.fromGeometry(Point.fromLngLat(lon, lat)).apply {
+                addStringProperty("color", if ((d?.trees ?: 0) > 0) "#31a354" else "#9e9e9e")
+                addNumberProperty("radius", 6f + kotlin.math.min(14f, kotlin.math.sqrt((d?.trees ?: 0).toFloat())))
+            }
         }
     }
-    sectors.forEach { add("sector", it.referenceLatitude, it.referenceLongitude, it.boundaryJson) }
-    subs.forEach { add("sub_sector", it.referenceLatitude, it.referenceLongitude, it.boundaryJson, byId[it.id]) }
+    // Sectors that are split into sub-sectors are shown by their sub-sectors; the sector outline is drawn on top.
+    sectors.forEach { s ->
+        val split = subs.any { it.sectorId == s.id && it.boundaryJson != null }
+        add(if (split) "sector_outline" else "area", s.referenceLatitude, s.referenceLongitude, s.boundaryJson, sectorDensity[s.id])
+    }
+    subs.forEach { add("area", it.referenceLatitude, it.referenceLongitude, it.boundaryJson, subDensity[it.id]) }
     style.addSource(GeoJsonSource("areas", FeatureCollection.fromFeatures(polygons)))
     style.addSource(GeoJsonSource("refs", FeatureCollection.fromFeatures(points)))
-    style.addLayer(FillLayer("sub-fill", "areas").withProperties(fillColor("#1baf7a"), fillOpacity(0.2f)).also { it.setFilter(org.maplibre.android.style.expressions.Expression.eq(org.maplibre.android.style.expressions.Expression.get("kind"), "sub_sector")) })
-    style.addLayer(LineLayer("lines", "areas").withProperties(lineColor("#1d6b45"), lineWidth(2f)))
+    style.addLayer(FillLayer("area-fill", "areas").withProperties(fillColor(get("color")), fillOpacity(0.75f)).also { it.setFilter(eq(get("kind"), literal("area"))) })
+    style.addLayer(LineLayer("area-lines", "areas").withProperties(lineColor("#1d6b45"), lineWidth(1.5f)))
     style.addLayer(
-        CircleLayer("ref-points", "refs").withProperties(
-            circleRadius(org.maplibre.android.style.expressions.Expression.get("radius")),
-            circleColor(org.maplibre.android.style.expressions.Expression.get("color")),
-            circleStrokeColor("#ffffff"), circleStrokeWidth(2f),
-        ),
+        LineLayer("sector-lines", "areas").withProperties(lineColor("#0b2e1d"), lineWidth(3f))
+            .also { it.setFilter(eq(get("kind"), literal("sector_outline"))) },
+    )
+    style.addLayer(
+        CircleLayer("ref-points", "refs").withProperties(circleRadius(get("radius")), circleColor(get("color")), circleStrokeColor("#ffffff"), circleStrokeWidth(2f)),
     )
     if (count >= 2) map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), 48))
     else if (count == 1) map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(sectors.firstOrNull()?.referenceLatitude ?: 0.0, sectors.firstOrNull()?.referenceLongitude ?: 0.0), 14.0))
 }
 
-/** Alive / dead / not yet observed per sub-sector, with the same colours as the map. */
+private fun Double.oneDecimal() = String.format(java.util.Locale.US, "%.1f", this)
+
+/** The numbers behind the map: area, trees, trees per hectare and how many are alive, per sector and sub-sector. */
 @Composable
-private fun AreaShareList(sectors: List<SectorEntity>, subs: List<SubSectorEntity>, shares: List<AreaShare>, modifier: Modifier) {
-    val byId = shares.associateBy { it.subSectorId }
+private fun DensityList(
+    sectors: List<SectorEntity>,
+    subs: List<SubSectorEntity>,
+    sectorDensity: Map<String, AreaDensity>,
+    subDensity: Map<String, AreaDensity>,
+    max: Double,
+    modifier: Modifier,
+) {
     androidx.compose.foundation.lazy.LazyColumn(modifier, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            Text("Alive and dead by area", style = MaterialTheme.typography.titleSmall)
-            Text("Green = mostly alive · red = mostly dead · grey = not visited",
-                style = MaterialTheme.typography.bodySmall)
-        }
+        item { DensityLegend(max) }
+        if (sectors.isEmpty()) item { Notice("No surveyed areas for this planting year on this phone. Sync, or add the year's sectors in Projects.") }
         sectors.forEach { sector ->
-            val inSector = subs.filter { it.sectorId == sector.id }
-            item(key = sector.id) { Text("${sector.shortCode} · ${sector.name}", style = MaterialTheme.typography.labelLarge) }
-            inSector.forEach { ss ->
-                val s = byId[ss.id]
-                item(key = ss.id) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Row {
-                            Text("${ss.shortCode} · ${ss.name}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                            Text(s?.deadShare?.let { "${(it * 100).toInt()}% dead" } ?: "—", style = MaterialTheme.typography.bodyMedium)
-                        }
-                        ShareBar(s)
-                        Text(
-                            s?.let { "${it.total} trees · ${it.alive} alive · ${it.dead} dead · ${it.unknown} not observed" } ?: "No trees recorded",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-            }
+            item(key = sector.id) { DensityRow(sectorDensity[sector.id], max, heading = true) }
+            subs.filter { it.sectorId == sector.id }.forEach { ss -> item(key = ss.id) { DensityRow(subDensity[ss.id], max, heading = false) } }
         }
     }
 }
 
 @Composable
-private fun ShareBar(s: AreaShare?) {
-    val alive = androidx.compose.ui.graphics.Color(0xFF2E7D32)
-    val dead = androidx.compose.ui.graphics.Color(0xFFD32F2F)
-    val unknown = MaterialTheme.colorScheme.surfaceVariant
-    androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(10.dp)) {
-        val total = (s?.total ?: 0).coerceAtLeast(1).toFloat()
-        var x = 0f
-        listOf((s?.alive ?: 0) to alive, (s?.dead ?: 0) to dead, ((s?.unknown ?: 0) + if (s == null) 1 else 0) to unknown).forEach { (n, c) ->
-            val w = size.width * n / total
-            drawRect(c, topLeft = androidx.compose.ui.geometry.Offset(x, 0f), size = androidx.compose.ui.geometry.Size(w, size.height))
-            x += w
+private fun DensityLegend(max: Double) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("Trees per hectare", style = MaterialTheme.typography.titleSmall)
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("0", style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.width(4.dp))
+            DENSITY_SHADES.forEach { c ->
+                androidx.compose.foundation.layout.Box(Modifier.size(width = 28.dp, height = 14.dp).background(androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(c))))
+            }
+            Spacer(Modifier.width(4.dp))
+            Text(if (max > 0) max.oneDecimal() else "—", style = MaterialTheme.typography.bodySmall)
         }
+        Text("Shaded from the area's corner points and the trees registered in it. Grey = no trees yet.", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun DensityRow(d: AreaDensity?, max: Double, heading: Boolean) {
+    d ?: return
+    Row(Modifier.fillMaxWidth().padding(start = if (heading) 0.dp else 16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        androidx.compose.foundation.layout.Box(
+            Modifier.size(16.dp).background(androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(densityColor(d.perHectare, max)))),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(d.label, style = if (heading) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium)
+            Text(
+                listOfNotNull(
+                    d.hectares?.let { "${it.oneDecimal()} ha" } ?: "no corner points",
+                    "${d.trees} trees",
+                    d.trees.takeIf { it > 0 }?.let { "${d.alive} alive · ${d.dead} dead" },
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(d.perHectare?.let { "${it.oneDecimal()} /ha" } ?: "—", style = MaterialTheme.typography.titleSmall)
     }
 }

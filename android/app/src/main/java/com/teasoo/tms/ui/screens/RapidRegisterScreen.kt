@@ -1,7 +1,6 @@
 package com.teasoo.tms.ui.screens
 
 import android.content.Context
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -32,7 +31,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 import javax.inject.Inject
 
 /** Per-tree input; everything else comes from the field session. */
@@ -56,6 +54,7 @@ class RapidRegisterViewModel @Inject constructor(
     private val sessions: FieldSessionRepository,
     private val auth: SessionStore,
     val photoStore: PhotoStore,
+    private val photoLoader: PhotoLoader,
 ) : ViewModel() {
     private val ref = db.reference()
     val session = sessions.session.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -124,8 +123,8 @@ class RapidRegisterViewModel @Inject constructor(
     /** Remembered for the rest of the session. */
     fun setSpecies(id: String) = viewModelScope.launch { sessions.update { it.copy(speciesId = id) } }
     fun setStatus(id: String) = viewModelScope.launch { sessions.update { it.copy(statusId = id) } }
-    fun setVisitType(code: String) = viewModelScope.launch { sessions.update { it.copy(visitType = code) } }
-    fun setPlantedOn(d: LocalDate?) = viewModelScope.launch { sessions.update { it.copy(plantedOn = d?.toString()) } }
+    suspend fun latestPhoto(treeId: String) = db.media().latestFor(treeId)
+    suspend fun photo(m: com.teasoo.tms.data.local.MediaEntity, maxPx: Int) = photoLoader.load(m, maxPx)
     fun switchSubSector(id: String) = viewModelScope.launch { sessions.update { it.copy(subSectorId = id) } }
 
     private suspend fun refreshCheck() {
@@ -162,8 +161,6 @@ class RapidRegisterViewModel @Inject constructor(
                     statusId = s.statusId ?: throw RegistrationException("Choose a status."),
                     // Stamped when saved; not editable.
                     observedAt = java.time.Instant.now(),
-                    visitType = s.visitType,
-                    plantedOn = s.plantedOn,
                     notes = e.notes.ifBlank { null },
                     remarks = e.remarks.ifBlank { null },
                     photos = e.photos,
@@ -212,15 +209,15 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
     val suggestion by vm.suggestion.collectAsStateWithLifecycle()
     val species by vm.species.collectAsStateWithLifecycle()
     val statuses by vm.statuses.collectAsStateWithLifecycle()
-    val lastSaved by vm.lastSaved.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val saving by vm.saving.collectAsStateWithLifecycle()
     val treeFieldDefs by vm.treeFieldDefs.collectAsStateWithLifecycle()
     val observationFieldDefs by vm.observationFieldDefs.collectAsStateWithLifecycle()
     val showFieldErrors by vm.showFieldErrors.collectAsStateWithLifecycle()
     val referenceCm by vm.referenceCm.collectAsStateWithLifecycle()
-    var camera by remember { mutableStateOf(false) }
-    var moreDetails by remember { mutableStateOf(false) }
+    var showNote by remember { mutableStateOf(false) }
+    // The confirmation shown after each save, before the next (already cleared) form.
+    var confirmed by remember { mutableStateOf<String?>(null) }
     val serialFocus = remember { FocusRequester() }
     val scroll = rememberScrollState()
     val scope = rememberCoroutineScope()
@@ -241,16 +238,7 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
         )
     }) { padding ->
         Column(Modifier.padding(padding).padding(horizontal = 16.dp).verticalScroll(scroll), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            AnimatedVisibility(lastSaved != null) {
-                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Saved ${lastSaved.orEmpty()} · $treesCount today", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-            ctx?.let { SubSectorChips(it) { id -> vm.switchSubSector(id) } }
+            ctx?.let { SubSectorPicker(it) { id -> vm.switchSubSector(id) } }
 
             when (val p = prefix) {
                 null -> Text("Preparing…")
@@ -277,8 +265,11 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
                             is SerialCheck.LocalDuplicate -> Card(Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("${c.physicalId} is already registered.", style = MaterialTheme.typography.titleSmall)
-                                    val about by produceState<String?>(null, c.existingTreeId) { value = vm.describe(c.existingTreeId) }
-                                    about?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        TreeThumb(c.existingTreeId, vm::latestPhoto, vm::photo, size = 72.dp)
+                                        val about by produceState<String?>(null, c.existingTreeId) { value = vm.describe(c.existingTreeId) }
+                                        about?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                                    }
                                     Button(onClick = { onVisitTree(c.existingTreeId) }) { Text("Record a visit to this tree") }
                                 }
                             }
@@ -299,28 +290,52 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
             Picker("Species", species, species.find { it.id == s?.speciesId }, { it.commonName?.let { c -> "$c (${it.scientificName})" } ?: it.scientificName },
                 { vm.setSpecies(it.id) })
             StatusSelector(statuses, s?.statusId, vm::setStatus)
-            VisitTypeSelector(s?.visitType ?: "VISIT", vm::setVisitType)
-            OutlinedTextField(e.remarks, { v -> vm.update { it.copy(remarks = v) } }, label = { Text("Remarks (optional)") }, modifier = Modifier.fillMaxWidth())
-            PhotoRow(e.photos, onAdd = { camera = true }, onRemove = vm::removePhoto, required = photoMissing)
+            PhotoCapture(e.photos, vm.photoStore, onAdd = vm::addPhoto, onRemove = vm::removePhoto, required = photoMissing)
             if (SHOW_HEIGHT) HeightSection(e.height, vm::setHeight, e.photos, referenceCm, vm::setReferenceCm)
             CustomFieldsForm(treeFieldDefs, e.treeFields, vm::setTreeField, showFieldErrors)
             CustomFieldsForm(observationFieldDefs, e.observationFields, vm::setObservationField, showFieldErrors)
 
-            TextButton(onClick = { moreDetails = !moreDetails }) { Text(if (moreDetails) "Hide details" else "More details (planting date, notes)") }
-            AnimatedVisibility(moreDetails) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DateField("Planted on (remembered)", s?.plantedOn?.let(LocalDate::parse), vm::setPlantedOn)
-                    OutlinedTextField(e.notes, { v -> vm.update { it.copy(notes = v) } }, label = { Text("Tree notes") }, modifier = Modifier.fillMaxWidth())
-                }
+            if (showNote || e.remarks.isNotBlank()) {
+                OutlinedTextField(e.remarks, { v -> vm.update { it.copy(remarks = v) } }, label = { Text("Note (optional)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+            } else {
+                TextButton(onClick = { showNote = true }) { Text("+ Add a note") }
             }
+            Text("Date and time are recorded automatically when you save.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(
-                onClick = { vm.save { scope.launch { scroll.animateScrollTo(0); runCatching { serialFocus.requestFocus() } } } },
+                onClick = { vm.save { confirmed = vm.lastSaved.value; showNote = false; scope.launch { scroll.scrollTo(0) } } },
                 enabled = !saving && check is SerialCheck.Ok && s?.speciesId != null && s?.statusId != null && !photoMissing,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            ) { Text(if (saving) "Saving…" else "Save and next tree") }
+                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(bottom = 16.dp),
+            ) { Text(if (saving) "Saving…" else "Save tree", style = MaterialTheme.typography.titleMedium) }
         }
     }
-    if (camera) CameraCaptureDialog(vm.photoStore, onCaptured = { vm.addPhoto(it); camera = false }, onDismiss = { camera = false })
+    confirmed?.let { id ->
+        TreeSavedDialog(
+            physicalId = id, savedThisSession = treesCount,
+            onNext = { confirmed = null; scope.launch { runCatching { serialFocus.requestFocus() } } },
+            onDone = { confirmed = null; onBack() },
+        )
+    }
+}
+
+/** Clear confirmation that the tree is saved on the phone, before the next empty form. */
+@Composable
+private fun TreeSavedDialog(physicalId: String, savedThisSession: Int, onNext: () -> Unit, onDone: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onNext,
+        icon = { Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(72.dp)) },
+        title = { Text("Tree registered", style = MaterialTheme.typography.headlineSmall) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Text(physicalId, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                Text("Saved on this phone. It is sent automatically when there is internet.", style = MaterialTheme.typography.bodyMedium)
+                Text("$savedThisSession registered this session", style = MaterialTheme.typography.titleSmall)
+            }
+        },
+        confirmButton = {
+            Button(onClick = onNext, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text("Register next tree", style = MaterialTheme.typography.titleMedium) }
+        },
+        dismissButton = { TextButton(onClick = onDone, modifier = Modifier.fillMaxWidth()) { Text("Done for now") } },
+    )
 }

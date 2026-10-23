@@ -265,6 +265,8 @@ interface MediaDao {
     @Upsert suspend fun upsert(m: MediaEntity)
     @Query("SELECT * FROM media WHERE id = :id") suspend fun get(id: String): MediaEntity?
     @Query("SELECT * FROM media WHERE treeId = :treeId ORDER BY capturedAt") fun forTree(treeId: String): Flow<List<MediaEntity>>
+    @Query("SELECT * FROM media WHERE treeId = :treeId ORDER BY capturedAt DESC LIMIT 1") suspend fun latestFor(treeId: String): MediaEntity?
+    @Query("SELECT * FROM media WHERE observationId = :observationId ORDER BY capturedAt LIMIT 1") suspend fun firstForObservation(observationId: String): MediaEntity?
     @Query("SELECT * FROM media WHERE state <> 'VERIFIED' AND localPath IS NOT NULL AND nextAttemptAt <= :now ORDER BY capturedAt")
     suspend fun dueForUpload(now: Long): List<MediaEntity>
     @Query("SELECT * FROM media WHERE state = 'VERIFIED' AND localPath IS NOT NULL") suspend fun verifiedWithLocalCopy(): List<MediaEntity>

@@ -1,6 +1,5 @@
 package com.teasoo.tms.ui.screens
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -18,18 +17,14 @@ import androidx.lifecycle.viewModelScope
 import com.teasoo.tms.data.local.*
 import com.teasoo.tms.data.repo.FieldSession
 import com.teasoo.tms.data.repo.FieldSessionRepository
-import com.teasoo.tms.data.repo.resolveScheme
 import com.teasoo.tms.data.session.SessionState
 import com.teasoo.tms.data.session.SessionStore
-import com.teasoo.tms.ui.components.DateField
 import com.teasoo.tms.ui.components.Notice
 import com.teasoo.tms.ui.components.Picker
-import com.teasoo.tms.ui.components.VisitTypeSelector
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.time.LocalDate
 import javax.inject.Inject
 
 /** The session's ids resolved to the names and codes shown on screen. */
@@ -109,7 +104,7 @@ fun SessionContextCard(
             if (ctx.stale) {
                 Notice("Part of this session was changed or deactivated by an administrator. Tap “Change” to pick again.", MaterialTheme.colorScheme.errorContainer)
             }
-            SubSectorChips(ctx, onSwitchSubSector)
+            SubSectorPicker(ctx, onSwitchSubSector)
             Text("$trees trees registered · $observations observations recorded this session", style = MaterialTheme.typography.bodySmall)
             content()
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -120,22 +115,13 @@ fun SessionContextCard(
     }
 }
 
-/** Horizontal chips for moving between sub-sectors without leaving the current screen. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Drop-down for moving to another sub-sector of the session's sector without leaving the current screen. */
 @Composable
-fun SubSectorChips(ctx: SessionContext, onSelect: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text("Sub-sector", style = MaterialTheme.typography.labelMedium)
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ctx.subSectors.forEach { ss ->
-                FilterChip(
-                    selected = ss.id == ctx.session.subSectorId,
-                    onClick = { onSelect(ss.id) },
-                    label = { Text("${ss.shortCode} · ${ss.name}") },
-                )
-            }
-        }
-    }
+fun SubSectorPicker(ctx: SessionContext, onSelect: (String) -> Unit) {
+    Picker(
+        "Sub-sector", ctx.subSectors, ctx.subSectors.find { it.id == ctx.session.subSectorId }, { "${it.shortCode} · ${it.name}" },
+        { onSelect(it.id) }, supportingText = null,
+    )
 }
 
 // ---------------------------------------------------------------- setup
@@ -158,8 +144,6 @@ class SessionSetupViewModel @Inject constructor(
     val sectorId = MutableStateFlow<String?>(null)
     val subSectorId = MutableStateFlow<String?>(null)
     val vendorId = MutableStateFlow<String?>(null)
-    val plantedOn = MutableStateFlow<LocalDate?>(LocalDate.now())
-    val visitType = MutableStateFlow("VISIT")
 
     val years = projectId.filterNotNull().flatMapLatest { ref.years(it) }
         // Officers work in open planting years; administrators may back-enter closed ones.
@@ -174,21 +158,15 @@ class SessionSetupViewModel @Inject constructor(
     val vendors = combine(linkedVendors, ref.vendors()) { linked, all -> linked.ifEmpty { all.filter { it.active } } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val subSectors = projectId.filterNotNull().flatMapLatest { ref.subSectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    /** A vendor is chosen when the year has vendors, or when the ID format uses one. */
-    val vendorNeeded = combine(projectId.filterNotNull(), yearId, linkedVendors) { p, y, linked -> Triple(p, y, linked) }
-        .mapLatest { (p, y, linked) ->
-            linked.isNotEmpty() || ref.activeSchemes(p).let { all ->
-                all.any { it.vendorId != null } || resolveScheme(all, y, null)?.let { it.componentsJson.contains("VENDOR_CODE") || it.serialScopeJson.contains("VENDOR") } == true
-            }
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    /** Who planted is recorded when the year has vendors; it does not affect the tree ID. */
+    val vendorNeeded = linkedVendors.map { it.isNotEmpty() }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     init {
         // Pre-fill from the current session, so "Change" only asks for what is different.
         viewModelScope.launch {
             sessions.current()?.let { s ->
                 projectId.value = s.projectId; yearId.value = s.plantingYearId; sectorId.value = s.sectorId
-                subSectorId.value = s.subSectorId; vendorId.value = s.vendorId; plantedOn.value = s.plantedOn?.let(LocalDate::parse)
-                visitType.value = s.visitType
+                subSectorId.value = s.subSectorId; vendorId.value = s.vendorId
             }
         }
     }
@@ -215,7 +193,7 @@ class SessionSetupViewModel @Inject constructor(
         sessions.start(
             FieldSession(
                 projectId = projectId.value!!, plantingYearId = yearId.value!!, sectorId = sectorId.value!!, subSectorId = subSectorId.value!!,
-                vendorId = vendorId.value, plantedOn = plantedOn.value?.toString(), visitType = visitType.value,
+                vendorId = vendorId.value,
                 // Keep the running count and remembered choices when only the sub-sector or vendor changed.
                 startedAt = if (sameDay) previous!!.startedAt else java.time.Instant.now().toString(),
                 speciesId = previous?.speciesId.takeIf { sameDay }, statusId = previous?.statusId.takeIf { sameDay },
@@ -242,8 +220,6 @@ fun SessionSetupScreen(onStarted: () -> Unit, onBack: () -> Unit, vm: SessionSet
     val sectorId by vm.sectorId.collectAsStateWithLifecycle()
     val subSectorId by vm.subSectorId.collectAsStateWithLifecycle()
     val vendorId by vm.vendorId.collectAsStateWithLifecycle()
-    val plantedOn by vm.plantedOn.collectAsStateWithLifecycle()
-    val visitType by vm.visitType.collectAsStateWithLifecycle()
 
     // Only areas this user is assigned to; administrators have no assignment rows and see everything.
     val mySectors = sectors.filter { s -> isAdmin || allowed(grants, s.projectId, s.id, null) }
@@ -268,16 +244,14 @@ fun SessionSetupScreen(onStarted: () -> Unit, onBack: () -> Unit, vm: SessionSet
             }
             Picker("Sector", mySectors, mySectors.find { it.id == sectorId }, { "${it.shortCode} · ${it.name}" }, { vm.selectSector(it.id) }, enabled = yearId != null,
                 supportingText = null)
-            Picker("Starting sub-sector", mySubs, mySubs.find { it.id == subSectorId }, { "${it.shortCode} · ${it.name}" }, { vm.subSectorId.value = it.id }, enabled = sectorId != null)
+            Picker("Sub-sector", mySubs, mySubs.find { it.id == subSectorId }, { "${it.shortCode} · ${it.name}" }, { vm.subSectorId.value = it.id }, enabled = sectorId != null)
             if (yearId != null && mySectors.isEmpty()) Notice("No surveyed areas for this planting year on this device yet. Sync, or ask an administrator to add this year's sectors.")
-            VisitTypeSelector(visitType) { vm.visitType.value = it }
-            DateField("Planted on (default for new trees)", plantedOn, { vm.plantedOn.value = it })
             if (projects.isEmpty()) Notice("No projects on this device yet. Sync while connected, or ask an administrator to assign you.")
             Button(
                 onClick = { vm.start(onStarted) },
                 enabled = projectId != null && yearId != null && sectorId != null && subSectorId != null && (!vendorNeeded || vendorId != null),
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Start session") }
+                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+            ) { Text("Start session", style = MaterialTheme.typography.titleMedium) }
         }
     }
 }

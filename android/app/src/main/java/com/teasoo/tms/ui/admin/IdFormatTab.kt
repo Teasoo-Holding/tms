@@ -6,7 +6,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -23,18 +22,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.teasoo.tms.data.remote.AdminPlantingYearDto
 import com.teasoo.tms.data.remote.AdminSchemeDto
-import com.teasoo.tms.data.remote.AdminYearVendorDto
 import com.teasoo.tms.data.remote.ProjectDetailDto
 import com.teasoo.tms.data.remote.SchemeComponent
 import com.teasoo.tms.data.remote.SchemeRequest
-import com.teasoo.tms.ui.components.Picker
 
-val COMPONENT_TYPES = listOf("PROJECT_CODE", "PLANTING_YEAR", "VENDOR_CODE", "TEXT", "SECTOR_CODE", "SUB_SECTOR_CODE", "SERIAL")
-val SCOPE_DIMENSIONS = listOf("PROJECT", "PLANTING_YEAR", "VENDOR", "SECTOR", "SUB_SECTOR")
+/** Tree IDs are project/year scoped: every vendor shares one progressive sequence, so formats have no vendor part. */
+val COMPONENT_TYPES = listOf("PROJECT_CODE", "PLANTING_YEAR", "TEXT", "SECTOR_CODE", "SUB_SECTOR_CODE", "SERIAL")
+val SCOPE_DIMENSIONS = listOf("PROJECT", "PLANTING_YEAR", "SECTOR", "SUB_SECTOR")
 /** Parts that are the same on every tree in the format's scope; the others change with where the tree is. */
 val FIXED_TYPES = setOf("PROJECT_CODE", "PLANTING_YEAR", "VENDOR_CODE", "TEXT")
-/** Serial numbers restart per project + year + vendor: recommended when several vendors tag trees. */
-val RECOMMENDED_VENDOR_SCOPE = listOf("PROJECT", "PLANTING_YEAR", "VENDOR")
 private const val MAX_PARTS = 8
 private val SEPARATORS = listOf("-", "_", "/", ".", "")
 private val TEXT_PATTERN = Regex("^[A-Z0-9]{1,16}$")
@@ -80,7 +76,7 @@ private fun schemeProblems(components: List<SchemeComponent>, scope: List<String
     if (components.any { it.type == "TEXT" && !TEXT_PATTERN.matches(it.value.orEmpty()) }) add("Fixed text needs 1 to 16 letters or digits.")
     if ("SERIAL" !in types) add("The ID needs a tree number.") else if (types.last() != "SERIAL") add("The tree number must be the last part.")
     if (scope.toSet().size != scope.size) add("Each uniqueness dimension can be chosen once.")
-    val needs = mapOf("PLANTING_YEAR" to "PLANTING_YEAR", "VENDOR" to "VENDOR_CODE", "SECTOR" to "SECTOR_CODE", "SUB_SECTOR" to "SUB_SECTOR_CODE")
+    val needs = mapOf("PLANTING_YEAR" to "PLANTING_YEAR", "SECTOR" to "SECTOR_CODE", "SUB_SECTOR" to "SUB_SECTOR_CODE")
     scope.forEach { d ->
         val c = needs[d]
         if (c != null && c !in types) add("Tree numbers restart for each ${scopeLabel(d).lowercase()}, but the ID does not show it, so two trees could carry the same visible ID.")
@@ -93,98 +89,55 @@ private fun scopeSentence(scope: List<String>) =
     if (scope.isEmpty()) "Tree numbers are unique across the whole system (they never restart)."
     else "Tree numbers restart for each " + scope.joinToString(" + ") { scopeLabel(it).lowercase() } + "."
 
-private fun FormatScope.needsVendor() = this == FormatScope.VENDOR || this == FormatScope.VENDOR_YEAR
-private fun FormatScope.needsYear() = this == FormatScope.YEAR || this == FormatScope.VENDOR_YEAR
-
 /** The builder's working copy of a format. */
-private class FormatDraft(kind: FormatScope, vendorId: String?, base: AdminSchemeDto?) {
-    var kind by mutableStateOf(kind)
-    var vendorId by mutableStateOf(vendorId)
+private class FormatDraft(base: AdminSchemeDto?) {
     val components = mutableStateListOf<SchemeComponent>().apply {
         addAll(
             base?.components?.takeIf { it.isNotEmpty() }
-                ?: listOfNotNull(SchemeComponent("PROJECT_CODE"), SchemeComponent("PLANTING_YEAR"), SchemeComponent("VENDOR_CODE").takeIf { kind.needsVendor() }, SchemeComponent("SERIAL")),
+                ?: listOf(SchemeComponent("PROJECT_CODE"), SchemeComponent("PLANTING_YEAR"), SchemeComponent("SERIAL")),
         )
     }
     var separator by mutableStateOf(base?.separator ?: "-")
     var width by mutableIntStateOf(base?.serialWidth ?: 5)
     val scope = mutableStateListOf<String>().apply {
-        addAll(base?.serialUniquenessScope ?: if (kind.needsVendor()) RECOMMENDED_VENDOR_SCOPE else listOf("PROJECT", "PLANTING_YEAR"))
+        addAll(base?.serialUniquenessScope?.filter { it != "VENDOR" } ?: listOf("PROJECT", "PLANTING_YEAR"))
     }
 }
 
 /**
- * ID formats for the selected year: the project default, the year's format and each vendor's, from general to specific,
- * plus a builder for any of these scopes.
+ * The project's one ID format. Tree numbers run on per project and planting year; vendors share the sequence.
+ * Changing the format makes a new version; existing tree IDs never change.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun IdFormatTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: ProjectSetupViewModel) {
     val areas = collect(vm.areas)
     val saving = collect(vm.saving)
     val formError = collect(vm.formError)
-    val linked = p.linkedVendors(year?.id)
-    val defaultScheme = p.schemes.activeIn(null, null)
-    val yearScheme = year?.let { p.schemes.activeIn(null, it.id) }
-    fun samplesFor(vendorCode: String?) = idSamples(p, year, vendorCode, areas)
+    val current = p.schemes.activeIn(null, null)
+    val samples = idSamples(p, year, null, areas)
 
     var draft by remember { mutableStateOf<FormatDraft?>(null) }
     var confirming by remember { mutableStateOf(false) }
-    var retiring by remember { mutableStateOf<AdminSchemeDto?>(null) }
     var showHistory by remember { mutableStateOf(false) }
     val actions = rememberItemActions()
-
-    fun start(kind: FormatScope, vendorId: String?) {
-        val v = vendorId.takeIf { kind.needsVendor() }
-        val y = year?.id.takeIf { kind.needsYear() }
-        // Start from the format this scope uses today, so a change is a small edit.
-        val base = p.schemes.activeIn(v, y) ?: p.schemes.effectiveFor(v, y ?: year?.id)
-        vm.clearFormError()
-        draft = FormatDraft(kind, v, base)
-    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         val d = draft
         if (d != null) {
-            FormatBuilder(p, year, linked, d, saving, ::samplesFor, onCancel = { draft = null }, onSave = { vm.clearFormError(); confirming = true })
+            FormatBuilder(p, d, saving, samples, onCancel = { draft = null }, onSave = { vm.clearFormError(); confirming = true })
             Spacer(Modifier.height(24.dp))
             return@Column
         }
 
         FormatLevelCard(
-            title = "Project default",
-            subtitle = null,
-            scheme = defaultScheme,
-            samples = samplesFor(null),
+            title = "Tree ID format",
+            subtitle = "Used by every vendor. Tree numbers run on for each planting year.",
+            scheme = current,
+            samples = samples,
             emptyText = "Not set. Needed before trees can be registered.",
-            actionLabel = if (defaultScheme == null) "Set the project default" else "Change",
-            onAction = { start(FormatScope.DEFAULT, null) },
-            onRetire = null,
+            actionLabel = if (current == null) "Set the format" else "Change",
+            onAction = { vm.clearFormError(); draft = FormatDraft(current) },
         )
-
-        if (year == null) {
-
-        } else {
-            FormatLevelCard(
-                title = "Year ${year.yearLabel}",
-                subtitle = null,
-                scheme = yearScheme,
-                samples = samplesFor(null),
-                emptyText = "Uses the project default.",
-                actionLabel = if (yearScheme == null) "Set a ${year.yearLabel} format" else "Change",
-                onAction = { start(FormatScope.YEAR, null) },
-                onRetire = yearScheme?.let { s -> { vm.clearFormError(); retiring = s } },
-            )
-
-            if (linked.isNotEmpty()) SectionHeader("Vendors in ${year.yearLabel}")
-            linked.forEach { link ->
-                VendorFormatCard(
-                    p, year, link, samplesFor(link.vendorShortCode),
-                    onSet = { start(FormatScope.VENDOR_YEAR, link.vendorId) },
-                    onRetire = { vm.clearFormError(); retiring = it },
-                )
-            }
-        }
 
         if (p.schemes.isNotEmpty()) {
             TextButton(onClick = { showHistory = !showHistory }, modifier = Modifier.heightIn(min = 48.dp)) {
@@ -194,9 +147,6 @@ internal fun IdFormatTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: P
                 VersionRow(s, idSamples(p, year, s.vendorShortCode, areas), onActions = {
                     actions.open(
                         "${s.scopeTitle()} · v${s.version}",
-                        extra = listOfNotNull(
-                            SheetAction("Retire", Icons.Default.Block) { vm.clearFormError(); retiring = s }.takeIf { s.active && s.scopeKind() != FormatScope.DEFAULT },
-                        ),
                         delete = PendingDelete(
                             "format version ${s.version}",
                             detail = if (s.active) "Only a format no tree uses can be deleted." else null,
@@ -212,45 +162,14 @@ internal fun IdFormatTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: P
 
     val d = draft
     if (confirming && d != null) {
-        val vendor = linked.firstOrNull { it.vendorId == d.vendorId }
-        val title = scopeDraftTitle(d.kind, year, vendor)
-        val replaced = p.schemes.activeIn(d.vendorId.takeIf { d.kind.needsVendor() }, year?.id.takeIf { d.kind.needsYear() })
         FormDialog(
-            "Save the format for $title?", "Save", true, saving, formError,
-            onConfirm = {
-                vm.createScheme(
-                    SchemeRequest(
-                        d.components.toList(), d.separator, d.width, d.scope.toList(),
-                        vendorId = d.vendorId.takeIf { d.kind.needsVendor() },
-                        plantingYearId = year?.id.takeIf { d.kind.needsYear() },
-                    ),
-                ) { confirming = false; draft = null }
-            },
+            "Save the new tree ID format?", "Save", true, saving, formError,
+            onConfirm = { vm.createScheme(SchemeRequest(d.components.toList(), d.separator, d.width, d.scope.toList())) { confirming = false; draft = null } },
             onDismiss = { confirming = false },
         ) {
-            PreviewBox(previewId(d.components, d.separator, d.width, samplesFor(vendor?.vendorShortCode), 1))
-            Text((if (replaced != null) "Replaces the current one. " else "") + "Existing tree IDs don’t change.")
+            PreviewBox(previewId(d.components, d.separator, d.width, samples, 1))
+            Text((if (current != null) "Replaces the current one. " else "") + "Existing tree IDs don’t change.")
         }
-    }
-    retiring?.let { s ->
-        val fallback = p.schemes.filter { it.id != s.id }.effectiveFor(s.vendorId, s.plantingYearId)
-        ConfirmDialog(
-            "Retire the format for ${s.scopeTitle()}?",
-            "New trees will use " + (fallback?.let { "the ${it.scopeTitle().lowercase()} format" } ?: "no format") + ". Existing IDs don’t change.",
-            "Retire", saving, formError, destructive = true,
-            onConfirm = { vm.retireScheme(s) { retiring = null } },
-            onDismiss = { retiring = null },
-        )
-    }
-}
-
-private fun scopeDraftTitle(kind: FormatScope, year: AdminPlantingYearDto?, vendor: AdminYearVendorDto?): String {
-    val v = vendor?.vendorName ?: "the vendor"
-    return when (kind) {
-        FormatScope.DEFAULT -> "the project default"
-        FormatScope.YEAR -> "year ${year?.yearLabel ?: ""}".trim()
-        FormatScope.VENDOR -> "$v (all years)"
-        FormatScope.VENDOR_YEAR -> "$v in ${year?.yearLabel ?: "this year"}"
     }
 }
 
@@ -263,7 +182,6 @@ private fun FormatLevelCard(
     emptyText: String,
     actionLabel: String,
     onAction: () -> Unit,
-    onRetire: (() -> Unit)?,
 ) {
     ElevatedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -278,7 +196,6 @@ private fun FormatLevelCard(
             else SchemeSummary(scheme, samples)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onAction, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text(actionLabel) }
-                if (onRetire != null) TextButton(onClick = onRetire, modifier = Modifier.heightIn(min = 48.dp)) { Text("Retire") }
             }
         }
     }
@@ -291,85 +208,24 @@ private fun SchemeSummary(s: AdminSchemeDto, samples: Map<String, String>) {
     Hint(scopeSentence(s.serialUniquenessScope))
 }
 
-@Composable
-private fun VendorFormatCard(
-    p: ProjectDetailDto,
-    year: AdminPlantingYearDto,
-    link: AdminYearVendorDto,
-    samples: Map<String, String>,
-    onSet: () -> Unit,
-    onRetire: (AdminSchemeDto) -> Unit,
-) {
-    val effective = p.schemes.effectiveFor(link.vendorId, year.id)
-    val own = listOfNotNull(p.schemes.activeIn(link.vendorId, year.id), p.schemes.activeIn(link.vendorId, null))
-    OutlinedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(link.vendorName ?: "Vendor", style = MaterialTheme.typography.titleSmall)
-            if (effective == null) Hint("No format applies yet.")
-            else {
-                Text(
-                    previewId(effective.components, effective.separator, effective.serialWidth, samples, 1),
-                    fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary,
-                )
-                if (effective.vendorId != null) Hint("Own format")
-            }
-            own.forEach { s ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(s.scopeTitle(), style = MaterialTheme.typography.bodyMedium)
-                        Text(previewId(s.components, s.separator, s.serialWidth, samples), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                    }
-                    TextButton(onClick = { onRetire(s) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Retire") }
-                }
-            }
-            OutlinedButton(onClick = onSet, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                Text(if (own.isEmpty()) "Set own format" else "Change")
-            }
-        }
-    }
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FormatBuilder(
     p: ProjectDetailDto,
-    year: AdminPlantingYearDto?,
-    linked: List<AdminYearVendorDto>,
     d: FormatDraft,
     saving: Boolean,
-    samplesFor: (String?) -> Map<String, String>,
+    samples: Map<String, String>,
     onCancel: () -> Unit,
     onSave: () -> Unit,
 ) {
-    val vendor = linked.firstOrNull { it.vendorId == d.vendorId }
-    val samples = samplesFor(vendor?.vendorShortCode)
     val problems = schemeProblems(d.components, d.scope)
     val blocking = problems.filterNot(::isWarning)
-    val scopeOk = (!d.kind.needsVendor() || vendor != null) && (!d.kind.needsYear() || year != null)
-    val replaced = p.schemes.activeIn(d.vendorId.takeIf { d.kind.needsVendor() }, year?.id.takeIf { d.kind.needsYear() })
-    val vendorInvolved = d.kind.needsVendor() || d.components.any { it.type == "VENDOR_CODE" }
+    val replaced = p.schemes.activeIn(null, null)
 
     SectionHeader("New ID format")
 
     ElevatedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            val kinds = listOfNotNull(FormatScope.DEFAULT, FormatScope.YEAR.takeIf { year != null }, FormatScope.VENDOR, FormatScope.VENDOR_YEAR.takeIf { year != null })
-            ChoiceChips(
-                "Applies to", kinds, d.kind,
-                {
-                    when (it) {
-                        FormatScope.DEFAULT -> "Project default"
-                        FormatScope.YEAR -> "This year (${year?.yearLabel})"
-                        FormatScope.VENDOR -> "A vendor (all years)"
-                        FormatScope.VENDOR_YEAR -> "A vendor in ${year?.yearLabel}"
-                    }
-                },
-                { d.kind = it },
-            )
-            if (d.kind.needsVendor()) {
-                if (linked.isEmpty()) Hint("No vendors are linked to ${year?.yearLabel ?: "this year"}. Add them under Vendors first.")
-                Picker("Vendor", linked, vendor, { (it.vendorName ?: "Vendor") + (it.vendorShortCode?.let { c -> " ($c)" } ?: "") }, { d.vendorId = it.vendorId })
-            }
             if (replaced != null) Hint("Replaces version ${replaced.version}.")
 
             HorizontalDivider()
@@ -434,20 +290,10 @@ private fun FormatBuilder(
                 }
             }
             Hint(scopeSentence(d.scope))
-            if (vendorInvolved && d.scope.toSet() != RECOMMENDED_VENDOR_SCOPE.toSet()) {
-                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Recommended with vendors: project + year + vendor.", style = MaterialTheme.typography.bodySmall)
-                        TextButton(onClick = { d.scope.clear(); d.scope.addAll(RECOMMENDED_VENDOR_SCOPE) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Use recommended") }
-                    }
-                }
-            }
-
             problems.forEach { Text("• $it", color = if (isWarning(it)) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-            if (!scopeOk) Text("• Choose the vendor this format is for.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Cancel") }
-                Button(onClick = onSave, enabled = blocking.isEmpty() && scopeOk && !saving, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Save format") }
+                Button(onClick = onSave, enabled = blocking.isEmpty() && !saving, modifier = Modifier.weight(1f).heightIn(min = 48.dp)) { Text("Save format") }
             }
         }
     }
@@ -463,7 +309,6 @@ private fun PreviewBox(text: String) {
 private fun partHelp(type: String, samples: Map<String, String>) = when (type) {
     "PROJECT_CODE" -> samples["PROJECT_CODE"].orEmpty()
     "PLANTING_YEAR" -> "e.g. ${samples["PLANTING_YEAR"]}"
-    "VENDOR_CODE" -> "e.g. ${samples["VENDOR_CODE"]}"
     "TEXT" -> ""
     "SECTOR_CODE" -> "e.g. ${samples["SECTOR_CODE"]}"
     "SUB_SECTOR_CODE" -> "e.g. ${samples["SUB_SECTOR_CODE"]}"

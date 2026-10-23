@@ -36,7 +36,8 @@ class EditTreeViewModel @Inject constructor(
     private val treeId: String = checkNotNull(saved["treeId"])
     val species = db.reference().species().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val speciesId = MutableStateFlow<String?>(null)
-    val plantedOn = MutableStateFlow<LocalDate?>(null)
+    /** Not editable on the phone any more; sent back unchanged. */
+    private var plantedOn: String? = null
     val notes = MutableStateFlow("")
     val physicalId = MutableStateFlow("")
     val fieldDefs = MutableStateFlow<List<com.teasoo.tms.data.local.CustomFieldEntity>>(emptyList())
@@ -48,7 +49,7 @@ class EditTreeViewModel @Inject constructor(
         viewModelScope.launch {
             db.trees().get(treeId)?.let { t ->
                 speciesId.value = t.speciesId
-                plantedOn.value = t.plantedOn?.let(LocalDate::parse)
+                plantedOn = t.plantedOn
                 notes.value = t.notes.orEmpty()
                 physicalId.value = t.physicalTreeId
                 fieldDefs.value = db.reference().customFields(t.projectId, "TREE").first()
@@ -66,7 +67,7 @@ class EditTreeViewModel @Inject constructor(
                 .filterKeys { k -> fieldDefs.value.none { it.key == k } }
                 .mapNotNull { (k, v) -> (v as? kotlinx.serialization.json.JsonPrimitive)?.let { k to it } }.toMap()
             val fields = keep + edited
-            trees.updateTree(treeId, speciesId.value, plantedOn.value?.toString(), notes.value.ifBlank { null }, fields)
+            trees.updateTree(treeId, speciesId.value, plantedOn, notes.value.ifBlank { null }, fields)
             SyncScheduler.syncNow(context)
             onDone()
         } catch (e: RegistrationException) {
@@ -80,7 +81,6 @@ class EditTreeViewModel @Inject constructor(
 fun EditTreeScreen(app: AppViewModel, onDone: () -> Unit, vm: EditTreeViewModel = hiltViewModel()) {
     val species by vm.species.collectAsStateWithLifecycle()
     val speciesId by vm.speciesId.collectAsStateWithLifecycle()
-    val plantedOn by vm.plantedOn.collectAsStateWithLifecycle()
     val notes by vm.notes.collectAsStateWithLifecycle()
     val physicalId by vm.physicalId.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
@@ -90,13 +90,12 @@ fun EditTreeScreen(app: AppViewModel, onDone: () -> Unit, vm: EditTreeViewModel 
         Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TreeIdText(physicalId, "")
             Picker("Species", species, species.find { it.id == speciesId }, { it.commonName ?: it.scientificName }, { vm.speciesId.value = it.id })
-            DateField("Planted on", plantedOn, { vm.plantedOn.value = it })
             OutlinedTextField(notes, { vm.notes.value = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
             val fieldDefs by vm.fieldDefs.collectAsStateWithLifecycle()
             val fieldValues by vm.fieldValues.collectAsStateWithLifecycle()
             CustomFieldsForm(fieldDefs, fieldValues, { k, v -> vm.fieldValues.value = vm.fieldValues.value + (k to v) })
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Button(onClick = { vm.save(onDone) }, modifier = Modifier.fillMaxWidth()) { Text("Save on this device") }
+            Button(onClick = { vm.save(onDone) }, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) { Text("Save on this device", style = MaterialTheme.typography.titleMedium) }
         }
     }
 }
