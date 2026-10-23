@@ -65,6 +65,39 @@ private fun Thumbnail(m: MediaEntity, load: PhotoSource, onClick: () -> Unit) {
     }
 }
 
+/** The tree's most recent photo, large, at the top of anything that describes the tree; tap for full screen. */
+@Composable
+fun TreePhoto(media: List<MediaEntity>, load: PhotoSource, modifier: Modifier = Modifier) {
+    val latest = media.maxByOrNull { it.capturedAt }
+    var open by remember { mutableStateOf(false) }
+    val image by produceState<ImageBitmap?>(null, latest?.id, latest?.state) { value = latest?.let { load(it, 1024) } }
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = modifier.fillMaxWidth().height(220.dp).clip(MaterialTheme.shapes.medium).clickable(enabled = image != null) { open = true },
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            val img = image
+            when {
+                img != null -> Image(img, contentDescription = "Latest photo of the tree", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                latest == null -> PhotoPlaceholder(Icons.Default.CloudOff, "No photo yet")
+                latest.state != MediaState.VERIFIED -> PhotoPlaceholder(Icons.Default.CloudUpload, "Uploading")
+                else -> PhotoPlaceholder(Icons.Default.CloudOff, "Connect to view")
+            }
+        }
+    }
+    if (open && latest != null) PhotoViewer(latest, load, null) { open = false }
+}
+
+/** A small square of a tree's latest photo for lists; blank when there is none or it can't be loaded offline. */
+@Composable
+fun TreeThumb(treeId: String, latest: suspend (String) -> MediaEntity?, load: PhotoSource, size: androidx.compose.ui.unit.Dp = 56.dp) {
+    val image by produceState<ImageBitmap?>(null, treeId) { value = latest(treeId)?.let { load(it, 320) } }
+    Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(size).clip(MaterialTheme.shapes.small)) {
+        image?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+    }
+}
+
 @Composable
 private fun PhotoPlaceholder(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {

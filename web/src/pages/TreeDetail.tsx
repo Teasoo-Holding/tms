@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useIsAdmin } from '../auth';
 import { ChartEmpty, LineChart, SERIES } from '../charts/charts';
-import { CardHeader, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RecordStatePill, RowMenu, StatusPill, visitTypeLabel } from '../components/ui';
+import { fmtHeight, LatestPhoto, Lightbox, newestFirst, Thumbs } from '../components/Photos';
+import { CardHeader, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RecordStatePill, RowMenu, StatusPill } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
-import { effectiveScheme, previewId, Scheme } from '../idscheme';
+import { currentScheme, previewId, Scheme } from '../idscheme';
 import type { CustomField } from './ProjectDetail';
 
 export function TreeDetailPage() {
@@ -38,6 +39,11 @@ export function TreeDetailPage() {
   const alreadyReplaced = t.lineage.some((l: any) => l.generation === 1);
   const canReplace = isAdmin && t.record_state === 'ACTIVE' && !!currentStatus?.allows_replacement && !alreadyReplaced;
   const hasLineage = t.lineage.length > 1 || t.physical_id_history.length > 0;
+  const latest = newestFirst(media)[0];
+  const openPhoto = (m: any) => {
+    const list = m.observation_id ? media.filter((x) => x.observation_id === m.observation_id) : media.filter((x) => !x.observation_id);
+    setLightbox({ media: list, index: Math.max(0, list.indexOf(m)), observation: observations.find((o) => o.id === m.observation_id) });
+  };
   return (
     <div className="stack">
       <PageHeader
@@ -55,6 +61,8 @@ export function TreeDetailPage() {
         <StatusPill code={t.status_code} name={t.status_name} />
         <RecordStatePill state={t.record_state} />
       </PageHeader>
+
+      {latest && <LatestPhoto media={latest} onOpen={() => openPhoto(latest)} />}
 
       <div className={hasLineage ? 'grid cols-2' : 'stack'}>
         <section className="card">
@@ -146,7 +154,6 @@ export function TreeDetailPage() {
                 <div className="row">
                   <StatusPill code={o.status_code} name={o.status_name} />
                   <strong>{fmtDateTime(o.observed_at)}</strong>
-                  {(o.visit_type ?? 'VISIT') !== 'VISIT' && <span className="pill" title="Visit type">{visitTypeLabel(o.visit_type)}</span>}
                   {o.is_amendment && <span className="pill warning">Correction</span>}
                   {o.superseded && <span className="pill">Superseded by a correction</span>}
                 </div>
@@ -202,8 +209,6 @@ export function TreeDetailPage() {
   );
 }
 
-const fmtHeight = (cm: number) => (cm >= 100 ? `${(cm / 100).toFixed(2)} m` : `${cm.toFixed(cm % 1 ? 1 : 0)} cm`);
-
 function formatValue(v: unknown, type?: CustomField['field_type']): string {
   if (v == null || v === '') return '—';
   if (type === 'BOOLEAN' || typeof v === 'boolean') return v === true || v === 'true' ? 'Yes' : 'No';
@@ -239,165 +244,6 @@ function CustomValues({ values, defs, empty }: { values: Record<string, unknown>
   );
 }
 
-/** Becomes true once the element scrolls near the viewport, so photo URLs are only requested when needed. */
-function useInView<T extends Element>() {
-  const ref = useRef<T>(null);
-  const [inView, setInView] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || inView) return;
-    if (typeof IntersectionObserver === 'undefined') return setInView(true);
-    const io = new IntersectionObserver(([e]) => e.isIntersecting && setInView(true), { rootMargin: '200px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [inView]);
-  return { ref, inView };
-}
-
-/**
- * Signed photo URL: `thumb` (~320 px) for galleries, `full` only in the lightbox. Signed URLs live a few
- * minutes, so results are cached for 4 minutes and then fetched again.
- */
-function useViewUrl(media: any, size: 'thumb' | 'full', enabled = true) {
-  return useQuery({
-    queryKey: ['media-url', media.id, size],
-    queryFn: () => api.get<{ url: string; size?: 'thumb' | 'full' }>(`/media/${media.id}/view-url${size === 'thumb' ? '?size=thumb' : ''}`),
-    enabled: enabled && media.upload_state === 'VERIFIED',
-    staleTime: 240_000,
-    gcTime: 240_000,
-    // A signed URL must not be shown past its lifetime: no placeholder from another photo.
-    placeholderData: undefined,
-  });
-}
-
-function Thumbs({ media, onOpen }: { media: any[]; onOpen: (index: number) => void }) {
-  if (media.length === 0) return null;
-  return (
-    <div className="thumbs">
-      {media.map((m, i) => (
-        <Thumb key={m.id} media={m} onOpen={() => onOpen(i)} />
-      ))}
-    </div>
-  );
-}
-
-function Thumb({ media, onOpen }: { media: any; onOpen: () => void }) {
-  const { ref, inView } = useInView<HTMLButtonElement>();
-  const url = useViewUrl(media, 'thumb', inView);
-  if (media.upload_state !== 'VERIFIED') {
-    return (
-      <span className="thumb placeholder" title={`Captured ${fmtDateTime(media.captured_at)}`}>
-        {media.upload_state === 'FAILED' ? 'Photo failed verification' : 'Photo uploading'}
-      </span>
-    );
-  }
-  return (
-    <button ref={ref} type="button" className="thumb" onClick={onOpen} aria-label={`Open photo captured ${fmtDateTime(media.captured_at)}`}>
-      {url.data ? <img src={url.data.url} alt="" loading="lazy" /> : <span className="muted" style={{ fontSize: 12 }}>{url.isError ? 'Unavailable' : 'Loading…'}</span>}
-    </button>
-  );
-}
-
-type Pt = [number, number];
-const isPt = (v: unknown): v is Pt => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && Number.isFinite(n));
-
-function Lightbox({ media, index: initial, observation, onClose }: { media: any[]; index: number; observation?: any; onClose: () => void }) {
-  const [index, setIndex] = useState(initial);
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-  const m = media[index];
-  const url = useViewUrl(m, 'full');
-  // The thumbnail is usually cached already: show it while the full-size photo loads.
-  const thumb = useQueryClient().getQueryData<{ url: string }>(['media-url', m.id, 'thumb']);
-  const go = useCallback((d: number) => (setSize(null), setIndex((i) => (i + d + media.length) % media.length)), [media.length]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-      if (e.key === 'ArrowRight' && media.length > 1) go(1);
-      if (e.key === 'ArrowLeft' && media.length > 1) go(-1);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, go, media.length]);
-
-  // Height measured on a photo: overlay its markers on the photo it was measured on
-  // (or the observation's only/first photo when the measurement does not name one).
-  const hm = SHOW_HEIGHT && observation?.height_method === 'PHOTO_REFERENCE' ? observation.height_measurement : null;
-  const pts = hm?.points ?? {};
-  const appliesHere = hm && (hm.media_id ? hm.media_id === m.id : index === 0);
-  const overlay = appliesHere && isPt(pts.ref_top) && isPt(pts.ref_bottom) && isPt(pts.tree_top) && isPt(pts.tree_base);
-
-  return (
-    <div className="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      {m.upload_state !== 'VERIFIED' ? (
-        <div className="lightbox-caption">This photo is still uploading.</div>
-      ) : !url.data ? (
-        thumb && !url.isError ? (
-          <div className="lightbox-frame">
-            <img src={thumb.url} alt="" className="lightbox-preview" />
-          </div>
-        ) : (
-          <div className="lightbox-caption">{url.isError ? 'The photo could not be loaded.' : 'Loading photo…'}</div>
-        )
-      ) : (
-        <div className="lightbox-frame">
-          <img
-            src={url.data.url}
-            alt={`Tree photo captured ${fmtDateTime(m.captured_at)}`}
-            onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-          />
-          {overlay && size && <MeasurementOverlay w={size.w} h={size.h} points={pts} />}
-        </div>
-      )}
-      <div className="lightbox-caption">
-        {media.length > 1 && <button onClick={() => go(-1)} aria-label="Previous photo">‹ Prev</button>}
-        <span>
-          Captured {fmtDateTime(m.captured_at)}
-          {media.length > 1 && ` · ${index + 1} of ${media.length}`}
-        </span>
-        {overlay && (
-          <span>
-            <span className="key" style={{ background: REF_COLOR }} />Reference{hm.reference_cm ? ` ${hm.reference_cm} cm` : ''}
-            <span className="key" style={{ background: TREE_COLOR, marginLeft: 12 }} />Tree{observation.height_cm != null ? ` ${fmtHeight(Number(observation.height_cm))}` : ''}
-          </span>
-        )}
-        {media.length > 1 && <button onClick={() => go(1)} aria-label="Next photo">Next ›</button>}
-        <button onClick={onClose}>Close</button>
-      </div>
-    </div>
-  );
-}
-
-const REF_COLOR = 'var(--series-4)';
-const TREE_COLOR = 'var(--series-3)';
-
-/** Points are normalised 0..1 of the photo; drawn in the image's own pixel space so markers stay round. */
-function MeasurementOverlay({ w, h, points }: { w: number; h: number; points: Record<string, Pt> }) {
-  const r = Math.max(w, h) * 0.008;
-  const P = (k: string): Pt => [points[k][0] * w, points[k][1] * h];
-  const seg = (a: string, b: string, color: string, label: string) => {
-    const [x1, y1] = P(a);
-    const [x2, y2] = P(b);
-    return (
-      <g>
-        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#000" strokeOpacity={0.55} strokeWidth={5} vectorEffect="non-scaling-stroke" />
-        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={3} vectorEffect="non-scaling-stroke" />
-        {[[x1, y1], [x2, y2]].map(([x, y], i) => (
-          <circle key={i} cx={x} cy={y} r={r} fill={color} stroke="#fff" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-        ))}
-        <text x={Math.max(x1, x2) + r * 2} y={(y1 + y2) / 2} fill="#fff" stroke="#000" strokeWidth={r * 0.35} paintOrder="stroke" fontSize={r * 3} fontWeight={700}>
-          {label}
-        </text>
-      </g>
-    );
-  };
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-label="Height measurement markers">
-      {seg('ref_top', 'ref_bottom', REF_COLOR, 'Reference')}
-      {seg('tree_top', 'tree_base', TREE_COLOR, 'Tree')}
-    </svg>
-  );
-}
-
 function CorrectSerial({ tree, onClose }: { tree: any; onClose: () => void }) {
   const [serial, setSerial] = useState(tree.serial_number);
   const [reason, setReason] = useState('');
@@ -428,10 +274,6 @@ const newId = (): string =>
 
 /** Hand-set tree IDs: letters, digits, - _ / . (starting with a letter or digit), up to 64 characters. */
 const CUSTOM_ID = /^[A-Za-z0-9][A-Za-z0-9\-_/.]*$/;
-const today = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-};
 
 /** Administrator back-entry of a replacement tree (POST /trees/:id/replacements, a CreateTree payload). */
 function ReplacementForm({ tree, onClose }: { tree: any; onClose: () => void }) {
@@ -454,7 +296,6 @@ function ReplacementForm({ tree, onClose }: { tree: any; onClose: () => void }) 
     serial: '',
     custom: false,
     custom_id: '',
-    planted_on: today(),
     remarks: '',
   });
   const [localError, setLocalError] = useState<string | null>(null);
@@ -475,19 +316,18 @@ function ReplacementForm({ tree, onClose }: { tree: any; onClose: () => void }) 
   const subSector = subSectors.find((ss) => ss.id === subSectorId);
   const vendorLinks: any[] = (p?.planting_year_vendors ?? []).filter((l: any) => l.planting_year_id === yearId && l.active);
   const vendorId = vendorLinks.some((l) => l.vendor_id === v.vendor_id) ? v.vendor_id : '';
-  const vendor = vendorLinks.find((l) => l.vendor_id === vendorId);
   const speciesOptions = (species.data ?? []).filter((s) => s.active !== false);
   const speciesId = speciesOptions.some((s) => s.id === v.species_id) ? v.species_id : '';
   const statusOptions = (statuses.data ?? []).filter((s) => s.active !== false && !s.is_terminal);
   const statusId = statusOptions.some((s) => s.id === v.status_id) ? v.status_id : (statusOptions.find((s) => s.code === 'PLANTED') ?? statusOptions[0])?.id ?? '';
-  const scheme: Scheme | undefined = p ? effectiveScheme(p.tree_id_schemes ?? [], vendorId || null, yearId || null) : undefined;
-  const vendorNeeded = !!scheme && (scheme.component_definition.some((c) => c.type === 'VENDOR_CODE' && c.required) || scheme.serial_uniqueness_scope.includes('VENDOR'));
+  // One format per project, whatever the vendor or year; the vendor is attribution only.
+  const scheme: Scheme | undefined = p ? currentScheme(p.tree_id_schemes ?? []) : undefined;
   const preview = scheme
     ? previewId(
         scheme.component_definition,
         scheme.separator,
         scheme.serial_width,
-        { PROJECT_CODE: p.short_code, PLANTING_YEAR: year?.year_label, VENDOR_CODE: vendor?.vendor_short_code, SECTOR_CODE: sector?.short_code, SUB_SECTOR_CODE: subSector?.short_code },
+        { PROJECT_CODE: p.short_code, PLANTING_YEAR: year?.year_label, SECTOR_CODE: sector?.short_code, SUB_SECTOR_CODE: subSector?.short_code },
         v.serial || '0',
       )
     : null;
@@ -505,7 +345,6 @@ function ReplacementForm({ tree, onClose }: { tree: any; onClose: () => void }) 
         id_scheme_id: scheme!.id,
         serial_input: v.custom ? '' : v.serial.trim(),
         ...(v.custom ? { custom_physical_id: v.custom_id.trim() } : {}),
-        planted_on: v.planted_on || null,
         initial_observation: {
           id: ids.observation,
           status_id: statusId,
@@ -524,11 +363,10 @@ function ReplacementForm({ tree, onClose }: { tree: any; onClose: () => void }) 
   const submit = () => {
     const customId = v.custom_id.trim();
     let problem: string | null = null;
-    if (!scheme) problem = 'This project has no active tree ID format for the chosen planting year. Define one under Projects → Tree ID format.';
+    if (!scheme) problem = 'This project has no tree ID format yet. Define one under Projects → ID format.';
     else if (!yearId || !sectorId || !subSectorId) problem = 'Choose the planting year, sector and sub-sector.';
     else if (!speciesId) problem = 'Choose the species.';
     else if (!statusId) problem = 'Choose the observed status.';
-    else if (vendorNeeded && !vendorId) problem = 'This ID format needs a vendor.';
     else if (v.custom && (!customId || customId.length > 64 || !CUSTOM_ID.test(customId))) problem = 'The tree ID may use letters, digits and - _ / . (starting with a letter or digit), up to 64 characters.';
     else if (!v.custom && !/^\d{1,32}$/.test(v.serial.trim())) problem = 'Enter the serial (tree number) from the label, digits only.';
     setLocalError(problem);
@@ -562,11 +400,8 @@ function ReplacementForm({ tree, onClose }: { tree: any; onClose: () => void }) 
               {select('Sector', sectorId, (x) => set('sector_id', x), sectors.map((s) => [s.id, `${s.short_code} · ${s.name}`]), 'Choose a sector')}
               {select('Sub-sector', subSectorId, (x) => set('sub_sector_id', x), subSectors.map((s) => [s.id, `${s.short_code} · ${s.name}`]), sectorId ? 'Choose a sub-sector' : 'Choose a sector first')}
               {select('Species', speciesId, (x) => set('species_id', x), speciesOptions.map((s) => [s.id, s.common_name ? `${s.common_name} (${s.scientific_name})` : s.scientific_name]), 'Choose a species')}
-              {select('Vendor', vendorId, (x) => set('vendor_id', x), vendorLinks.map((l) => [l.vendor_id, l.vendor_short_code ? `${l.vendor_name} (${l.vendor_short_code})` : l.vendor_name]), 'No vendor', vendorNeeded ? 'required by the ID format' : 'optional')}
+              {select('Vendor', vendorId, (x) => set('vendor_id', x), vendorLinks.map((l) => [l.vendor_id, l.vendor_short_code ? `${l.vendor_name} (${l.vendor_short_code})` : l.vendor_name]), 'No vendor', 'optional; who planted it')}
               {select('Observed status', statusId, (x) => set('status_id', x), statusOptions.map((s) => [s.id, s.name]), 'Choose a status')}
-              <Field label="Planted on" hint="optional">
-                <input type="date" max={today()} value={v.planted_on} onChange={(e) => set('planted_on', e.target.value)} />
-              </Field>
             </div>
             <div className="stack" style={{ gap: 8 }}>
               <label className="check">
@@ -584,7 +419,7 @@ function ReplacementForm({ tree, onClose }: { tree: any; onClose: () => void }) 
                   {preview ? (
                     <div className="id-preview small">{preview.prefix}<span className="serial">{preview.serial}</span></div>
                   ) : (
-                    <p className="muted" style={{ margin: 0 }}>No active tree ID format applies to this planting year and vendor.</p>
+                    <p className="muted" style={{ margin: 0 }}>This project has no tree ID format yet.</p>
                   )}
                 </>
               )}

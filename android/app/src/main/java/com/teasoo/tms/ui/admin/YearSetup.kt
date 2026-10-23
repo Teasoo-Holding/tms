@@ -92,14 +92,9 @@ fun AdminSchemeDto.scopeTitle(): String = when (scopeKind()) {
 fun List<AdminSchemeDto>.activeIn(vendorId: String?, yearId: String?): AdminSchemeDto? =
     firstOrNull { it.active && it.vendorId == vendorId && it.plantingYearId == yearId }
 
-/**
- * The format officers use for [vendorId]'s trees in [yearId]: vendor + year, then vendor, then year, then the project default.
- */
-fun List<AdminSchemeDto>.effectiveFor(vendorId: String?, yearId: String?): AdminSchemeDto? =
-    (if (vendorId != null && yearId != null) activeIn(vendorId, yearId) else null)
-        ?: (if (vendorId != null) activeIn(vendorId, null) else null)
-        ?: (if (yearId != null) activeIn(null, yearId) else null)
-        ?: activeIn(null, null)
+/** The format officers use in [yearId]: the year's own (older setups), else the project's. Vendors no longer have formats. */
+fun List<AdminSchemeDto>.effectiveFor(@Suppress("UNUSED_PARAMETER") vendorId: String?, yearId: String?): AdminSchemeDto? =
+    (if (yearId != null) activeIn(null, yearId) else null) ?: activeIn(null, null)
 
 /** Real codes for example IDs: this project, the chosen year and vendor, and the year's first area. */
 fun idSamples(p: ProjectDetailDto, year: AdminPlantingYearDto?, vendorCode: String?, areas: List<AdminSectorDto>): Map<String, String> {

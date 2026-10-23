@@ -69,14 +69,17 @@ components:
           items:
             type: object
             properties:
-              type: { enum: [PROJECT_CODE, PLANTING_YEAR, VENDOR_CODE, SECTOR_CODE, SUB_SECTOR_CODE, SERIAL] }
+              type:
+                enum: [PROJECT_CODE, PLANTING_YEAR, SECTOR_CODE, SUB_SECTOR_CODE, TEXT, SERIAL]
+                description: VENDOR_CODE appears only in formats (and tree snapshots) from before migration 007; new formats are refused with it (400 SCHEME_INVALID, details [VENDOR_CODE_RETIRED]).
               required: { type: boolean }
+              value: { type: string, description: The text, for TEXT parts (1–16 letters or digits). }
         separator: { enum: ['-', '_', '/', '.', ''] }
         serial_width: { type: integer, minimum: 1, maximum: 12 }
         serial_uniqueness_scope:
           type: array
-          description: Empty array means serials are unique globally.
-          items: { enum: [PROJECT, PLANTING_YEAR, VENDOR, SECTOR, SUB_SECTOR] }
+          description: Empty array means serials are unique globally. Usual choice is [PROJECT, PLANTING_YEAR] (one sequence per project and year, shared by all vendors). VENDOR is legacy only (400 SCHEME_INVALID, details [VENDOR_SCOPE_RETIRED]).
+          items: { enum: [PROJECT, PLANTING_YEAR, SECTOR, SUB_SECTOR] }
     CreateTree:
       type: object
       required: [id, project_id, planting_year_id, sector_id, sub_sector_id, species_id, id_scheme_id, serial_input, initial_observation]
@@ -88,13 +91,13 @@ components:
         sector_id: { type: string, format: uuid }
         sub_sector_id: { type: string, format: uuid }
         species_id: { type: string, format: uuid }
-        vendor_id: { type: [string, 'null'], format: uuid }
+        vendor_id: { type: [string, 'null'], format: uuid, description: Who planted (attribution only); never required by the ID format. }
         id_scheme_id: { type: string, format: uuid, description: The scheme version the device used (may since be superseded). }
         serial_input: { type: string, description: Digits from the label; zero-padded by the server. }
         physical_tree_id: { type: string, description: Full ID the officer confirmed; must equal the assembled ID. }
         id_component_values: { type: object, additionalProperties: { type: [string, 'null'] }, description: Codes the device assembled the prefix from. }
         replaces_tree_id: { type: [string, 'null'], format: uuid }
-        planted_on: { type: [string, 'null'], format: date }
+        planted_on: { type: [string, 'null'], format: date, description: Optional; when omitted the date part of initial_observation.observed_at is stored. }
         notes: { type: [string, 'null'] }
         client_recorded_at: { type: string, format: date-time }
         initial_observation:
@@ -103,8 +106,47 @@ components:
           properties:
             id: { type: string, format: uuid }
             status_id: { type: string, format: uuid }
-            observed_at: { type: string, format: date-time }
+            observed_at: { type: string, format: date-time, description: Stamped by the device. }
             remarks: { type: [string, 'null'] }
+            visit_type: { enum: [VISIT, FIRST_INSTANCE, PLANTING, MAINTENANCE, null], default: VISIT, description: Optional; omitted or null means VISIT. }
+    DensityStats:
+      type: object
+      required: [registered_trees, alive_trees, dead_trees, unknown_trees, area_hectares, trees_per_hectare, alive_share]
+      properties:
+        registered_trees: { type: integer }
+        alive_trees: { type: integer }
+        dead_trees: { type: integer }
+        unknown_trees: { type: integer }
+        area_hectares: { type: [number, 'null'], description: Rounded to 4 decimals; null without an outline. }
+        trees_per_hectare: { type: [number, 'null'], description: Rounded to 1 decimal; null without an area. }
+        alive_share: { type: [number, 'null'], description: '0..1, rounded to 3 decimals: alive / (alive + dead).' }
+    DensityArea:
+      allOf:
+        - $ref: '#/components/schemas/DensityStats'
+        - type: object
+          required: [kind, id, short_code, name, active, reference_latitude, reference_longitude, boundary]
+          properties:
+            kind: { enum: [sector, sub_sector] }
+            id: { type: string, format: uuid }
+            short_code: { type: string }
+            name: { type: string }
+            active: { type: boolean, description: Inactive areas appear only while they still hold trees. }
+            reference_latitude: { type: number }
+            reference_longitude: { type: number }
+            boundary: { oneOf: [{ $ref: '#/components/schemas/GeoJsonPolygon' }, { type: 'null' }] }
+            planting_year_id: { type: [string, 'null'], format: uuid, description: Sectors only. }
+            year_label: { type: [string, 'null'], description: Sectors only. }
+            sector_id: { type: string, format: uuid, description: Sub-sectors only. }
+            sub_sectors: { type: array, items: { $ref: '#/components/schemas/DensityArea' }, description: Sectors only. }
+    DensityMap:
+      type: object
+      required: [generated_at, project, planting_year, totals, sectors]
+      properties:
+        generated_at: { type: string, format: date-time }
+        project: { type: object, properties: { id: { type: string, format: uuid }, name: { type: string }, short_code: { type: string } } }
+        planting_year: { oneOf: [{ type: object, properties: { id: { type: string, format: uuid }, year_label: { type: string } } }, { type: 'null' }] }
+        totals: { $ref: '#/components/schemas/DensityStats', description: Sums over the listed sectors (area = sum of sector areas). }
+        sectors: { type: array, items: { $ref: '#/components/schemas/DensityArea' } }
     Observation:
       type: object
       required: [id, observed_status_id, observed_at]
@@ -117,6 +159,7 @@ components:
         remarks: { type: [string, 'null'] }
         amends_observation_id: { type: [string, 'null'], format: uuid, description: Set for audited corrections; the original is kept and marked superseded. }
         amendment_reason: { type: [string, 'null'] }
+        visit_type: { enum: [VISIT, FIRST_INSTANCE, PLANTING, MAINTENANCE, null], default: VISIT, description: Optional; omitted or null means VISIT. }
     OperationResult:
       type: object
       required: [status]
@@ -252,7 +295,11 @@ paths:
     patch: { summary: Open/close or re-date a planting year (admin; the label is fixed), responses: { '200': { description: Planting year } } }
   /projects/{id}/tree-id-schemes:
     post:
-      summary: Publish a new ID format version (admin); it becomes current for new registrations.
+      summary: Publish a new version of the project's ID format (admin); it becomes current for new registrations.
+      description: >-
+        One format per project, shared by all vendors and planting years (a new project starts with PROJECT_CODE-PLANTING_YEAR-SERIAL,
+        6 digits, numbered per project + planting year). vendor_id or planting_year_id in the body is refused with 400 VENDOR_FORMAT_RETIRED /
+        YEAR_FORMAT_RETIRED. Earlier versions stay as history; registered IDs never change.
       requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/IdScheme' } } } }
       responses: { '201': { description: Scheme version }, '400': { $ref: '#/components/responses/Error' } }
   /projects/{id}/custom-fields:
@@ -339,6 +386,25 @@ paths:
                 base_revision: { type: integer }
                 changes: { type: object, properties: { species_id: { type: string }, vendor_id: { type: [string, 'null'] }, planted_on: { type: [string, 'null'] }, notes: { type: [string, 'null'] } } }
       responses: { '200': { description: Accepted }, '409': { description: REVISION_MISMATCH } }
+  /trees/{id}/media:
+    get:
+      summary: The tree's photos, newest first (view each with /media/{id}/view-url?size=thumb or full)
+      responses:
+        '200':
+          description: Photos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string, format: uuid }
+                    observation_id: { type: [string, 'null'], format: uuid }
+                    mime_type: { type: string }
+                    byte_size: { type: [integer, 'null'] }
+                    upload_state: { type: string, description: Only VERIFIED photos can be viewed. }
+                    captured_at: { type: string, format: date-time }
   /trees/{id}/observations:
     post:
       summary: Append an observation or an audited amendment
@@ -437,6 +503,33 @@ paths:
         - { name: planting_year_id, in: query, schema: { type: string } }
         - { name: overdue_days, in: query, schema: { type: integer, default: 90 } }
       responses: { '200': { description: Summary including last_server_sync_at and data completeness } }
+  /reports/density:
+    get:
+      summary: Tree density by sector and sub-sector, with outlines, for the density map (admin and executive)
+      description: >-
+        Trees have no GPS, so density is registered trees (active records, scoped to the caller's project/area assignments) over the
+        area of the surveyed outline (ST_Area on geography). With planting_year_id: that year's sectors plus older sectors not tied to
+        a year, counting only trees of that year. alive = current status recorded and not terminal; dead = terminal status;
+        unknown = not observed yet. alive_share = alive / (alive + dead), null when neither. Executives need an assignment to the
+        project (or all-projects access); field officers get 403.
+      parameters:
+        - { name: project_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: planting_year_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Density map, content: { application/json: { schema: { $ref: '#/components/schemas/DensityMap' } } } }
+        '400': { description: project_id missing or not a UUID }
+        '403': { description: Not an administrator or executive, or not assigned to the project }
+        '404': { description: Project or planting year not found (the year must belong to the project) }
+  /share/{token}/density:
+    get:
+      summary: The same density map for a client share link's project (no sign-in)
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+        - { name: planting_year_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Density map, content: { application/json: { schema: { $ref: '#/components/schemas/DensityMap' } } } }
+        '404': { description: LINK_INVALID }
   /reports/trees.csv:
     get: { summary: CSV export (formula-injection safe; audited), responses: { '200': { description: CSV } } }
   /reports/trees.xlsx:

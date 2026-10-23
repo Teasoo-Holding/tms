@@ -4,14 +4,15 @@ import { Link } from 'react-router-dom';
 import { api, qs } from '../api/client';
 import { useIsAdmin } from '../auth';
 import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
-import { Chevron, Details, EmptyState, ErrorNotice, fmtDate, fmtDateTime, fmtNum, PageHeader, StatusPill, VISIT_TYPES, visitTypeLabel } from '../components/ui';
+import { TreePhotos } from '../components/Photos';
+import { Chevron, Details, EmptyState, ErrorNotice, fmtDate, fmtDateTime, fmtNum, PageHeader, StatusPill } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 
 const PAGE = 100;
 
 export function VisitsPage() {
   const isAdmin = useIsAdmin();
-  const f = useReportFilters(['recorded_by', 'q', 'visit_type']);
+  const f = useReportFilters(['recorded_by', 'q']);
   const [q, setQ] = useState(f.get('q'));
   // Keep the search box in step with the URL (e.g. after "Reset filters" or following a link).
   useEffect(() => setQ(f.get('q')), [f.get('q')]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -62,13 +63,6 @@ export function VisitsPage() {
 
       {filtersOpen && (
         <ReportFilters f={f} dateNote="Dates are visit dates." onClose={() => setFiltersOpen(false)}>
-          <label className="field">
-            Visit type
-            <select value={f.get('visit_type')} onChange={(e) => f.set('visit_type', e.target.value)}>
-              <option value="">All types</option>
-              {VISIT_TYPES.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-            </select>
-          </label>
           {isAdmin && (
             <label className="field">
               Recorded by
@@ -117,18 +111,19 @@ export function VisitsPage() {
                         <Details
                           items={[
                             ['Visited', fmtDateTime(v.observed_at)],
-                            ['Type', visitTypeLabel(v.visit_type)],
                             ['Project', `${v.project} · ${v.planting_year}`],
                             ['Area', `${v.sector} / ${v.sub_sector}`],
                             ['Species', v.species],
                             ['Recorded by', v.recorded_by],
-                            ['Photos', v.photos ? String(v.photos) : null],
                             SHOW_HEIGHT && v.height_cm != null ? ['Height', `${fmtNum(v.height_cm)} cm`] : ['', null],
                             ['Remarks', v.remarks],
                             ['Correction reason', v.is_amendment ? v.amendment_reason : null],
                             ['Synced', fmtDateTime(v.synced_at)],
                           ]}
                         />
+                        <div style={{ marginTop: 8 }}>
+                          <TreePhotos treeId={v.tree_id} observationId={v.id} />
+                        </div>
                       </td>
                     </tr>
                   )}

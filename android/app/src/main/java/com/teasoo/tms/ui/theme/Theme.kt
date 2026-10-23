@@ -2,10 +2,12 @@ package com.teasoo.tms.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 
 private val Light = lightColorScheme(
     primary = Color(0xFF1D6B45), onPrimary = Color.White,
@@ -27,7 +29,22 @@ object StatusColors {
     val critical = Color(0xFFD03B3B)
 }
 
+/** Text a size up from the Material defaults, for reading outdoors and at arm's length. */
+private const val TEXT_SCALE = 1.12f
+
+private fun TextStyle.larger() = copy(fontSize = fontSize * TEXT_SCALE, lineHeight = lineHeight * TEXT_SCALE)
+
+private val Larger = Typography().run {
+    copy(
+        displayLarge = displayLarge.larger(), displayMedium = displayMedium.larger(), displaySmall = displaySmall.larger(),
+        headlineLarge = headlineLarge.larger(), headlineMedium = headlineMedium.larger(), headlineSmall = headlineSmall.larger(),
+        titleLarge = titleLarge.larger(), titleMedium = titleMedium.larger(), titleSmall = titleSmall.larger(),
+        bodyLarge = bodyLarge.larger(), bodyMedium = bodyMedium.larger(), bodySmall = bodySmall.larger(),
+        labelLarge = labelLarge.larger(), labelMedium = labelMedium.larger(), labelSmall = labelSmall.larger(),
+    )
+}
+
 @Composable
 fun TmsTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
+    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, typography = Larger, content = content)
 }

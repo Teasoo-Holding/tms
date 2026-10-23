@@ -84,6 +84,7 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
         val t = d.tree
         val superseded = observations.mapNotNull { it.amendsObservationId }.toSet()
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            TreePhoto(media, vm::photo)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { StatusChip(d.status?.code, d.status?.name); SyncBadge(t.syncState) }
             t.syncMessage?.let { Notice(it, MaterialTheme.colorScheme.errorContainer) }
             ElevatedCard(Modifier.fillMaxWidth()) {
@@ -91,8 +92,7 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
                     Field("Planting year", d.year?.yearLabel)
                     Field("Area", "${d.sector?.shortCode} · ${d.sector?.name} / ${d.subSector?.shortCode} · ${d.subSector?.name}")
                     Field("Species", d.species?.let { it.commonName ?: it.scientificName })
-                    Field("Planted on", t.plantedOn)
-                    Field("ID format", "version ${t.idSchemeVersion}")
+                    Field("Registered", formatInstant(t.createdAt))
                     t.notes?.let { Field("Notes", it) }
                     displayFields(fieldDefs.filter { it.appliesTo == "TREE" }, t.customFieldsJson).forEach { (label, value) -> Field(label, value) }
                     Field("Registered by", if (t.createdBy == userId) "you" else t.createdByName ?: "another user")
@@ -100,10 +100,11 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
                     d.replacement?.let { r -> TextButton(onClick = { nav.navigate(Routes.tree(r.id)) }) { Text("Replaced by ${r.physicalTreeId}") } }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { nav.navigate(Routes.observe(t.id)) }, enabled = t.recordState != "REJECTED") { Text("Add observation") }
-                OutlinedButton(onClick = { nav.navigate(Routes.edit(t.id)) }, enabled = t.recordState == "ACTIVE") { Text("Edit") }
-            }
+            Button(
+                onClick = { nav.navigate(Routes.observe(t.id)) }, enabled = t.recordState != "REJECTED",
+                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+            ) { Text("Record a visit", style = MaterialTheme.typography.titleMedium) }
+            OutlinedButton(onClick = { nav.navigate(Routes.edit(t.id)) }, enabled = t.recordState == "ACTIVE", modifier = Modifier.fillMaxWidth()) { Text("Edit tree details") }
             if (d.status?.allowsReplacement == true && d.replacement == null && t.recordState == "ACTIVE") {
                 OutlinedButton(onClick = { nav.navigate(Routes.register(replaces = t.id)) }, modifier = Modifier.fillMaxWidth()) { Text("Plant a replacement tree") }
             }
@@ -125,7 +126,7 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
                 }
             }
 
-            Text("Observation history", style = MaterialTheme.typography.titleMedium)
+            Text("Visit history", style = MaterialTheme.typography.titleMedium)
             observations.forEach { o ->
                 val s = statuses.find { it.id == o.statusId }
                 val isSuperseded = o.id in superseded
@@ -143,7 +144,6 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
                             "Recorded by ${if (o.recordedBy == userId) "you" else o.recordedByName ?: "another user"}",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Text(VisitType.label(o.visitType), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                         if (SHOW_HEIGHT) o.heightCm?.let { cm ->
                             Text("Height ${formatHeight(cm)}" + if (o.heightMethod == "PHOTO_REFERENCE") " · measured on photo" else "", style = MaterialTheme.typography.bodyMedium)
                         }
@@ -156,7 +156,7 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
                         SyncBadge(o.syncState)
                         o.syncMessage?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                         if (!isSuperseded && (o.recordedBy == userId) && t.recordState != "REJECTED") {
-                            TextButton(onClick = { nav.navigate(Routes.observe(t.id, amends = o.id)) }) { Text("Correct this observation") }
+                            TextButton(onClick = { nav.navigate(Routes.observe(t.id, amends = o.id)) }) { Text("Correct this visit") }
                         }
                     }
                 }

@@ -34,7 +34,6 @@ object Routes {
     const val MAP = "map"
     const val SESSION_SETUP = "session/setup"
     const val SESSION_REGISTER = "session/register"
-    const val SESSION_VISIT = "session/visit"
     const val ADMIN_DASHBOARD = "admin/dashboard"
     const val ADMIN_CONFLICTS = "admin/conflicts"
     const val MY_VISITS = "my-visits"
@@ -72,14 +71,6 @@ private fun MainNav(vm: AppViewModel) {
         composable(Routes.MAP) { AreaMapScreen(vm, onBack = { nav.popBackStack() }) }
         composable(Routes.SESSION_SETUP) { SessionSetupScreen(onStarted = { nav.popBackStack(Routes.HOME, inclusive = false) }, onBack = { nav.popBackStack() }) }
         composable(Routes.SESSION_REGISTER) { RapidRegisterScreen(onBack = { nav.popBackStack() }, onVisitTree = { nav.navigate(Routes.observe(it)) }) }
-        composable(Routes.SESSION_VISIT) {
-            VisitScreen(
-                onObserve = { nav.navigate(Routes.observe(it)) },
-                onOpenTree = { nav.navigate(Routes.tree(it)) },
-                onRegister = { nav.navigate(Routes.SESSION_REGISTER) { popUpTo(Routes.HOME) } },
-                onBack = { nav.popBackStack() },
-            )
-        }
         composable(Routes.ADMIN_DASHBOARD) { DashboardScreen(vm, onBack = { nav.popBackStack() }) }
         composable(Routes.ADMIN_CONFLICTS) { ConflictsScreen(onOpenTree = { nav.navigate(Routes.tree(it)) }, onBack = { nav.popBackStack() }) }
         composable(Routes.MY_VISITS) { MyVisitsScreen(onOpenTree = { nav.navigate(Routes.tree(it)) }, onBack = { nav.popBackStack() }) }

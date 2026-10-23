@@ -23,13 +23,11 @@ fun SectorDto.toEntity() = SectorEntity(id, projectId, name, shortCode, referenc
 fun PlantingYearVendorDto.toEntity() = PlantingYearVendorEntity(id, projectId, plantingYearId, vendorId, active)
 
 /**
- * The ID format for registrations by [vendorId] in [yearId]: the most specific active format wins
- * (vendor + year, then vendor, then year, then the project default).
+ * The ID format for registrations in [yearId]. Tree IDs are project/year scoped and shared by every vendor, so the
+ * vendor never picks the format: a year's own format (older setups) wins, else the project's.
  */
-fun resolveScheme(active: List<IdSchemeEntity>, yearId: String?, vendorId: String?): IdSchemeEntity? =
-    active.firstOrNull { it.vendorId != null && it.vendorId == vendorId && it.plantingYearId == yearId }
-        ?: active.firstOrNull { it.vendorId != null && it.vendorId == vendorId && it.plantingYearId == null }
-        ?: active.firstOrNull { it.vendorId == null && it.plantingYearId != null && it.plantingYearId == yearId }
+fun resolveScheme(active: List<IdSchemeEntity>, yearId: String?, @Suppress("UNUSED_PARAMETER") vendorId: String?): IdSchemeEntity? =
+    active.firstOrNull { it.vendorId == null && it.plantingYearId != null && it.plantingYearId == yearId }
         ?: active.firstOrNull { it.vendorId == null && it.plantingYearId == null }
 fun SubSectorDto.toEntity() = SubSectorEntity(id, sectorId, projectId, name, shortCode, referenceLatitude, referenceLongitude, boundary.asText(), active)
 fun SpeciesDto.toEntity() = SpeciesEntity(id, scientificName, commonName, active)

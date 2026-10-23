@@ -120,6 +120,20 @@ export class TreesController {
     };
   }
 
+  /** A tree's photos (newest first) for galleries outside the tree page; view them through /media/:id/view-url. */
+  @Get(':id/media')
+  async media(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
+    const tree = await this.db.one(this.db, 'SELECT project_id, sector_id, sub_sector_id FROM trees WHERE id = $1', [id]);
+    if (!tree) throw notFound('Tree');
+    await this.access.assertArea(user, tree.project_id, tree.sector_id, tree.sub_sector_id);
+    const { rows } = await this.db.query(
+      `SELECT id, observation_id, mime_type, byte_size, upload_state, captured_at
+         FROM tree_media WHERE tree_id = $1 ORDER BY captured_at DESC`,
+      [id],
+    );
+    return rows;
+  }
+
   /** Full replacement chain: every ancestor this tree replaced and every later replacement. */
   private async lineage(id: string) {
     const { rows } = await this.db.query(

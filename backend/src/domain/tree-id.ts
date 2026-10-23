@@ -6,6 +6,7 @@
 export const COMPONENT_TYPES = [
   'PROJECT_CODE',
   'PLANTING_YEAR',
+  /** Legacy: only in formats created before IDs became project/year scoped (see RETIRED_COMPONENTS). */
   'VENDOR_CODE',
   'SECTOR_CODE',
   'SUB_SECTOR_CODE',
@@ -17,6 +18,13 @@ export type ComponentType = (typeof COMPONENT_TYPES)[number];
 
 export const SCOPE_DIMENSIONS = ['PROJECT', 'PLANTING_YEAR', 'VENDOR', 'SECTOR', 'SUB_SECTOR'] as const;
 export type ScopeDimension = (typeof SCOPE_DIMENSIONS)[number];
+
+/**
+ * Tree IDs are scoped to the project and planting year: every vendor on a project shares one serial
+ * sequence. Vendor parts stay readable (older trees and formats keep them) but new formats cannot use them.
+ */
+export const RETIRED_COMPONENTS: readonly ComponentType[] = ['VENDOR_CODE'];
+export const RETIRED_SCOPE_DIMENSIONS: readonly ScopeDimension[] = ['VENDOR'];
 
 export const ALLOWED_SEPARATORS = ['-', '_', '/', '.', ''];
 export const MAX_SERIAL_WIDTH = 12;
@@ -84,6 +92,26 @@ export function validateScheme(scheme: IdScheme): string[] {
   if (new Set(scheme.serialUniquenessScope).size !== scheme.serialUniquenessScope.length) {
     problems.push('SCOPE_DIMENSION_DUPLICATED');
   }
+  return problems;
+}
+
+/** A new project's format (also restored by migration 007 where a project was left without one): PROJECT-YEAR-000001. */
+export const DEFAULT_SCHEME: IdScheme = {
+  separator: '-',
+  serialWidth: 6,
+  components: [
+    { type: 'PROJECT_CODE', required: true },
+    { type: 'PLANTING_YEAR', required: true },
+    { type: 'SERIAL', required: true },
+  ],
+  serialUniquenessScope: ['PROJECT', 'PLANTING_YEAR'],
+};
+
+/** Problems that only apply to new formats: parts that are kept for older formats but can no longer be chosen. */
+export function retiredSchemeParts(scheme: IdScheme): string[] {
+  const problems: string[] = [];
+  if (scheme.components.some((c) => RETIRED_COMPONENTS.includes(c.type))) problems.push('VENDOR_CODE_RETIRED');
+  if (scheme.serialUniquenessScope.some((d) => RETIRED_SCOPE_DIMENSIONS.includes(d))) problems.push('VENDOR_SCOPE_RETIRED');
   return problems;
 }
 

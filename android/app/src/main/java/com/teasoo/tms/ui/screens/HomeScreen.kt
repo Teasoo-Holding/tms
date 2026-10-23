@@ -12,7 +12,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -21,7 +20,6 @@ import com.teasoo.tms.BuildConfig
 import com.teasoo.tms.data.session.SessionState
 import com.teasoo.tms.ui.AppViewModel
 import com.teasoo.tms.ui.Routes
-import com.teasoo.tms.ui.admin.ADMIN_ENTRIES
 import com.teasoo.tms.ui.admin.AnalyticsDashboardScreen
 import com.teasoo.tms.ui.components.Notice
 import com.teasoo.tms.ui.components.formatInstant
@@ -82,7 +80,7 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
     val trees by fs.treesThisSession.collectAsStateWithLifecycle()
     val observations by fs.observationsThisSession.collectAsStateWithLifecycle()
 
-    // Search and the area map follow the session's project.
+    // Search follows the session's project.
     LaunchedEffect(ctx?.session?.projectId) { ctx?.session?.projectId?.let { vm.selectProject(it) } }
 
     Scaffold(
@@ -95,7 +93,7 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
     ) { padding ->
         Column(
             Modifier.padding(padding).padding(horizontal = 20.dp, vertical = 8.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             if (sync.lowStorage) Notice("Phone storage is low. Open “Ready to send” → Free up space.", MaterialTheme.colorScheme.errorContainer)
             val c = ctx
@@ -107,36 +105,50 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
                         else -> "No project assigned to you yet."
                     },
                 )
-                c == null -> PrimaryPill(Icons.Default.PlayArrow, "Start field session") { nav.navigate(Routes.SESSION_SETUP) }
+                c == null -> {
+                    Text("Hello, ${session.user.fullName.substringBefore(' ')}", style = MaterialTheme.typography.headlineSmall)
+                    HeroButton(Icons.Default.PlayArrow, "Start field session") { nav.navigate(Routes.SESSION_SETUP) }
+                }
                 else -> {
-                    // One line saying where the officer is working; tap to change.
+                    // Where the officer is working; tap to change.
                     Surface(onClick = { nav.navigate(Routes.SESSION_SETUP) }, shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(c.title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
-                                if (trees + observations > 0) Text("$trees registered · $observations visits today", style = MaterialTheme.typography.bodySmall)
+                                Text(c.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
+                                c.subSector?.let { Text("Sub-sector ${it.shortCode} · ${it.name}", style = MaterialTheme.typography.bodyMedium) }
+                                if (trees + observations > 0) Text("$trees registered · $observations visits this session", style = MaterialTheme.typography.bodyMedium)
                             }
                             Icon(Icons.Default.Edit, contentDescription = "Change session", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                     if (c.stale) Notice("This session's area was changed by an administrator. Tap above to choose again.", MaterialTheme.colorScheme.errorContainer)
-                    SubSectorChips(c, fs::switchSubSector)
-                    PrimaryPill(Icons.Default.Add, "Register trees", enabled = !c.stale) { nav.navigate(Routes.SESSION_REGISTER) }
-                    Pill(Icons.Default.Checklist, "Visit trees", enabled = !c.stale) { nav.navigate(Routes.SESSION_VISIT) }
+                    HeroButton(Icons.Default.Add, "Register trees", enabled = !c.stale) { nav.navigate(Routes.SESSION_REGISTER) }
                 }
             }
             if (projects.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Pill(Icons.Default.Search, "Find a tree") { nav.navigate(Routes.TREES) }
                 Pill(Icons.Default.History, "My visits") { nav.navigate(Routes.MY_VISITS) }
                 Pill(
                     Icons.AutoMirrored.Filled.Send, "Ready to send",
                     count = (sync.pendingOperations + sync.unsentPhotos).takeIf { it > 0 },
                     alert = sync.needsAttention > 0,
                 ) { nav.navigate(Routes.SYNC) }
-                Pill(Icons.Default.Search, "Find a tree") { nav.navigate(Routes.TREES) }
-                Pill(Icons.Default.Map, "Map") { nav.navigate(Routes.MAP) }
             }
             if (isAdmin) Pill(Icons.Default.AdminPanelSettings, "Administration") { nav.navigate(com.teasoo.tms.ui.admin.AdminRoutes.HUB) }
-            if (c != null) TextButton(onClick = { fs.end() }, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("End session") }
+            if (c != null) {
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = { fs.end() },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
+                    shape = CircleShape,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp),
+                ) {
+                    Icon(Icons.Default.Stop, contentDescription = null)
+                    Spacer(Modifier.width(10.dp))
+                    Text("End session", style = MaterialTheme.typography.titleMedium)
+                }
+            }
             SyncFooter(vm)
         }
     }
@@ -155,13 +167,16 @@ private fun SyncFooter(vm: AppViewModel) {
     }
 }
 
-/** The one main action on the screen: a large filled pill. */
+/** The one main action on the screen: big enough to find at a glance. */
 @Composable
-private fun PrimaryPill(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Button(onClick = onClick, enabled = enabled, shape = CircleShape, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)) {
-        Icon(icon, contentDescription = null)
-        Spacer(Modifier.width(12.dp))
-        Text(label, style = MaterialTheme.typography.titleMedium)
+private fun HeroButton(icon: ImageVector, label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Button(
+        onClick = onClick, enabled = enabled, shape = MaterialTheme.shapes.extraLarge,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 132.dp),
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(40.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(label, style = MaterialTheme.typography.headlineSmall)
     }
 }
 

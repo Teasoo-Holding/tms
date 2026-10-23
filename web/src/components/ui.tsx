@@ -132,15 +132,6 @@ export function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>,
   );
 }
 
-/** Why a visit was made (observation `visit_type`); VISIT is the default. */
-export const VISIT_TYPES: [string, string][] = [
-  ['VISIT', 'Visit'],
-  ['FIRST_INSTANCE', 'First data collection'],
-  ['PLANTING', 'At planting'],
-  ['MAINTENANCE', 'Maintenance'],
-];
-export const visitTypeLabel = (v?: string | null) => VISIT_TYPES.find(([k]) => k === (v || 'VISIT'))?.[1] ?? String(v);
-
 const STATUS_TONE: Record<string, string> = {
   ALIVE: 'good',
   HEALTHY: 'good',

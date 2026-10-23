@@ -20,9 +20,12 @@ import { OperationContext, OperationResult, Rejection } from './operation-result
 
 const COMPONENT_VALUE_KEYS = ['PROJECT_CODE', 'PLANTING_YEAR', 'VENDOR_CODE', 'SECTOR_CODE', 'SUB_SECTOR_CODE'] as const;
 
-/** Why the visit was made: an ordinary visit, the first data collection on existing trees, at planting, or maintenance. */
+/**
+ * Why the visit was made: an ordinary visit, the first data collection on existing trees, at planting, or maintenance.
+ * No longer asked in the app; omitted (or null) means an ordinary visit. Older app versions may still send it.
+ */
 export const VISIT_TYPES = ['VISIT', 'FIRST_INSTANCE', 'PLANTING', 'MAINTENANCE'] as const;
-const visitType = z.enum(VISIT_TYPES).default('VISIT');
+const visitType = z.enum(VISIT_TYPES).nullish().transform((v) => v ?? 'VISIT');
 
 const customFields = z.record(z.string(), z.unknown()).refine((v) => JSON.stringify(v).length <= 20_000, 'Too much custom field data');
 
@@ -53,6 +56,7 @@ export const CreateTreePayload = z.object({
   replaces_tree_id: z.string().uuid().nullish(),
   /** Administrators may give a replanted tree an ID of their choosing instead of the format's. */
   custom_physical_id: z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9\-_/.]*$/, 'Use letters, digits, - _ / .').optional(),
+  /** No longer asked in the app; when omitted, the date of the first visit (see createTree). */
   planted_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   notes: z.string().max(4000).nullish(),
   custom_fields: customFields.optional(),
@@ -157,14 +161,13 @@ export class TreesService {
     if (!schemeRow) throw new Rejection('SCHEME_INVALID', 'The ID format does not belong to this project.');
     const scheme = toScheme(schemeRow);
 
+    // The vendor is attribution (who planted) and optional. Tree IDs no longer depend on it; a format from before
+    // that change can still name it, and a missing required vendor code is then reported by the assembly below.
     let vendor: any = null;
     if (p.vendor_id) {
       vendor = await this.db.one(tx, 'SELECT * FROM vendors WHERE id = $1', [p.vendor_id]);
       if (!vendor?.active) throw new Rejection('VENDOR_INVALID', 'The vendor is unknown or deactivated.');
     }
-    const vendorNeeded =
-      scheme.components.some((c) => c.type === 'VENDOR_CODE' && c.required) || scheme.serialUniquenessScope.includes('VENDOR');
-    if (vendorNeeded && !vendor) throw new Rejection('VENDOR_REQUIRED', 'This ID format requires a vendor.');
 
     // Current codes from the server; the device's values (from its cache) take precedence
     // because they are what was printed on the label and confirmed by the officer.
@@ -231,12 +234,15 @@ export class TreesService {
     if (!custom) await this.assertSerialAllocated(tx, actor, serialKey, assembled.serial);
 
     if (p.replaces_tree_id) await this.assertReplaceable(tx, p.replaces_tree_id, p.project_id);
+    // Without a planting date, the first visit's date stands in for it (the device's local date as stamped),
+    // so reports keep a planting date for every tree.
+    const plantedOn = p.planted_on ?? p.initial_observation.observed_at.slice(0, 10);
     const treeFields = await this.customValues(tx, p.project_id, 'TREE', p.custom_fields);
 
     const insertValues = [
       p.id, assembled.physicalId, assembled.normalized, physicalIdScopeKey(project.physical_id_uniqueness, project.id),
       assembled.serial, serialKey, schemeRow.id, schemeRow.version, JSON.stringify(snapshot), p.project_id, p.planting_year_id,
-      p.sector_id, p.sub_sector_id, p.species_id, p.vendor_id ?? null, p.replaces_tree_id ?? null, p.planted_on ?? null,
+      p.sector_id, p.sub_sector_id, p.species_id, p.vendor_id ?? null, p.replaces_tree_id ?? null, plantedOn,
       p.notes ?? null, actor.id, ctx.deviceId, p.client_recorded_at ?? null, JSON.stringify(treeFields),
     ];
     const insertSql = (state: string) => `
@@ -474,7 +480,7 @@ export class TreesService {
         initial, !!p.amends_observation_id, p.amends_observation_id ?? null, p.amendment_reason ?? null, JSON.stringify(fields),
         heightCm, heightCm == null ? null : (p.height_method ?? 'MANUAL'),
         heightCm == null || !p.height_measurement ? null : JSON.stringify(p.height_measurement),
-        p.visit_type ?? 'VISIT',
+        p.visit_type,
       ],
     ))!;
   }

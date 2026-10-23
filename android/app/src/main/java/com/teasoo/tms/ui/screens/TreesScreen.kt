@@ -28,7 +28,7 @@ import javax.inject.Inject
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
-class TreesViewModel @Inject constructor(db: TmsDatabase) : ViewModel() {
+class TreesViewModel @Inject constructor(private val db: TmsDatabase, private val photos: com.teasoo.tms.data.repo.PhotoLoader) : ViewModel() {
     val projectId = MutableStateFlow<String?>(null)
     val query = MutableStateFlow("")
     val subSectorId = MutableStateFlow<String?>(null)
@@ -36,6 +36,9 @@ class TreesViewModel @Inject constructor(db: TmsDatabase) : ViewModel() {
     val rows = combine(projectId.filterNotNull(), query.debounce(200), subSectorId) { p, q, s -> Triple(p, q, s) }
         .flatMapLatest { (p, q, s) -> db.trees().search(p, TreeIdAssembler.normalize(q), s) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    suspend fun latestPhoto(treeId: String) = db.media().latestFor(treeId)
+    suspend fun photo(m: com.teasoo.tms.data.local.MediaEntity, maxPx: Int) = photos.load(m, maxPx)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,7 +54,11 @@ fun TreesScreen(app: AppViewModel, onOpen: (String) -> Unit, onBack: () -> Unit,
         TopAppBar(title = { Text("Find a tree") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
     }) { padding ->
         Column(Modifier.padding(padding).padding(horizontal = 16.dp)) {
-            OutlinedTextField(query, { vm.query.value = it }, label = { Text("Tree ID or serial") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(
+                query, { vm.query.value = it }, label = { Text("Type the tree number") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+            )
+            Text("Tap a tree to see it and record a visit.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 6.dp))
             Spacer(Modifier.height(8.dp))
             Picker("Sub-sector", listOf<com.teasoo.tms.data.local.SubSectorEntity?>(null) + subs, subs.find { it.id == sub },
                 { it?.let { s -> "${s.shortCode} · ${s.name}" } ?: "All sub-sectors" }, { vm.subSectorId.value = it?.id })
@@ -60,6 +67,7 @@ fun TreesScreen(app: AppViewModel, onOpen: (String) -> Unit, onBack: () -> Unit,
                 items(rows, key = { it.id }) { t ->
                     ListItem(
                         modifier = Modifier.clickable { onOpen(t.id) },
+                        leadingContent = { com.teasoo.tms.ui.components.TreeThumb(t.id, vm::latestPhoto, vm::photo) },
                         headlineContent = { Text(t.physicalTreeId, fontFamily = FontFamily.Monospace) },
                         supportingContent = {
                             Column {

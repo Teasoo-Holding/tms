@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, apiUrl, publicGet, qs } from '../api/client';
 import { ChartCard, Donut, HBarChart, SERIES, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
+import { DensityReport, DensityView } from '../components/DensityMap';
 import { ShareArea } from '../components/ShareMap';
 import { fmtDate, fmtDateTime, fmtNum, relativeTime, SimpleTable } from '../components/ui';
 
@@ -41,6 +42,13 @@ export function SharePage() {
   const view = useQuery({ queryKey: ['share', token, filter], queryFn: () => publicGet(`${base}${filter}`), retry: (n, e) => (e as ApiError).status !== 404 && n < 1 });
   const d = view.data;
   const yearId = get('planting_year_id');
+  const densityFilter = qs({ planting_year_id: yearId });
+  const density = useQuery({
+    queryKey: ['share-density', token, densityFilter],
+    queryFn: () => publicGet<DensityReport>(`${base}/density${densityFilter}`),
+    enabled: !!d,
+    retry: (n, e) => (e as ApiError).status !== 404 && n < 1,
+  });
 
   const areas: any[] = d?.areas ?? [];
   const yearAreas = areas.filter((a) => !yearId || a.planting_year_id === yearId || a.planting_year_id == null);
@@ -165,6 +173,13 @@ export function SharePage() {
         </div>
 
         <AreaShareView rows={coverage} sectors={sectorShare} boundaries={boundaries} />
+
+        {density.data && (
+          <section className="stack" aria-label="Tree density">
+            <h2 style={{ margin: '8px 0 0' }}>Tree density</h2>
+            <DensityView report={density.data} />
+          </section>
+        )}
 
         <ChartCard title="Trees by sector" empty={(s.by_sector ?? []).length === 0 && 'No trees yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [`${r.short_code} · ${r.name}`, fmtNum(r.count)])} />}>
           <HBarChart data={s.by_sector.map((r: any) => ({ label: `${r.short_code} · ${r.name}`, value: r.count }))} />

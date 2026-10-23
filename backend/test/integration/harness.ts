@@ -57,6 +57,9 @@ export class Session {
   patch(path: string, body?: unknown) {
     return request(this.app.getHttpServer()).patch(`/api/v1${path}`).set('Authorization', `Bearer ${this.token}`).send(body as object);
   }
+  del(path: string) {
+    return request(this.app.getHttpServer()).delete(`/api/v1${path}`).set('Authorization', `Bearer ${this.token}`);
+  }
 }
 
 export async function sql(text: string, params: unknown[] = []) {

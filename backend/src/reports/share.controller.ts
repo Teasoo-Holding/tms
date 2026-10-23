@@ -9,7 +9,7 @@ import { AuditService } from '../common/audit.service';
 import { AppError, notFound } from '../common/errors';
 import { parse } from '../common/validation';
 import { Db } from '../database/db.service';
-import { Filter, VisitFilter } from './reports.controller';
+import { DensityFilter, Filter, VisitFilter } from './reports.controller';
 import { ReportsService } from './reports.service';
 import { addSheet, toCsv } from './workbook';
 
@@ -107,6 +107,16 @@ export class ShareController {
     // Clients see results, not staff: field officers' names are left out.
     const { officer_activity: _officers, ...shared } = summary as any;
     return { project, planting_years: years.rows, vendors: vendors.rows, areas: areas.rows, summary: shared };
+  }
+
+  /** The tree-density map for the link's project (planting_year_id optional). */
+  @Public()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get('share/:token/density')
+  async density(@Param('token') token: string, @Query() query: unknown) {
+    const projectId = await this.resolve(token);
+    const f = parse(DensityFilter.omit({ project_id: true }), query);
+    return this.reports.density(SHARE_READER, projectId, f.planting_year_id);
   }
 
   @Public()

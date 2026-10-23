@@ -9,7 +9,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -42,13 +47,11 @@ data class RegisterForm(
     val speciesId: String? = null,
     val statusId: String? = null,
     val serial: String = "",
-    val plantedOn: LocalDate? = LocalDate.now(),
     val notes: String = "",
     val remarks: String = "",
     /** Administrators only, for replacements: a tree ID typed by hand. */
     val customId: String = "",
     val useCustomId: Boolean = false,
-    val visitType: String = "VISIT",
     val photos: List<CapturedPhoto> = emptyList(),
     val treeFields: Map<String, String> = emptyMap(),
     val observationFields: Map<String, String> = emptyMap(),
@@ -128,8 +131,8 @@ class RegisterViewModel @Inject constructor(
         val pid = projectId.value ?: return
         val all = ref.activeSchemes(pid)
         val f = form.value
-        vendorNeeded.value = (f.yearId != null && ref.vendorsForYear(f.yearId).first().isNotEmpty()) || all.any { it.vendorId != null } ||
-            resolveScheme(all, f.yearId, null)?.let { s -> s.componentsJson.contains("VENDOR_CODE") || s.serialScopeJson.contains("VENDOR") } == true
+        // Who planted is recorded when the year has vendors; it does not affect the tree ID.
+        vendorNeeded.value = f.yearId != null && ref.vendorsForYear(f.yearId).first().isNotEmpty()
         val a = area()
         if (a == null) {
             prefix.value = null; serialCheck.value = null; return
@@ -164,11 +167,10 @@ class RegisterViewModel @Inject constructor(
                     area = a, speciesId = f.speciesId ?: throw RegistrationException("Choose a species."),
                     serialInput = f.serial, confirmedPhysicalId = if (custom) f.customId.trim() else ok!!.assembled.physicalId,
                     statusId = f.statusId ?: throw RegistrationException("Choose a status."),
-                    observedAt = Instant.now(), plantedOn = f.plantedOn?.toString(),
+                    observedAt = Instant.now(),
                     notes = f.notes.ifBlank { null }, remarks = f.remarks.ifBlank { null }, photos = f.photos,
                     replacesTreeId = replacesTreeId,
                     customPhysicalId = f.customId.trim().takeIf { custom && it.isNotEmpty() },
-                    visitType = f.visitType,
                     treeFields = toFieldValues(treeFieldDefs.value, f.treeFields),
                     observationFields = toFieldValues(observationFieldDefs.value, f.observationFields),
                     height = f.height,
@@ -216,7 +218,6 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
     val saving by vm.saving.collectAsStateWithLifecycle()
     val vendorNeeded by vm.vendorNeeded.collectAsStateWithLifecycle()
     val replacing by vm.replacing.collectAsStateWithLifecycle()
-    var camera by remember { mutableStateOf(false) }
 
     // Only areas the officer is assigned to (the server enforces this too).
     val isAdmin by vm.isAdmin.collectAsStateWithLifecycle()
@@ -289,12 +290,10 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
             HorizontalDivider()
             Picker("Species", species, species.find { it.id == f.speciesId }, { it.commonName?.let { c -> "$c (${it.scientificName})" } ?: it.scientificName }, { s -> vm.update { it.copy(speciesId = s.id) } })
             StatusSelector(statuses, f.statusId, { id -> vm.update { it.copy(statusId = id) } })
-            VisitTypeSelector(f.visitType) { t -> vm.update { it.copy(visitType = t) } }
-            DateField("Planted on", f.plantedOn, { d -> vm.update { it.copy(plantedOn = d) } })
             OutlinedTextField(f.remarks, { v -> vm.update { it.copy(remarks = v) } }, label = { Text("Observation remarks") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(f.notes, { v -> vm.update { it.copy(notes = v) } }, label = { Text("Tree notes") }, modifier = Modifier.fillMaxWidth())
 
-            PhotoRow(f.photos, onAdd = { camera = true }, onRemove = vm::removePhoto, required = photoMissing)
+            PhotoCapture(f.photos, vm.photoStore, onAdd = vm::addPhoto, onRemove = vm::removePhoto, required = photoMissing)
             val treeFieldDefs by vm.treeFieldDefs.collectAsStateWithLifecycle()
             val observationFieldDefs by vm.observationFieldDefs.collectAsStateWithLifecycle()
             val showFieldErrors by vm.showFieldErrors.collectAsStateWithLifecycle()
@@ -307,24 +306,70 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
             Button(
                 onClick = { vm.save(onDone) },
                 enabled = !saving && (check is SerialCheck.Ok || (f.useCustomId && isAdmin && f.customId.isNotBlank())) && f.speciesId != null && f.statusId != null && !photoMissing,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (saving) "Saving…" else "Save on this device") }
+                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+            ) { Text(if (saving) "Saving…" else "Save on this device", style = MaterialTheme.typography.titleMedium) }
         }
     }
-    if (camera) CameraCaptureDialog(vm.photoStore, onCaptured = { vm.addPhoto(it); camera = false }, onDismiss = { camera = false })
 }
 
+/**
+ * The photos taken for this form, shown as large previews with Retake and Remove, and a big button for the camera.
+ * Retaking keeps the old photo until the new one is taken.
+ */
 @Composable
-fun PhotoRow(photos: List<CapturedPhoto>, onAdd: () -> Unit, onRemove: (CapturedPhoto) -> Unit, required: Boolean) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Photos (${photos.size})", style = MaterialTheme.typography.titleSmall)
-        photos.forEachIndexed { i, p ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Photo ${i + 1} · ${p.byteSize / 1024} KB", Modifier.padding(top = 12.dp))
-                TextButton(onClick = { onRemove(p) }) { Text("Remove") }
+fun PhotoCapture(photos: List<CapturedPhoto>, photoStore: PhotoStore, onAdd: (CapturedPhoto) -> Unit, onRemove: (CapturedPhoto) -> Unit, required: Boolean) {
+    var camera by remember { mutableStateOf(false) }
+    var retaking by remember { mutableStateOf<CapturedPhoto?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Photo", style = MaterialTheme.typography.titleMedium)
+        photos.forEach { p ->
+            PhotoPreview(p)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { retaking = p; camera = true }, modifier = Modifier.weight(1f).heightIn(min = 52.dp)) {
+                    Icon(Icons.Default.CameraAlt, null); Spacer(Modifier.width(8.dp)); Text("Retake")
+                }
+                OutlinedButton(
+                    onClick = { onRemove(p) }, modifier = Modifier.weight(1f).heightIn(min = 52.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Icon(Icons.Default.Delete, null); Spacer(Modifier.width(8.dp)); Text("Remove") }
             }
         }
-        if (required) Text("A photo of the tree is required.", color = MaterialTheme.colorScheme.error)
-        OutlinedButton(onClick = onAdd) { Text("Take photo") }
+        if (photos.isEmpty()) {
+            Button(
+                onClick = { retaking = null; camera = true },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
+            ) { Icon(Icons.Default.CameraAlt, null, Modifier.size(32.dp)); Spacer(Modifier.width(12.dp)); Text("Take photo", style = MaterialTheme.typography.titleMedium) }
+            if (required) Text("A photo of the tree is required.", color = MaterialTheme.colorScheme.error)
+        } else {
+            TextButton(onClick = { retaking = null; camera = true }) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(4.dp)); Text("Add another photo") }
+        }
+    }
+    if (camera) CameraCaptureDialog(
+        photoStore,
+        onCaptured = { new -> retaking?.let(onRemove); retaking = null; onAdd(new); camera = false },
+        onDismiss = { retaking = null; camera = false },
+    )
+}
+
+/** A photo just taken, decoded small enough to show on the form. */
+@Composable
+private fun PhotoPreview(p: CapturedPhoto) {
+    val image by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, p.mediaId) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeFile(p.file.path, bounds)
+                var sample = 1
+                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 900) sample *= 2
+                android.graphics.BitmapFactory.decodeFile(p.file.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
+    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth().height(240.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            image?.let { androidx.compose.foundation.Image(it, "Photo of the tree", contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+                ?: CircularProgressIndicator()
+        }
     }
 }

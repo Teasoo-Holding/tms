@@ -44,7 +44,8 @@ data class NewTree(
     val confirmedPhysicalId: String,
     val statusId: String,
     val observedAt: Instant,
-    val plantedOn: String?,
+    /** Not asked for any more: a new tree is taken as planted on the day it is registered. */
+    val plantedOn: String? = null,
     val notes: String?,
     val remarks: String?,
     val photos: List<CapturedPhoto>,
@@ -185,6 +186,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
         val treeId = UUID.randomUUID().toString()
         val observationId = UUID.randomUUID().toString()
         val now = Instant.now().toString()
+        val plantedOn = t.plantedOn ?: t.observedAt.atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString()
         val snapshot = buildJsonObject {
             put("scheme_version", info.scheme.version)
             put("separator", info.scheme.separator)
@@ -196,7 +198,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
             componentsSnapshotJson = snapshot.toString(), projectId = t.area.projectId, plantingYearId = t.area.plantingYearId,
             sectorId = t.area.sectorId, subSectorId = t.area.subSectorId, speciesId = t.speciesId, currentStatusId = t.statusId,
             lastObservedAt = t.observedAt.toString(), vendorId = t.area.vendorId, replacesTreeId = t.replacesTreeId,
-            plantedOn = t.plantedOn, notes = t.notes, createdBy = userId, createdAt = now, serverRevision = null,
+            plantedOn = plantedOn, notes = t.notes, createdBy = userId, createdAt = now, serverRevision = null,
             recordState = "ACTIVE", syncState = SyncState.PENDING, syncMessage = null, customFieldsJson = t.treeFields.toJson().toString(),
         )
         val payload = buildJsonObject {
@@ -213,7 +215,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
             putJsonObject("id_component_values") { info.componentValues.forEach { (k, v) -> put(k, v) } }
             t.replacesTreeId?.let { put("replaces_tree_id", it) }
             custom?.let { put("custom_physical_id", it) }
-            t.plantedOn?.let { put("planted_on", it) }
+            put("planted_on", plantedOn)
             t.notes?.let { put("notes", it) }
             if (t.treeFields.isNotEmpty()) put("custom_fields", t.treeFields.toJson())
             putJsonObject("initial_observation") {

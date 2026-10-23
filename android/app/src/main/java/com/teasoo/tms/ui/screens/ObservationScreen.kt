@@ -37,6 +37,7 @@ class ObservationViewModel @Inject constructor(
     private val session: SessionStore,
     val photoStore: PhotoStore,
     private val fieldSessions: FieldSessionRepository,
+    private val photoLoader: PhotoLoader,
     saved: SavedStateHandle,
 ) : ViewModel() {
     val treeId: String = checkNotNull(saved["treeId"])
@@ -45,7 +46,10 @@ class ObservationViewModel @Inject constructor(
     val amended = flow { emit(amends?.let { db.observations().get(it) }) }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val statuses = db.reference().statuses().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val statusId = MutableStateFlow<String?>(null)
-    val visitType = MutableStateFlow("VISIT")
+    /** Kept from the visit being corrected; new visits are plain visits (the type is no longer asked). */
+    private var visitType = "VISIT"
+    /** Earlier photos of this tree, so the officer can check it is the right one. */
+    val treeMedia = db.media().forTree(treeId).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val remarks = MutableStateFlow("")
     val reason = MutableStateFlow("")
     val photos = MutableStateFlow<List<CapturedPhoto>>(emptyList())
@@ -65,7 +69,6 @@ class ObservationViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             referenceCm.value = fieldSessions.referenceCm()
-            fieldSessions.current()?.let { visitType.value = it.visitType }
         }
         viewModelScope.launch {
             // Sticky values from today's field session pre-fill the form.
@@ -77,13 +80,17 @@ class ObservationViewModel @Inject constructor(
         viewModelScope.launch {
             amended.filterNotNull().first().let { o ->
                 statusId.value = o.statusId
-                visitType.value = o.visitType
+                visitType = o.visitType
                 remarks.value = o.remarks.orEmpty()
                 height.value = o.heightCm?.let { HeightReading(it, o.heightMethod ?: "MANUAL", o.heightMeasurementJson) }
                 fieldValues.value = storedFieldText(o.customFieldsJson)
             }
         }
     }
+
+    suspend fun photo(m: com.teasoo.tms.data.local.MediaEntity, maxPx: Int) = photoLoader.load(m, maxPx)
+    fun addPhoto(p: CapturedPhoto) = photos.update { it + p }
+    fun removePhoto(p: CapturedPhoto) { photoStore.discard(p); photos.update { it - p } }
 
     fun setField(key: String, value: String) = fieldValues.update { it + (key to value) }
     fun setReferenceCm(cm: Double) = viewModelScope.launch { referenceCm.value = cm; fieldSessions.setReferenceCm(cm) }
@@ -101,7 +108,7 @@ class ObservationViewModel @Inject constructor(
                 statusId = statusId.value ?: throw RegistrationException("Choose a status."),
                 // Stamped when saved and not editable; a correction keeps the time of the visit it corrects.
                 observedAt = amended.value?.observedAt?.let(java.time.Instant::parse) ?: java.time.Instant.now(),
-                visitType = visitType.value,
+                visitType = visitType,
                 remarks = remarks.value.ifBlank { null },
                 photos = photos.value,
                 userId = session.userId() ?: throw RegistrationException("Sign in again to save."),
@@ -135,7 +142,7 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
     val tree by vm.tree.collectAsStateWithLifecycle()
     val statuses by vm.statuses.collectAsStateWithLifecycle()
     val statusId by vm.statusId.collectAsStateWithLifecycle()
-    val visitType by vm.visitType.collectAsStateWithLifecycle()
+    val treeMedia by vm.treeMedia.collectAsStateWithLifecycle()
     val remarks by vm.remarks.collectAsStateWithLifecycle()
     val reason by vm.reason.collectAsStateWithLifecycle()
     val photos by vm.photos.collectAsStateWithLifecycle()
@@ -146,41 +153,39 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
     val fieldValues by vm.fieldValues.collectAsStateWithLifecycle()
     val showFieldErrors by vm.showFieldErrors.collectAsStateWithLifecycle()
     val areaWarning by vm.areaWarning.collectAsStateWithLifecycle()
-    var camera by remember { mutableStateOf(false) }
     val status = statuses.find { it.id == statusId }
     val photoMissing = vm.amends == null && photos.isEmpty()
     val amending = vm.amends != null
 
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text(if (amending) "Correct observation" else "New observation") },
+            title = { Text(if (amending) "Correct visit" else "Record a visit") },
             navigationIcon = { IconButton(onClick = onDone) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
         )
     }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             tree?.let { TreeIdText(it.physicalTreeId, "") }
+            TreePhoto(treeMedia, vm::photo)
             areaWarning?.let { Notice(it, MaterialTheme.colorScheme.errorContainer) }
             if (amending) Notice("The original observation is kept and marked as superseded. Your correction is recorded with its reason.")
             StatusSelector(statuses, statusId, { vm.statusId.value = it }, label = "What do you see?")
-            VisitTypeSelector(visitType) { vm.visitType.value = it }
             Text(
                 if (amending) "The correction keeps the date and time of the original visit." else "Date and time are recorded automatically when you save.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             OutlinedTextField(remarks, { vm.remarks.value = it }, label = { Text("Remarks") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
             if (amending) OutlinedTextField(reason, { vm.reason.value = it }, label = { Text("Reason for correction") }, modifier = Modifier.fillMaxWidth())
-            PhotoRow(photos, onAdd = { camera = true }, onRemove = { p -> vm.photoStore.discard(p); vm.photos.value = vm.photos.value - p }, required = photoMissing)
+            PhotoCapture(photos, vm.photoStore, onAdd = vm::addPhoto, onRemove = vm::removePhoto, required = photoMissing)
             if (SHOW_HEIGHT) HeightSection(height, { vm.height.value = it }, photos, referenceCm, vm::setReferenceCm)
             CustomFieldsForm(fieldDefs, fieldValues, vm::setField, showFieldErrors)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(
                 onClick = { vm.save(onDone) },
                 enabled = statusId != null && !photoMissing && (!amending || reason.isNotBlank()),
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Save on this device") }
+                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+            ) { Text("Save visit", style = MaterialTheme.typography.titleMedium) }
         }
     }
-    if (camera) CameraCaptureDialog(vm.photoStore, onCaptured = { vm.photos.value = vm.photos.value + it; camera = false }, onDismiss = { camera = false })
 }
 
 /**

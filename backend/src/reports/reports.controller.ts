@@ -30,7 +30,11 @@ export const VisitFilter = Filter.extend({
   limit: z.coerce.number().int().min(1).max(500).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 });
-
+/** Density map: one project, optionally one planting year. */
+export const DensityFilter = z.object({
+  project_id: z.string().uuid(),
+  planting_year_id: z.string().uuid().optional(),
+});
 
 @Controller('reports')
 export class ReportsController {
@@ -39,6 +43,14 @@ export class ReportsController {
   @Get('summary')
   summary(@CurrentUser() user: AuthUser, @Query() query: unknown) {
     return this.reports.summary(user, parse(Filter, query));
+  }
+
+  /** Trees per hectare by sector and sub-sector, with their outlines, for the density map (web and Android). */
+  @Roles('ADMIN', 'EXECUTIVE')
+  @Get('density')
+  density(@CurrentUser() user: AuthUser, @Query() query: unknown) {
+    const f = parse(DensityFilter, query);
+    return this.reports.density(user, f.project_id, f.planting_year_id);
   }
 
   @Get('visits')

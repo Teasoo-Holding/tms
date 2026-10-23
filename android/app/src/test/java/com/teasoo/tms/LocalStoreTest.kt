@@ -261,18 +261,17 @@ class LocalStoreTest {
     }
 
     @Test
-    fun theMostSpecificIdFormatAppliesForTheVendorAndYear() = runBlocking {
+    fun vendorsShareTheProjectYearIdFormat() = runBlocking {
+        // A leftover vendor-specific format (from before IDs were project/year scoped) is ignored.
         val components = """[{"type":"PROJECT_CODE","required":true},{"type":"PLANTING_YEAR","required":true},{"type":"VENDOR_CODE","required":true},""" +
             """{"type":"TEXT","required":true,"value":"TR"},{"type":"SERIAL","required":true}]"""
         db.reference().upsertVendors(listOf(VendorEntity("v1", "Konam", "KNM", true)))
         db.reference().upsertSchemes(listOf(IdSchemeEntity("sch-knm", "p1", 2, components, "-", 5, """["PROJECT","PLANTING_YEAR","VENDOR"]""", true, vendorId = "v1")))
-        val knm = area.copy(vendorId = "v1")
-        assertEquals("T4L-2024-KNM-TR-", trees.prefix(knm).prefix)
-        // Another vendor (or none) falls back to the project's default format.
+        assertEquals("T4L-2024-", trees.prefix(area.copy(vendorId = "v1")).prefix)
         assertEquals("T4L-2024-", trees.prefix(area).prefix)
         val active = db.reference().activeSchemes("p1")
-        assertEquals("sch-knm", resolveScheme(active, "y2024", "v1")!!.id)
-        assertEquals("sch1", resolveScheme(active, "y2024", "v2")!!.id)
+        assertEquals("sch1", resolveScheme(active, "y2024", "v1")!!.id)
+        assertEquals("sch1", resolveScheme(active, "y2024", null)!!.id)
     }
 
     @Test

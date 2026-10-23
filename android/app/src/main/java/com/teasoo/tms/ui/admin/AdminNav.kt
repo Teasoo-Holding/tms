@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.History
@@ -81,6 +82,7 @@ data class AdminEntry(val title: String, val subtitle: String, val icon: ImageVe
 val ADMIN_ENTRIES = listOf(
     AdminEntry("Projects", "Years, areas, ID formats, officers", Icons.Default.Forest, AdminRoutes.PROJECTS),
     AdminEntry("Dashboard", "Progress and field activity", Icons.Default.Insights, AdminRoutes.ANALYTICS),
+    AdminEntry("Density map", "Trees per hectare by area", Icons.Default.Map, com.teasoo.tms.ui.Routes.MAP),
     AdminEntry("Users", "Accounts and roles", Icons.Default.Group, AdminRoutes.USERS),
     AdminEntry("Reference data", "Species, statuses, vendors", Icons.Default.Category, AdminRoutes.REFERENCE),
     AdminEntry("Activity log", "Who changed what", Icons.Default.History, AdminRoutes.audit()),
