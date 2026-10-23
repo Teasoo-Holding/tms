@@ -9,6 +9,7 @@ import { Layout } from './components/Layout';
 import { AuditPage } from './pages/Audit';
 import { ConflictsPage } from './pages/Conflicts';
 import { DashboardPage } from './pages/Dashboard';
+import { DensityPage } from './pages/Density';
 import { LoginPage } from './pages/Login';
 import { ProjectDetailPage } from './pages/ProjectDetail';
 import { ProjectsPage } from './pages/Projects';
@@ -56,6 +57,7 @@ function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<DashboardPage />} />
+        <Route path="density" element={<DensityPage />} />
         <Route path="trees" element={<TreesPage />} />
         <Route path="trees/:id" element={<TreeDetailPage />} />
         <Route path="visits" element={<VisitsPage />} />

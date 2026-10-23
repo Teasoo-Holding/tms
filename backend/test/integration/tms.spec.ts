@@ -1,5 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import request from 'supertest';
 import { bootApp, resetDatabase, Session, sql } from './harness';
 import { createOp, Fixtures, loadFixtures, observationOp, treePayload } from './fixtures';
@@ -514,41 +516,52 @@ describe('areas per planting year, vendors and their ID formats', () => {
     expect(res.body.results[0].code).toBe('AREA_OTHER_YEAR');
   });
 
-  it('links vendors to a planting year and gives a vendor its own ID format', async () => {
+  it('links vendors to a planting year as attribution; ID formats are per project, not per vendor or year', async () => {
     vendor = (await admin.post('/vendors', { name: 'Konam Ltd', short_code: 'KNM' }).expect(201)).body.id;
+    const other = (await admin.post('/vendors', { name: 'Green Hands', short_code: 'GRH' }).expect(201)).body.id;
     await admin.post(`/planting-years/${year2026}/vendors`, { vendor_id: vendor }).expect(201);
+    await admin.post(`/planting-years/${year2026}/vendors`, { vendor_id: other }).expect(201);
     const boot = (await admin.get('/mobile/bootstrap').expect(200)).body;
     expect(boot.planting_year_vendors.some((l: any) => l.vendor_id === vendor && l.planting_year_id === year2026)).toBe(true);
     expect(boot.sectors.find((s: any) => s.id === sector26).planting_year_id).toBe(year2026);
 
-    const fmt = await admin
-      .post(`/projects/${f.projectId}/tree-id-schemes`, {
-        vendor_id: vendor,
-        components: [
-          { type: 'PROJECT_CODE' }, { type: 'PLANTING_YEAR' }, { type: 'VENDOR_CODE' }, { type: 'TEXT', value: 'TR' }, { type: 'SECTOR_CODE' }, { type: 'SERIAL' },
-        ],
-        separator: '-', serial_width: 5, serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR', 'VENDOR'],
-      })
-      .expect(201);
+    const format = { components: [{ type: 'PROJECT_CODE' }, { type: 'PLANTING_YEAR' }, { type: 'SECTOR_CODE' }, { type: 'SERIAL' }], separator: '-', serial_width: 5 };
+    const scheme = (body: Record<string, unknown>) => admin.post(`/projects/${f.projectId}/tree-id-schemes`, { ...format, serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR'], ...body });
+    expect((await scheme({ vendor_id: vendor }).expect(400)).body.code).toBe('VENDOR_FORMAT_RETIRED');
+    expect((await scheme({ planting_year_id: year2026 }).expect(400)).body.code).toBe('YEAR_FORMAT_RETIRED');
+    const withCode = await scheme({ components: [{ type: 'PROJECT_CODE' }, { type: 'VENDOR_CODE' }, { type: 'SERIAL' }] }).expect(400);
+    expect(withCode.body.code).toBe('SCHEME_INVALID');
+    expect(withCode.body.details).toEqual(['VENDOR_CODE_RETIRED']);
+    expect((await scheme({ serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR', 'VENDOR'] }).expect(400)).body.details).toEqual(['VENDOR_SCOPE_RETIRED']);
+    await scheme({ components: [{ type: 'TEXT', value: 'bad text!' }, { type: 'SERIAL' }], serial_uniqueness_scope: [] }).expect(400);
+
+    // One project format; it replaces the previous version.
+    const fmt = await scheme({}).expect(201);
     const project = (await admin.get(`/projects/${f.projectId}`).expect(200)).body;
-    const active = project.tree_id_schemes.filter((s: any) => s.active);
-    expect(active.map((s: any) => s.vendor_name ?? 'default').sort()).toEqual(['Konam Ltd', 'default']);
+    expect(project.tree_id_schemes.filter((s: any) => s.active).map((s: any) => s.id)).toEqual([fmt.body.id]);
+    const del = await admin.del(`/tree-id-schemes/${fmt.body.id}`).expect(409);
+    expect(del.body.code).toBe('FORMAT_CURRENT');
 
-    const payload = treePayload(f, '15', {
-      planting_year_id: year2026, sector_id: sector26, sub_sector_id: sub26, vendor_id: vendor, id_scheme_id: fmt.body.id,
-      id_component_values: { PROJECT_CODE: 'T4L', PLANTING_YEAR: '2030', VENDOR_CODE: 'KNM', SECTOR_CODE: 'S01' },
-      physical_tree_id: 'T4L-2030-KNM-TR-S01-00015',
-    });
-    const res = await sync(admin, [createOp(payload)]);
-    expect(res.body.results[0].status).toBe('ACCEPTED');
-    expect(res.body.results[0].entity.physical_tree_id).toBe('T4L-2030-KNM-TR-S01-00015');
-
-    await admin.post(`/projects/${f.projectId}/tree-id-schemes`, {
-      components: [{ type: 'TEXT', value: 'bad text!' }, { type: 'SERIAL' }], separator: '-', serial_width: 5, serial_uniqueness_scope: [],
-    }).expect(400);
-    await admin.post(`/tree-id-schemes/${fmt.body.id}/retire`).expect(201);
-    const after = (await admin.get(`/projects/${f.projectId}`).expect(200)).body;
-    expect(after.tree_id_schemes.filter((s: any) => s.active)).toHaveLength(1);
+    // Vendors are recorded on the tree but share one sequence per project + planting year.
+    const register = (serial: string, vendorId: string | null) =>
+      sync(admin, [
+        createOp(
+          treePayload(f, serial, {
+            planting_year_id: year2026, sector_id: sector26, sub_sector_id: sub26, vendor_id: vendorId, id_scheme_id: fmt.body.id,
+            id_component_values: { PROJECT_CODE: 'T4L', PLANTING_YEAR: '2030', SECTOR_CODE: 'S01' },
+          }),
+        ),
+      ]);
+    const first = (await register('15', vendor)).body.results[0];
+    expect(first.status).toBe('ACCEPTED');
+    expect(first.entity.physical_tree_id).toBe('T4L-2030-S01-00015');
+    expect(first.entity.vendor_id).toBe(vendor);
+    expect(first.entity.serial_scope_key).toBe(`PLANTING_YEAR=${year2026}|PROJECT=${f.projectId}`);
+    const clash = (await register('15', other)).body.results[0];
+    expect(clash.status).toBe('CONFLICT');
+    expect((await register('16', other)).body.results[0].status).toBe('ACCEPTED');
+    // No vendor at all is fine too.
+    expect((await register('17', null)).body.results[0].status).toBe('ACCEPTED');
   });
 
   it('lets Teasoo management executives see every project, while clients see only theirs', async () => {
@@ -577,6 +590,9 @@ describe('visit types, hand-set replacement IDs and portal access', () => {
     expect(visit.body.results[0].entity.visit_type).toBe('VISIT');
     const maint = await sync(officer, [observationOp(payload.id, f.status.ALIVE, { visit_type: 'MAINTENANCE' })]);
     expect(maint.body.results[0].entity.visit_type).toBe('MAINTENANCE');
+    // The app no longer asks for the type: omitted or null is an ordinary visit.
+    const unset = await sync(officer, [observationOp(payload.id, f.status.ALIVE, { visit_type: null })]);
+    expect(unset.body.results[0].entity.visit_type).toBe('VISIT');
     const bad = await sync(officer, [observationOp(payload.id, f.status.ALIVE, { visit_type: 'PICNIC' })]);
     expect(bad.body.results[0].status).toBe('REJECTED');
     const first = (await admin.get(`/reports/visits?visit_type=FIRST_INSTANCE&q=009101`).expect(200)).body;
@@ -613,5 +629,127 @@ describe('visit types, hand-set replacement IDs and portal access', () => {
     await request(app.getHttpServer()).get('//api/v1/health').expect(200);
     const other = await request(app.getHttpServer()).options('/api/v1/auth/login').set('Origin', 'https://evil.example.com').set('Access-Control-Request-Method', 'POST');
     expect(other.headers['access-control-allow-origin']).toBeUndefined();
+  });
+});
+
+describe('planting date, photos and the tree-density map', () => {
+  const sq = (lat: number, lon: number, d: number) => [
+    { latitude: lat, longitude: lon }, { latitude: lat, longitude: lon + d }, { latitude: lat + d, longitude: lon + d }, { latitude: lat + d, longitude: lon },
+  ];
+  let year: string;
+  let sector: string;
+  let sub: string;
+  let scheme: string;
+  const tree = (serial: string, overrides: Record<string, unknown> = {}) =>
+    treePayload(f, serial, {
+      planting_year_id: year, sector_id: sector, sub_sector_id: sub, id_scheme_id: scheme, id_component_values: undefined, physical_tree_id: undefined, ...overrides,
+    });
+
+  beforeAll(async () => {
+    year = (await admin.post(`/projects/${f.projectId}/planting-years`, { year_label: '2031' }).expect(201)).body.id;
+    sector = (await admin.post(`/projects/${f.projectId}/sectors`, { planting_year_id: year, name: 'Density', short_code: 'D1', corners: sq(7.60, 3.90, 0.01) }).expect(201)).body.id;
+    sub = (await admin.post(`/sectors/${sector}/sub-sectors`, { name: 'Dense', short_code: 'DA', corners: sq(7.601, 3.901, 0.004) }).expect(201)).body.id;
+    [{ id: scheme }] = await sql(`SELECT id FROM tree_id_schemes WHERE project_id = $1 AND active`, [f.projectId]);
+  });
+
+  it('defaults the planting date to the first visit when the app does not send one', async () => {
+    const p = tree('501', { planted_on: undefined, initial_observation: { id: randomUUID(), status_id: f.status.ALIVE, observed_at: '2026-03-04T00:30:00+01:00' } });
+    const r = (await sync(admin, [createOp(p)])).body.results[0];
+    expect(r.status).toBe('ACCEPTED');
+    expect(r.entity.planted_on).toBe('2026-03-04');
+    const given = (await sync(admin, [createOp(tree('502', { planted_on: '2025-12-01' }))])).body.results[0];
+    expect(given.entity.planted_on).toBe('2025-12-01');
+  });
+
+  it("lists a tree's photos for galleries", async () => {
+    const [t] = await sql(`SELECT id FROM trees WHERE sub_sector_id = $1 LIMIT 1`, [sub]);
+    expect((await admin.get(`/trees/${t.id}/media`).expect(200)).body).toEqual([]);
+    await admin.get(`/trees/${randomUUID()}/media`).expect(404);
+  });
+
+  it('reports trees per hectare and the alive share by sector and sub-sector', async () => {
+    const dead = tree('503', { initial_observation: { id: randomUUID(), status_id: f.status.DEAD, observed_at: '2026-03-05T10:00:00Z' } });
+    expect((await sync(admin, [createOp(dead)])).body.results[0].status).toBe('ACCEPTED');
+    const res = (await admin.get(`/reports/density?project_id=${f.projectId}&planting_year_id=${year}`).expect(200)).body;
+    expect(res.project.id).toBe(f.projectId);
+    expect(res.planting_year).toEqual({ id: year, year_label: '2031' });
+    // Only this year's survey and older areas not tied to a year.
+    expect(res.sectors.every((s: any) => s.planting_year_id === year || s.planting_year_id === null)).toBe(true);
+    const s = res.sectors.find((x: any) => x.id === sector);
+    expect(s).toMatchObject({ kind: 'sector', short_code: 'D1', registered_trees: 3, alive_trees: 2, dead_trees: 1, unknown_trees: 0, alive_share: 0.667 });
+    expect(s.boundary.type).toBe('Polygon');
+    expect(s.area_hectares).toBeGreaterThan(100); // ≈ 1.1 km × 1.1 km
+    expect(s.area_hectares).toBeLessThan(140);
+    expect(s.trees_per_hectare).toBeCloseTo(3 / s.area_hectares, 1);
+    const ss = s.sub_sectors[0];
+    expect(ss).toMatchObject({ kind: 'sub_sector', id: sub, sector_id: sector, registered_trees: 3 });
+    expect(ss.trees_per_hectare).toBeGreaterThan(s.trees_per_hectare);
+    // Trees of other years in older (year-less) areas are not counted for this year.
+    expect(res.totals.registered_trees).toBe(3);
+
+    // Executives read it for their projects; field officers do not.
+    expect((await exec.get(`/reports/density?project_id=${f.projectId}&planting_year_id=${year}`).expect(200)).body.totals.registered_trees).toBe(3);
+    await officer.get(`/reports/density?project_id=${f.projectId}`).expect(403);
+    await admin.get(`/reports/density`).expect(400);
+    await admin.get(`/reports/density?project_id=${f.projectId}&planting_year_id=${randomUUID()}`).expect(404);
+
+    // Client share links get the same map for their project.
+    const link = (await admin.post(`/projects/${f.projectId}/share-links`, { label: 'Density' }).expect(201)).body;
+    const shared = (await request(app.getHttpServer()).get(`/api/v1/share/${link.token}/density?planting_year_id=${year}`).expect(200)).body;
+    expect(shared.sectors.find((x: any) => x.id === sector).registered_trees).toBe(3);
+  });
+});
+
+describe('migration 007: tree IDs per project and planting year', () => {
+  const file = path.resolve(__dirname, '../../migrations/007_project_year_tree_ids.sql');
+  const definition = (types: string[]) => JSON.stringify(types.map((type) => ({ type, required: true })));
+
+  it('retires vendor and year formats and leaves every project with one project format', async () => {
+    await sql('ALTER TABLE tree_id_schemes DROP CONSTRAINT tree_id_schemes_project_wide');
+    const [vendor] = await sql(`INSERT INTO vendors (name, short_code) VALUES ('Migration Vendor', 'MIGV') RETURNING id`);
+    const project = async (code: string) => {
+      const [p] = await sql(`INSERT INTO projects (name, short_code, physical_id_uniqueness) VALUES ($1, $1, 'PROJECT') RETURNING id`, [code]);
+      const [y] = await sql(`INSERT INTO planting_years (project_id, year_label) VALUES ($1, '2027') RETURNING id`, [p.id]);
+      return { id: p.id as string, year: y.id as string };
+    };
+    const insert = (projectId: string, version: number, types: string[], scope: string[], vendorId: string | null = null, yearId: string | null = null) =>
+      sql(
+        `INSERT INTO tree_id_schemes (project_id, version, component_definition, separator, serial_width, serial_uniqueness_scope, vendor_id, planting_year_id)
+         VALUES ($1, $2, $3, '-', 5, $4, $5, $6)`,
+        [projectId, version, definition(types), JSON.stringify(scope), vendorId, yearId],
+      );
+    // A: a project format that names the vendor, plus a vendor format and a year format.
+    const a = await project('MIGA');
+    await insert(a.id, 1, ['PROJECT_CODE', 'VENDOR_CODE', 'SERIAL'], ['PROJECT', 'PLANTING_YEAR', 'VENDOR']);
+    await insert(a.id, 2, ['PROJECT_CODE', 'VENDOR_CODE', 'TEXT', 'SERIAL'], ['VENDOR'], vendor.id);
+    await insert(a.id, 3, ['PROJECT_CODE', 'SECTOR_CODE', 'SERIAL'], ['SECTOR'], null, a.year);
+    // B: only a year format (globally numbered). C: no format at all.
+    const b = await project('MIGB');
+    await insert(b.id, 1, ['PROJECT_CODE', 'PLANTING_YEAR', 'VENDOR_CODE', 'SERIAL'], [], null, b.year);
+    const c = await project('MIGC');
+
+    await sql(fs.readFileSync(file, 'utf8'));
+    const active = async (projectId: string) => sql(`SELECT * FROM tree_id_schemes WHERE project_id = $1 AND active`, [projectId]);
+    const types = (row: any) => row.component_definition.map((x: any) => x.type);
+
+    const [fa] = await active(a.id);
+    expect(fa).toMatchObject({ version: 4, vendor_id: null, planting_year_id: null, serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR'] });
+    expect(types(fa)).toEqual(['PROJECT_CODE', 'SERIAL']);
+    const [{ n: kept }] = await sql(`SELECT count(*)::int AS n FROM tree_id_schemes WHERE project_id = $1 AND NOT active`, [a.id]);
+    expect(kept).toBe(3); // history rows stay, so registered IDs keep their format
+    const [fb] = await active(b.id);
+    expect(fb).toMatchObject({ version: 2, planting_year_id: null, serial_uniqueness_scope: [] });
+    expect(types(fb)).toEqual(['PROJECT_CODE', 'PLANTING_YEAR', 'SERIAL']);
+    const [fc] = await active(c.id);
+    expect(fc).toMatchObject({ version: 1, separator: '-', serial_width: 6, serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR'] });
+    expect(types(fc)).toEqual(['PROJECT_CODE', 'PLANTING_YEAR', 'SERIAL']);
+    const counts = await sql(`SELECT p.id, (SELECT count(*)::int FROM tree_id_schemes s WHERE s.project_id = p.id AND s.active) AS n FROM projects p`);
+    expect(counts.every((r: any) => r.n === 1)).toBe(true);
+
+    // Running it again changes nothing; vendor formats cannot become active again.
+    const [{ n: before }] = await sql('SELECT count(*)::int AS n FROM tree_id_schemes');
+    await sql(fs.readFileSync(file, 'utf8'));
+    expect((await sql('SELECT count(*)::int AS n FROM tree_id_schemes'))[0].n).toBe(before);
+    await expect(insert(a.id, 9, ['SERIAL'], [], vendor.id)).rejects.toThrow(/tree_id_schemes_project_wide/);
   });
 });

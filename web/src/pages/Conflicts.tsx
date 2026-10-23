@@ -2,6 +2,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, qs } from '../api/client';
+import { TreePhotos } from '../components/Photos';
 import { EmptyState, ErrorNotice, Field, fmtDateTime, Modal, PageHeader, Tabs } from '../components/ui';
 
 const TYPE_LABEL: Record<string, string> = {
@@ -120,7 +121,7 @@ function TreeCard({ title, tree }: { title: string; tree: any }) {
           <dt>Registered by</dt><dd>{tree.created_by_name}</dd>
           <dt>Recorded on device</dt><dd>{fmtDateTime(tree.client_recorded_at)}</dd>
           <dt>Synced</dt><dd>{fmtDateTime(tree.synced_at)}</dd>
-          <dt>Photos</dt><dd>{tree.media_count}</dd>
+          <dt>Photos</dt><dd>{tree.media_count ? <TreePhotos treeId={tree.id} /> : 'None'}</dd>
           <dt>Notes</dt><dd>{tree.notes ?? '—'}</dd>
         </dl>
       ) : (

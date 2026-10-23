@@ -8,12 +8,11 @@ import { areaHectares, AreaSketch, boundaryCorners, LonLat, orderCorners } from 
 import { ShareLinksModal } from '../components/ShareLinks';
 import { ActivePill, CardHeader, clean, EmptyState, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RowMenu, Tabs, useDelete, useForm } from '../components/ui';
 import {
+  appliedTo,
   COMPONENTS,
   componentLabel,
-  effectiveScheme,
+  currentScheme,
   isFixedPart,
-  LEVEL_LABEL,
-  levelOf,
   previewId,
   RECOMMENDED_SCOPE,
   Scheme,
@@ -88,29 +87,32 @@ export function ProjectDetailPage() {
         crumbs={<><Link to="/projects">Projects</Link> /</>}
         title={p.name}
         actions={
-          isAdmin && (
-            <>
-              <button className="primary" onClick={() => setSharing(true)}>Share</button>
-              <RowMenu
-                label="Project actions"
-                items={[
-                  { label: 'Edit', onClick: () => setEditing(true) },
-                  {
-                    label: 'Delete',
-                    danger: true,
-                    onClick: () =>
-                      del.ask({
-                        what: 'project',
-                        name: p.name,
-                        path: `/projects/${p.id}`,
-                        note: 'Only a project without trees can be deleted. All its setup is removed.',
-                        onDeleted: () => navigate('/projects', { replace: true }),
-                      }),
-                  },
-                ]}
-              />
-            </>
-          )
+          <>
+            <Link className="btn" to={`/density?project_id=${p.id}${year ? `&planting_year_id=${year.id}` : ''}`}>Density map</Link>
+            {isAdmin && (
+              <>
+                <button className="primary" onClick={() => setSharing(true)}>Share</button>
+                <RowMenu
+                  label="Project actions"
+                  items={[
+                    { label: 'Edit', onClick: () => setEditing(true) },
+                    {
+                      label: 'Delete',
+                      danger: true,
+                      onClick: () =>
+                        del.ask({
+                          what: 'project',
+                          name: p.name,
+                          path: `/projects/${p.id}`,
+                          note: 'Only a project without trees can be deleted. All its setup is removed.',
+                          onDeleted: () => navigate('/projects', { replace: true }),
+                        }),
+                    },
+                  ]}
+                />
+              </>
+            )}
+          </>
         }
       >
         <span className="pill mono">{p.short_code}</span>
@@ -119,7 +121,7 @@ export function ProjectDetailPage() {
       <YearBar years={years} selected={year} onSelect={setYear} onAdd={isAdmin ? addYear : undefined} />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'areas' && <AreasTab project={p} year={year} onAddYear={addYear} />}
-      {tab === 'vendors' && <VendorsTab project={p} year={year} onAddYear={addYear} onTab={setTab} />}
+      {tab === 'vendors' && <VendorsTab project={p} year={year} onAddYear={addYear} />}
       {tab === 'schemes' && <SchemesTab project={p} year={year} />}
       {tab === 'years' && <YearsTab project={p} selected={year} onSelect={setYear} onAdd={addYear} />}
       {tab === 'fields' && <CustomFieldsTab projectId={p.id} />}
@@ -719,10 +721,9 @@ function ImportForm({ projectId, year, onClose }: { projectId: string; year: Pla
 }
 
 // ------------------------------------------------------------------ vendors per planting year
-function VendorsTab({ project, year, onAddYear, onTab }: { project: any; year?: PlantingYear; onAddYear: () => void; onTab: (t: Tab) => void }) {
+function VendorsTab({ project, year, onAddYear }: { project: any; year?: PlantingYear; onAddYear: () => void }) {
   const isAdmin = useIsAdmin();
   const vendors = useQuery({ queryKey: ['vendors'], queryFn: () => api.get<any[]>('/vendors') });
-  const codes = useExampleCodes(project.id, year);
   const [vendorId, setVendorId] = useState('');
   const [creating, setCreating] = useState(false);
   const [editingVendor, setEditingVendor] = useState<any | null>(null);
@@ -737,20 +738,20 @@ function VendorsTab({ project, year, onAddYear, onTab }: { project: any; year?: 
   // Active links first, then earlier ones (kept so they can be linked again).
   const ordered = [...active, ...links.filter((l) => !l.active && !active.some((a) => a.vendor_id === l.vendor_id))];
   const available = (vendors.data ?? []).filter((v) => v.active !== false && !links.some((l) => l.vendor_id === v.id));
-  const schemes: Scheme[] = project.tree_id_schemes;
   return (
     <div className="stack">
       <ErrorNotice error={vendors.error ?? link.error ?? unlink.error} />
       <section className="card flush">
-        <CardHeader title={`Vendors in ${year.year_label}`} />
+        <CardHeader
+          title={`Vendors in ${year.year_label}`}
+          description="Who plants this year. Tree IDs do not depend on the vendor: all vendors share one sequence of tree numbers per planting year."
+        />
         <div className="table-wrap" style={{ marginTop: 12 }}>
           {ordered.length > 0 && (
             <table>
-              <thead><tr><th>Vendor</th><th>Example ID</th>{isAdmin && <th className="actions" />}</tr></thead>
+              <thead><tr><th>Vendor</th>{isAdmin && <th className="actions" />}</tr></thead>
               <tbody>
                 {ordered.map((l) => {
-                  const scheme = effectiveScheme(schemes, l.vendor_id, year.id);
-                  const needsCode = scheme?.component_definition.some((c) => c.type === 'VENDOR_CODE') && !l.vendor_short_code;
                   const vendor = vendors.data?.find((v) => v.id === l.vendor_id);
                   return (
                     <tr key={l.id} style={l.active ? undefined : { opacity: 0.65 }}>
@@ -758,14 +759,6 @@ function VendorsTab({ project, year, onAddYear, onTab }: { project: any; year?: 
                         {l.vendor_name}
                         {l.vendor_short_code && <span className="muted mono"> · {l.vendor_short_code}</span>}
                         {!l.active && <span className="pill" style={{ marginLeft: 8 }}>Unlinked</span>}
-                        {l.active && needsCode && <div className="muted" style={{ color: 'var(--warning-ink)' }}>Needs a short code for its ID format.</div>}
-                      </td>
-                      <td>
-                        {scheme ? (
-                          exampleId(scheme, { PROJECT_CODE: project.short_code, PLANTING_YEAR: year.year_label, VENDOR_CODE: l.vendor_short_code, SECTOR_CODE: codes.sector, SUB_SECTOR_CODE: codes.subSector })
-                        ) : (
-                          <button className="link" onClick={() => onTab('schemes')}>Define a format</button>
-                        )}
                       </td>
                       {isAdmin && (
                         <td className="actions">
@@ -834,7 +827,7 @@ function NewVendorForm({ onClose, onCreated }: { onClose: () => void; onCreated:
         <ErrorNotice error={save.error} />
         <div className="form-grid">
           <Field label="Name"><input required maxLength={200} placeholder="Kano Nurseries Ltd" {...f.bind('name')} /></Field>
-          <Field label="Short code" hint="e.g. KNM; used in tree IDs">
+          <Field label="Short code" hint="e.g. KNM">
             <input required maxLength={16} pattern="[A-Za-z0-9]{1,16}" title="1–16 letters or digits" {...f.bind('short_code')} />
           </Field>
         </div>
@@ -847,100 +840,52 @@ function NewVendorForm({ onClose, onCreated }: { onClose: () => void; onCreated:
   );
 }
 
-// ------------------------------------------------------------------ ID formats
-type ScopeChoice = { vendorId: string | null; yearId: string | null };
-const scopeKey = (s: ScopeChoice) => `${s.vendorId ?? ''}|${s.yearId ?? ''}`;
-const parseScope = (k: string): ScopeChoice => {
-  const [v, y] = k.split('|');
-  return { vendorId: v || null, yearId: y || null };
-};
-
+// ------------------------------------------------------------------ ID format
+/** One format per project: every vendor and planting year uses it, so tree numbers run per project and year. */
 function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
   const isAdmin = useIsAdmin();
   const codes = useExampleCodes(project.id, year);
-  const [builder, setBuilder] = useState<ScopeChoice | null>(null);
-  const retire = useMutation({ mutationFn: (id: string) => api.post(`/tree-id-schemes/${id}/retire`) });
+  const [building, setBuilding] = useState(false);
   const del = useDelete();
   const deleteVersion = (sc: Scheme) => del.ask({ what: 'ID format version', name: `Version ${sc.version}`, path: `/tree-id-schemes/${sc.id}`, note: 'Only a version no tree uses can be deleted.' });
   const schemes: Scheme[] = project.tree_id_schemes;
-  const active = schemes.filter((s) => s.active);
-  const links = yearLinks(project, year?.id).filter((l) => l.active);
-  const firstVendorCode = links.find((l) => l.vendor_short_code)?.vendor_short_code;
-  const values = (vendorCode?: string | null, yearLabel?: string | null) => ({
+  const current = currentScheme(schemes);
+  const history = schemes.filter((s) => s.id !== current?.id);
+  const values = (yearLabel?: string | null, vendorCode?: string | null) => ({
     PROJECT_CODE: project.short_code,
     PLANTING_YEAR: yearLabel ?? year?.year_label,
-    VENDOR_CODE: vendorCode ?? firstVendorCode,
+    VENDOR_CODE: vendorCode,
     SECTOR_CODE: codes.sector,
     SUB_SECTOR_CODE: codes.subSector,
   });
-  const def = active.find((s) => !s.vendor_id && !s.planting_year_id);
-  const yearFormat = year && active.find((s) => !s.vendor_id && s.planting_year_id === year.id);
-  const vendorFormats = active.filter((s) => s.vendor_id && (s.planting_year_id == null || s.planting_year_id === year?.id));
-  const history = schemes.filter((s) => !s.active);
-
-  const level = (title: string, description: string, scheme: Scheme | undefined, scope: ScopeChoice, emptyText: string, vendorCode?: string | null) => (
-    <div className="scheme-level" key={scopeKey(scope)}>
-      <div>
-        <strong>{title}</strong>
-        <div className="muted">{description}</div>
-      </div>
-      {scheme ? (
-        <div className="stack" style={{ gap: 6 }}>
-          <div>{exampleId(scheme, values(vendorCode ?? scheme.vendor_short_code, scheme.year_label))}</div>
-          <div className="muted">
-            {scheme.component_definition.map((c) => (c.type === 'TEXT' ? `“${c.value}”` : componentLabel(c.type))).join(' → ')} · {scheme.serial_width}-digit tree number, unique per{' '}
-            {scopeLabel(scheme.serial_uniqueness_scope)} · version {scheme.version} since {fmtDate(scheme.active_from)}
-          </div>
-        </div>
-      ) : (
-        <div className="muted">{emptyText}</div>
-      )}
-      {isAdmin && (
-        <div className="row" style={{ flexWrap: 'nowrap' }}>
-          <button onClick={() => setBuilder(scope)}>{scheme ? 'Change' : 'Create'}</button>
-          {scheme && (
-            <RowMenu
-              label="Format actions"
-              items={[
-                levelOf(scheme) !== 'default' && {
-                  label: 'Retire (deactivate)',
-                  onClick: () => confirm('Retire this format? The broader format applies again to new registrations.') && retire.mutate(scheme.id),
-                },
-                { label: 'Delete', danger: true, onClick: () => deleteVersion(scheme) },
-              ]}
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
 
   return (
     <div className="stack">
-      {!def && <div className="notice warning">No project default format yet: officers cannot register trees without a format.</div>}
-      <ErrorNotice error={retire.error} />
+      {!current && <div className="notice warning">No ID format yet: officers cannot register trees without one.</div>}
       <section className="card">
         <CardHeader
-          title={year ? `Formats in ${year.year_label}` : 'Formats'}
-          actions={isAdmin && <button className="primary" onClick={() => setBuilder({ vendorId: null, yearId: year?.id ?? null })}>+ Format</button>}
+          title="Tree ID format"
+          description="One format for the whole project, used for every vendor and planting year."
+          actions={isAdmin && <button className="primary" onClick={() => setBuilding(true)}>{current ? 'Change' : 'Create'}</button>}
         />
-        {level('Project default', 'All years and vendors', def, { vendorId: null, yearId: null }, 'None yet.')}
-        {year && level(`Year ${year.year_label}`, 'All vendors this year', yearFormat, { vendorId: null, yearId: year.id }, 'Project default applies.')}
-        {vendorFormats.map((s) =>
-          level(
-            s.planting_year_id ? `Vendor ${s.vendor_name} in ${s.year_label}` : `Vendor ${s.vendor_name}`,
-            s.planting_year_id ? 'This year only' : 'Every year',
-            s,
-            { vendorId: s.vendor_id, yearId: s.planting_year_id },
-            '',
-          ),
+        {current ? (
+          <div className="stack" style={{ gap: 6 }}>
+            <div>{exampleId(current, values())}</div>
+            <div className="muted">
+              {current.component_definition.map((c) => (c.type === 'TEXT' ? `“${c.value}”` : componentLabel(c.type))).join(' → ')} · {current.serial_width}-digit tree number, unique per{' '}
+              {scopeLabel(current.serial_uniqueness_scope)} · version {current.version} since {fmtDate(current.active_from)}
+            </div>
+          </div>
+        ) : (
+          <div className="muted">None yet.</div>
         )}
       </section>
       <details className="more">
-        <summary>How formats are chosen</summary>
+        <summary>How tree numbers work</summary>
         <p className="muted">
-          The phone uses the most specific format: vendor in this year → vendor → planting year → project default. Fixed parts (project, year, vendor, text) are filled in by the
-          phone; the officer types only the tree number. Changes apply to new registrations only.
+          All vendors on the project share one progressive sequence of tree numbers per planting year; the vendor is recorded on each tree but is not part of its ID. Fixed
+          parts (project, year, text) are filled in by the phone; the officer types only the tree number. Changes apply to new registrations only: trees already registered keep
+          their IDs.
         </p>
       </details>
       {history.length > 0 && (
@@ -953,8 +898,8 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
                 {history.map((s) => (
                   <tr key={s.id}>
                     <td title={`Since ${fmtDateTime(s.active_from)}`}>{s.version}</td>
-                    <td>{LEVEL_LABEL[levelOf(s)]}{s.vendor_name ? ` · ${s.vendor_name}` : ''}{s.year_label ? ` · ${s.year_label}` : ''}</td>
-                    <td>{exampleId(s, values(s.vendor_short_code, s.year_label))}</td>
+                    <td>{appliedTo(s)}</td>
+                    <td>{exampleId(s, values(s.year_label, s.vendor_short_code))}</td>
                     {isAdmin && <td className="actions"><RowMenu items={[{ label: 'Delete', danger: true, onClick: () => deleteVersion(s) }]} /></td>}
                   </tr>
                 ))}
@@ -964,7 +909,7 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
         </details>
       )}
       {del.dialog}
-      {builder && <SchemeBuilder project={project} year={year} initial={builder} codes={codes} onClose={() => setBuilder(null)} />}
+      {building && <SchemeBuilder project={project} year={year} current={current} codes={codes} onClose={() => setBuilding(false)} />}
     </div>
   );
 }
@@ -973,52 +918,23 @@ type Part = SchemeComponent & { key: number };
 const DEFAULT_PARTS: SchemeComponent[] = [
   { type: 'PROJECT_CODE', required: true },
   { type: 'PLANTING_YEAR', required: true },
-  { type: 'VENDOR_CODE', required: true },
-  { type: 'SECTOR_CODE', required: true },
 ];
+/** Parts and numbering scopes that new formats can no longer use (formats from before IDs were per project and year). */
+const RETIRED_PART = 'VENDOR_CODE';
+const RETIRED_SCOPE = 'VENDOR';
 
-function SchemeBuilder({ project, year, initial, codes, onClose }: { project: any; year?: PlantingYear; initial: ScopeChoice; codes: { sector: string; subSector: string }; onClose: () => void }) {
-  const schemes: Scheme[] = project.tree_id_schemes;
-  const links = yearLinks(project, year?.id).filter((l) => l.active);
-  // Vendors offered as scopes: this year's vendors, plus any vendor that already has its own format.
-  const vendors = new Map<string, { name: string; code: string | null }>();
-  links.forEach((l) => vendors.set(l.vendor_id, { name: l.vendor_name, code: l.vendor_short_code }));
-  schemes.forEach((s) => s.vendor_id && !vendors.has(s.vendor_id) && vendors.set(s.vendor_id, { name: s.vendor_name ?? 'Vendor', code: s.vendor_short_code }));
-  const yearLabelOf = (id: string | null) => (id ? project.planting_years.find((y: PlantingYear) => y.id === id)?.year_label : undefined);
-  const scopeOptions: [string, string][] = [[scopeKey({ vendorId: null, yearId: null }), 'Project default (all years and vendors)']];
-  if (year) scopeOptions.push([scopeKey({ vendorId: null, yearId: year.id }), `This planting year (${year.year_label}), all vendors`]);
-  vendors.forEach((v, id) => {
-    scopeOptions.push([scopeKey({ vendorId: id, yearId: null }), `Vendor: ${v.name} (every year)`]);
-    if (year) scopeOptions.push([scopeKey({ vendorId: id, yearId: year.id }), `Vendor ${v.name} in ${year.year_label}`]);
-  });
-  // A scope coming from another year (e.g. a vendor format for an older year) is kept selectable.
-  if (!scopeOptions.some(([k]) => k === scopeKey(initial))) {
-    scopeOptions.push([scopeKey(initial), `${initial.vendorId ? `Vendor ${vendors.get(initial.vendorId)?.name}` : 'Year'} in ${yearLabelOf(initial.yearId)}`]);
-  }
-
+function SchemeBuilder({ project, year, current, codes, onClose }: { project: any; year?: PlantingYear; current?: Scheme; codes: { sector: string; subSector: string }; onClose: () => void }) {
   const nextKey = useRef(0);
-  const withKeys = (cs: SchemeComponent[]): Part[] => cs.filter((c) => c.type !== 'SERIAL').map((c) => ({ ...c, key: nextKey.current++ }));
-  /** Starts from the format that applies to the scope today, so a change is an edit, not a blank slate. */
-  const startFrom = (scope: ScopeChoice) => {
-    const base = effectiveScheme(schemes, scope.vendorId, scope.yearId);
-    const vendorInvolved = !!scope.vendorId || links.length > 0;
-    return {
-      parts: withKeys(base?.component_definition ?? DEFAULT_PARTS.filter((c) => c.type !== 'VENDOR_CODE' || vendorInvolved)),
-      separator: base?.separator ?? '-',
-      width: base?.serial_width ?? 5,
-      serialScope: base?.serial_uniqueness_scope ?? (vendorInvolved ? RECOMMENDED_SCOPE : ['PROJECT', 'PLANTING_YEAR']),
-      exact: schemes.find((s) => s.active && s.vendor_id === scope.vendorId && s.planting_year_id === scope.yearId),
-    };
-  };
-  const [scope, setScopeState] = useState<ScopeChoice>(initial);
-  const [form, setForm] = useState(() => startFrom(initial));
+  const withKeys = (cs: SchemeComponent[]): Part[] => cs.filter((c) => c.type !== 'SERIAL' && c.type !== RETIRED_PART).map((c) => ({ ...c, key: nextKey.current++ }));
+  /** Starts from the current format, so a change is an edit, not a blank slate. */
+  const [form, setForm] = useState(() => ({
+    parts: withKeys(current?.component_definition ?? DEFAULT_PARTS),
+    separator: current?.separator ?? '-',
+    width: current?.serial_width ?? 6,
+    serialScope: (current?.serial_uniqueness_scope ?? RECOMMENDED_SCOPE).filter((d) => d !== RETIRED_SCOPE),
+  }));
   const { parts, separator, width, serialScope } = form;
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
-  const changeScope = (k: string) => {
-    const next = parseScope(k);
-    setScopeState(next);
-    setForm(startFrom(next));
-  };
   const [localError, setLocalError] = useState<string | null>(null);
 
   const components: SchemeComponent[] = [
@@ -1028,8 +944,6 @@ function SchemeBuilder({ project, year, initial, codes, onClose }: { project: an
   const save = useMutation({
     mutationFn: () =>
       api.post(`/projects/${project.id}/tree-id-schemes`, {
-        vendor_id: scope.vendorId,
-        planting_year_id: scope.yearId,
         components,
         separator,
         serial_width: width,
@@ -1053,36 +967,24 @@ function SchemeBuilder({ project, year, initial, codes, onClose }: { project: an
   };
   const update = (i: number, patch: Partial<Part>) => set({ parts: parts.map((x, j) => (j === i ? { ...x, ...patch } : x)) });
 
-  const scopeVendor = scope.vendorId ? vendors.get(scope.vendorId) : undefined;
-  const sampleVendor = scopeVendor ?? (links[0] ? { name: links[0].vendor_name, code: links[0].vendor_short_code } : undefined);
-  const sampleYear = yearLabelOf(scope.yearId) ?? year?.year_label ?? String(new Date().getFullYear());
+  const sampleYear = year?.year_label ?? String(new Date().getFullYear());
   const sample = previewId(components, separator, width, {
     PROJECT_CODE: project.short_code,
     PLANTING_YEAR: sampleYear,
-    VENDOR_CODE: sampleVendor?.code,
     SECTOR_CODE: codes.sector,
     SUB_SECTOR_CODE: codes.subSector,
   });
-  const hasVendorCode = parts.some((p) => p.type === 'VENDOR_CODE');
-  const vendorInvolved = !!scope.vendorId || hasVendorCode || links.length > 1;
   const isRecommended = RECOMMENDED_SCOPE.every((d) => serialScope.includes(d)) && serialScope.length === RECOMMENDED_SCOPE.length;
-  const scopeName = scopeOptions.find(([k]) => k === scopeKey(scope))?.[1] ?? '';
+  const hadVendor = !!current && (current.component_definition.some((c) => c.type === RETIRED_PART) || current.serial_uniqueness_scope.includes(RETIRED_SCOPE));
 
   return (
-    <Modal title={form.exact ? `Change the ID format (now version ${form.exact.version})` : 'New ID format'} onClose={onClose} wide>
+    <Modal title={current ? `Change the ID format (now version ${current.version})` : 'New ID format'} onClose={onClose} wide>
       <div className="stack">
         {localError ? <div className="notice error" role="alert">{localError}</div> : <ErrorNotice error={save.error} />}
-        <Field label="Applies to" hint="the phone uses the most specific format">
-          <select value={scopeKey(scope)} onChange={(e) => changeScope(e.target.value)}>
-            {scopeOptions.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select>
-        </Field>
-        <p className="muted" style={{ margin: '-8px 0 0' }}>
-          {form.exact
-            ? 'This replaces the current format for this scope only. Other years’ and vendors’ formats stay as they are.'
-            : 'There is no format for this scope yet; the parts below start from the one that applies today.'}{' '}
-          Trees already registered keep their IDs.
+        <p className="muted" style={{ margin: 0 }}>
+          The format applies to the whole project: every vendor and planting year. Trees already registered keep their IDs.
         </p>
+        {hadVendor && <div className="notice">The vendor is no longer part of tree IDs, so the vendor code and per-vendor numbering have been left out.</div>}
         <div>
           <h3>Parts of the ID, in order</h3>
           <ol className="parts">
@@ -1123,8 +1025,8 @@ function SchemeBuilder({ project, year, initial, codes, onClose }: { project: an
             <button type="button" onClick={() => set({ parts: [...parts, { type: 'TEXT', required: true, value: '', key: nextKey.current++ }] })}>+ Fixed text</button>
           </div>
           <p className="muted" style={{ marginBottom: 0 }}>
-            <strong>Fixed</strong> parts are the same for every tree of a vendor in a year (project, year, vendor, fixed text). <strong>Changing</strong> parts depend on the tree
-            (sector, sub-sector, tree number).
+            <strong>Fixed</strong> parts are the same for every tree in a year (project, year, fixed text). <strong>Changing</strong> parts depend on the tree (sector, sub-sector,
+            tree number).
           </p>
         </div>
         <div className="form-grid">
@@ -1133,7 +1035,7 @@ function SchemeBuilder({ project, year, initial, codes, onClose }: { project: an
               {[['-', 'Hyphen  -'], ['_', 'Underscore  _'], ['/', 'Slash  /'], ['.', 'Dot  .'], ['', 'None']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </Field>
-          <Field label="Tree number digits" hint="zero-padded, e.g. 5 → 00015">
+          <Field label="Tree number digits" hint="zero-padded, e.g. 6 → 000015">
             <input type="number" min={1} max={12} value={width} onChange={(e) => set({ width: Number(e.target.value) })} />
           </Field>
         </div>
@@ -1147,15 +1049,10 @@ function SchemeBuilder({ project, year, initial, codes, onClose }: { project: an
             ))}
           </div>
           <p className="muted">{serialScope.length ? `Unique per ${scopeLabel(serialScope)}.` : 'No boxes ticked: tree numbers are unique globally.'} The full ID is always unique.</p>
-          {vendorInvolved && !isRecommended && (
+          {!isRecommended && (
             <div className="notice">
-              Recommended when vendors are involved: unique per <strong>project + planting year + vendor</strong>, so each vendor numbers its own trees (two vendors may both have tree
-              15). <button type="button" className="link" onClick={() => set({ serialScope: RECOMMENDED_SCOPE })}>Use recommended</button>
-            </div>
-          )}
-          {serialScope.includes('VENDOR') && !hasVendorCode && (
-            <div className="notice warning" style={{ marginTop: 8 }}>
-              Tree numbers are counted per vendor, but the ID has no vendor code: two vendors’ tree 15 would get the same ID. Add the vendor code to the parts.
+              Recommended: unique per <strong>project + planting year</strong>, so tree numbers run in one sequence each year, shared by all vendors.{' '}
+              <button type="button" className="link" onClick={() => set({ serialScope: RECOMMENDED_SCOPE })}>Use recommended</button>
             </div>
           )}
         </div>
@@ -1163,16 +1060,12 @@ function SchemeBuilder({ project, year, initial, codes, onClose }: { project: an
           <h3>Preview</h3>
           <div className="id-preview">{sample.prefix}<span className="serial">{sample.serial}</span></div>
           <p className="muted">
-            Example for {sampleVendor ? `vendor ${sampleVendor.name}` : 'a vendor'}, year {sampleYear}, sector {codes.sector}, sub-sector {codes.subSector}, tree 15. Officers see the
-            prefix filled in and type only the highlighted tree number.
+            Example for year {sampleYear}, sector {codes.sector}, sub-sector {codes.subSector}, tree 15. Officers see the prefix filled in and type only the highlighted tree number.
           </p>
-          {hasVendorCode && sampleVendor && !sampleVendor.code && (
-            <div className="notice warning">{sampleVendor.name} has no short code. Add one under <Link to="/reference">Species, statuses &amp; vendors</Link> before officers register trees.</div>
-          )}
         </div>
         <div className="form-actions">
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={save.isPending}>Publish for: {scopeName}</button>
+          <button className="primary" onClick={submit} disabled={save.isPending}>Publish</button>
         </div>
       </div>
     </Modal>
@@ -1294,19 +1187,16 @@ function AssignmentsTab({ projectId, year }: { projectId: string; year?: Plantin
 }
 
 // ------------------------------------------------------------------ serial ranges
-const KEYABLE = ['PROJECT', 'PLANTING_YEAR', 'VENDOR'];
+const KEYABLE = ['PROJECT', 'PLANTING_YEAR'];
 
 function SerialsTab({ project, year }: { project: any; year?: PlantingYear }) {
   const allocations = useQuery({ queryKey: ['allocations', project.id], queryFn: () => api.get<any[]>(`/serial-allocations${qs({ project_id: project.id })}`) });
   const users = useQuery({ queryKey: ['users'], queryFn: () => api.get<any[]>('/users') });
-  const links = yearLinks(project, year?.id).filter((l) => l.active);
-  const [vendorId, setVendorId] = useState('');
-  const scheme = effectiveScheme(project.tree_id_schemes, vendorId || null, year?.id);
+  const scheme = currentScheme(project.tree_id_schemes);
   const dims: string[] = scheme?.serial_uniqueness_scope ?? [];
-  const needsVendor = dims.includes('VENDOR');
   const f = useForm({ user_id: '', range_start: '', range_end: '', notes: '', scope_key: '' });
-  // Suggest the scope key when it depends only on project, year and vendor; sector-level keys can be pasted.
-  const lookup: Record<string, string | undefined> = { PROJECT: project.id, PLANTING_YEAR: year?.id, VENDOR: vendorId || undefined };
+  // Suggest the scope key when it depends only on project and year; sector-level keys can be pasted.
+  const lookup: Record<string, string | undefined> = { PROJECT: project.id, PLANTING_YEAR: year?.id };
   const suggested =
     scheme && dims.every((d) => KEYABLE.includes(d)) && dims.every((d) => lookup[d])
       ? dims.length === 0
@@ -1352,14 +1242,6 @@ function SerialsTab({ project, year }: { project: any; year?: PlantingYear }) {
         <h3>Allocate a range{year ? ` in ${year.year_label}` : ''}</h3>
         <ErrorNotice error={create.error ?? revoke.error} />
         <div className="form-grid">
-          {links.length > 0 && (
-            <Field label="Vendor" hint={needsVendor ? 'numbers are counted per vendor' : 'optional'}>
-              <select value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
-                <option value="">Choose…</option>
-                {links.map((l) => <option key={l.vendor_id} value={l.vendor_id}>{l.vendor_name}</option>)}
-              </select>
-            </Field>
-          )}
           <Field label="Officer" hint="optional">
             <select {...f.bind('user_id')}>
               <option value="">Any officer in scope</option>
@@ -1369,7 +1251,7 @@ function SerialsTab({ project, year }: { project: any; year?: PlantingYear }) {
           <Field label="First serial"><input required type="number" min={1} {...f.bind('range_start')} /></Field>
           <Field label="Last serial"><input required type="number" min={1} {...f.bind('range_end')} /></Field>
         </div>
-        <Field label="Scope key" hint={suggested ? 'filled from the planting year and vendor' : needsVendor && !vendorId ? 'choose a vendor to fill it' : 'see the format’s uniqueness scope'}>
+        <Field label="Scope key" hint={suggested ? 'filled from the planting year' : 'see the format’s uniqueness scope'}>
           <input className="mono" required value={f.values.scope_key || suggested} onChange={(e) => f.setValues({ ...f.values, scope_key: e.target.value })} />
         </Field>
         <Field label="Notes"><input {...f.bind('notes')} /></Field>

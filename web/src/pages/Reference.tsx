@@ -34,11 +34,11 @@ const CONFIG: Record<Kind, { title: string; singular: string; columns: Col[]; no
   vendors: {
     title: 'Vendors',
     singular: 'vendor',
-    note: 'A new short code applies to new tree IDs only.',
+    note: 'Vendors record who planted a tree; they are not part of tree IDs.',
     name: (r) => r.name,
     columns: [
       { key: 'name', label: 'Name', required: true, main: true },
-      { key: 'short_code', label: 'Short code', hint: 'used in tree IDs', main: true },
+      { key: 'short_code', label: 'Short code', hint: 'e.g. KNM', main: true },
       { key: 'contact_name', label: 'Contact' },
       { key: 'contact_phone', label: 'Phone' },
       { key: 'contact_email', label: 'Email', type: 'email' },

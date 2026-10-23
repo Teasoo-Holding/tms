@@ -100,6 +100,8 @@ export class DeletionController {
     return this.db.tx(async (tx) => {
       const before = await this.db.one(tx, 'SELECT * FROM tree_id_schemes WHERE id = $1 FOR UPDATE', [id]);
       if (!before) throw notFound('ID format');
+      // A project always has one current format; it can be replaced with a new version, not removed.
+      if (before.active) throw conflict('FORMAT_CURRENT', 'This is the project’s current ID format. Change it instead; earlier versions no tree uses can be deleted.');
       await this.refuseIfTrees(tx, 'id_scheme_id = $1', id, 'This ID format');
       await tx.query('DELETE FROM tree_id_schemes WHERE id = $1', [id]);
       await this.log(tx, user, 'tree_id_scheme', before, before.project_id);

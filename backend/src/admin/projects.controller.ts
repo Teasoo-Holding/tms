@@ -6,7 +6,7 @@ import { AuditService } from '../common/audit.service';
 import { badRequest, notFound } from '../common/errors';
 import { isoDate, parse, shortCode } from '../common/validation';
 import { Db, isUniqueViolation } from '../database/db.service';
-import { IdScheme, validateScheme, COMPONENT_TYPES, SCOPE_DIMENSIONS } from '../domain/tree-id';
+import { DEFAULT_SCHEME, IdScheme, retiredSchemeParts, validateScheme, COMPONENT_TYPES, SCOPE_DIMENSIONS } from '../domain/tree-id';
 import { FIELD_TYPES } from '../domain/custom-fields';
 
 const ProjectBody = z.object({
@@ -38,7 +38,7 @@ const SchemeBody = z.object({
   serial_width: z.number().int(),
   serial_uniqueness_scope: z.array(z.enum(SCOPE_DIMENSIONS)),
   active_from: z.string().datetime({ offset: true }).optional(),
-  /** Narrow the format to one vendor and/or one planting year; omit both for the project's default format. */
+  /** Retired: a project has one format for all vendors and years. Still parsed so a stale client gets a clear refusal. */
   vendor_id: z.string().uuid().nullish(),
   planting_year_id: z.string().uuid().nullish(),
 });
@@ -128,6 +128,12 @@ export class ProjectsController {
           throw e;
         });
       await this.audit.record({ actorId: user.id, action: 'project.create', entityType: 'project', entityId: project!.id, projectId: project!.id, after: project }, tx);
+      // Every project has one ID format from the start; the administrator can change it before trees are registered.
+      await tx.query(
+        `INSERT INTO tree_id_schemes (project_id, version, component_definition, separator, serial_width, serial_uniqueness_scope, created_by)
+         VALUES ($1, 1, $2, $3, $4, $5, $6)`,
+        [project!.id, JSON.stringify(DEFAULT_SCHEME.components), DEFAULT_SCHEME.separator, DEFAULT_SCHEME.serialWidth, JSON.stringify(DEFAULT_SCHEME.serialUniquenessScope), user.id],
+      );
       return project;
     });
   }
@@ -197,39 +203,45 @@ export class ProjectsController {
     });
   }
 
-  /** Creates a new ID format version; it becomes current for new registrations. Existing IDs are untouched. */
+  /**
+   * Creates a new version of the project's ID format; it becomes current for new registrations. Existing IDs are untouched.
+   * One format per project: all vendors share one serial sequence per planting year, so formats are not set per vendor or year.
+   */
   @Roles('ADMIN')
   @Post('projects/:id/tree-id-schemes')
   async createScheme(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) projectId: string, @Body() body: unknown) {
     const b = parse(SchemeBody, body);
+    if (b.vendor_id) {
+      throw badRequest('VENDOR_FORMAT_RETIRED', 'Tree ID formats are no longer set per vendor: all vendors on a project share one numbering per planting year. Leave out vendor_id.');
+    }
+    if (b.planting_year_id) {
+      throw badRequest('YEAR_FORMAT_RETIRED', 'Tree ID formats are set once per project (the planting year is a part of the ID). Leave out planting_year_id.');
+    }
     const scheme: IdScheme = {
       separator: b.separator,
       serialWidth: b.serial_width,
       components: b.components,
       serialUniquenessScope: b.serial_uniqueness_scope,
     };
+    const retired = retiredSchemeParts(scheme);
+    if (retired.length) {
+      throw badRequest(
+        'SCHEME_INVALID',
+        'A tree ID can no longer include the vendor code or count tree numbers per vendor: all vendors on a project share one sequence per planting year.',
+        retired,
+      );
+    }
     const problems = validateScheme(scheme);
     if (problems.length) throw badRequest('SCHEME_INVALID', 'The ID format is not valid.', problems);
     return this.db.tx(async (tx) => {
       if (!(await this.db.one(tx, 'SELECT id FROM projects WHERE id = $1 FOR UPDATE', [projectId]))) throw notFound('Project');
-      if (b.planting_year_id && !(await this.db.one(tx, 'SELECT id FROM planting_years WHERE id = $1 AND project_id = $2', [b.planting_year_id, projectId]))) {
-        throw badRequest('PLANTING_YEAR_INVALID', 'The planting year does not belong to this project.');
-      }
-      if (b.vendor_id && !(await this.db.one(tx, 'SELECT id FROM vendors WHERE id = $1', [b.vendor_id]))) throw notFound('Vendor');
       const { rows } = await tx.query('SELECT COALESCE(max(version), 0) + 1 AS v FROM tree_id_schemes WHERE project_id = $1', [projectId]);
-      // Replaces the current format for the same vendor/year scope only; other vendors' formats stay.
-      await tx.query(
-        `UPDATE tree_id_schemes SET active = false, updated_at = now()
-          WHERE project_id = $1 AND active AND vendor_id IS NOT DISTINCT FROM $2 AND planting_year_id IS NOT DISTINCT FROM $3`,
-        [projectId, b.vendor_id ?? null, b.planting_year_id ?? null],
-      );
+      await tx.query('UPDATE tree_id_schemes SET active = false, updated_at = now() WHERE project_id = $1 AND active', [projectId]);
       const created = await this.db.one(
         tx,
-        `INSERT INTO tree_id_schemes (project_id, version, component_definition, separator, serial_width, serial_uniqueness_scope, active_from, created_by,
-                                      vendor_id, planting_year_id)
-         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, now()), $8, $9, $10) RETURNING *`,
-        [projectId, rows[0].v, JSON.stringify(b.components), b.separator, b.serial_width, JSON.stringify(b.serial_uniqueness_scope), b.active_from ?? null, user.id,
-          b.vendor_id ?? null, b.planting_year_id ?? null],
+        `INSERT INTO tree_id_schemes (project_id, version, component_definition, separator, serial_width, serial_uniqueness_scope, active_from, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, now()), $8) RETURNING *`,
+        [projectId, rows[0].v, JSON.stringify(b.components), b.separator, b.serial_width, JSON.stringify(b.serial_uniqueness_scope), b.active_from ?? null, user.id],
       );
       await this.audit.record({ actorId: user.id, action: 'tree_id_scheme.create', entityType: 'tree_id_scheme', entityId: created!.id, projectId, after: created }, tx);
       return created;
@@ -290,7 +302,7 @@ export class ProjectsController {
     });
   }
 
-  /** Retires a vendor- or year-specific format so the broader one applies again (the project default cannot be retired). */
+  /** Retires a legacy vendor- or year-specific format (none stay active since migration 007; the project format cannot be retired). */
   @Roles('ADMIN')
   @Post('tree-id-schemes/:id/retire')
   async retireScheme(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {

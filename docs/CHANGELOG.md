@@ -7,6 +7,33 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-10-23: Simpler field app, project/year tree IDs, density map (migration 007)
+- **Android:**
+  - The home screen has a large "Start field session" button. During a session it shows one large "Register trees" button and a red "End session" button. "Map" and "Visit trees" are gone; use Find a tree to visit a tree.
+  - The app no longer asks for the type of visit or the planting date. Date and time are recorded automatically, and the planting date is the day the tree is registered.
+  - The sub-sector is a drop-down.
+  - Photos show on the form with Retake and Remove.
+  - A "Tree registered" confirmation appears after each save, before the next form.
+  - My visits is grouped by day; open a day to see what was recorded, with photos.
+  - The tree's photo shows wherever the tree is shown.
+  - Text and buttons are larger.
+  - Administration has a density map.
+- **Tree IDs:**
+  - Each project has one format, shared by all vendors, and tree numbers run on per project and planting year.
+  - Migration 007 retires vendor and year formats and removes the vendor part from project formats.
+  - New formats can't contain a vendor part.
+  - Existing IDs stay valid.
+- **Backend:**
+  - `GET /reports/density` and `GET /share/:token/density` return each area's hectares, trees, trees per hectare and alive share.
+  - `GET /trees/:id/media` returns a tree's photos.
+  - Visit type defaults to Visit.
+  - `planted_on` defaults to the date of the first visit.
+- **Web:**
+  - A "Density map" page, also on the client share page.
+  - Photos on the tree page (the latest shown large), in each visits row and in conflict review.
+  - The visit-type filter and the planted-on field are removed.
+  - A single ID format per project.
+
 ## 2026-10-22: PR #21. Deletion, clear data, client sharing, backups (migration 006)
 - **Backend:** reference data can be deleted, and phones drop deleted rows. Admins can clear all data (needs a
   typed confirmation and their password). Clients get read-only share links per project. Admins can export

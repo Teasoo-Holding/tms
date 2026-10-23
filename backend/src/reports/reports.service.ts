@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AccessService } from '../common/access.service';
 import { AuthUser } from '../common/auth.decorators';
+import { notFound } from '../common/errors';
 import { Db } from '../database/db.service';
 
 export interface ReportFilter {
@@ -278,5 +279,92 @@ export class ReportsService {
       params,
     );
     return rows;
+  }
+
+  /**
+   * Tree density per sector and sub-sector of one project (optionally one planting year's survey, plus older
+   * areas not tied to a year). Trees have no GPS, so density is registered trees over the area's surveyed
+   * outline. Counts are active registry records, scoped to the user's grants; "alive" and "dead" follow each
+   * tree's current status, and alive_share is alive / (alive + dead), leaving out trees not yet observed.
+   */
+  async density(user: AuthUser, projectId: string, plantingYearId?: string) {
+    await this.access.assertProject(user, projectId);
+    const project = await this.db.one(this.db, 'SELECT id, name, short_code FROM projects WHERE id = $1', [projectId]);
+    if (!project) throw notFound('Project');
+    const year = plantingYearId
+      ? await this.db.one(this.db, 'SELECT id, year_label FROM planting_years WHERE id = $1 AND project_id = $2', [plantingYearId, projectId])
+      : null;
+    if (plantingYearId && !year) throw notFound('Planting year');
+
+    const grants = await this.access.grants(user);
+    const params: unknown[] = [projectId, plantingYearId ?? null];
+    const g = this.access.treeFilter(grants, 't', params.length + 1);
+    params.push(...g.params);
+    const counts = `
+      SELECT t.sector_id, t.sub_sector_id, count(*)::int AS registered_trees,
+             count(*) FILTER (WHERE st.id IS NOT NULL AND NOT st.is_terminal)::int AS alive_trees,
+             count(*) FILTER (WHERE st.is_terminal)::int AS dead_trees,
+             count(*) FILTER (WHERE st.id IS NULL)::int AS unknown_trees
+        FROM trees t LEFT JOIN tree_statuses st ON st.id = t.current_status_id
+       WHERE t.record_state = 'ACTIVE' AND t.project_id = $1 AND ($2::uuid IS NULL OR t.planting_year_id = $2) AND ${g.sql}
+       GROUP BY t.sector_id, t.sub_sector_id`;
+    // Shared column list: area and outline of [geom], plus tree counts summed from [c].
+    const stats = (alias: string) => `
+      ${alias}.short_code, ${alias}.name, ${alias}.active,
+      ${alias}.reference_latitude::float8 AS reference_latitude, ${alias}.reference_longitude::float8 AS reference_longitude,
+      ST_AsGeoJSON(${alias}.boundary_geometry, 7)::json AS boundary,
+      ROUND((ST_Area(${alias}.boundary_geometry::geography) / 10000)::numeric, 4)::float8 AS area_hectares,
+      COALESCE(sum(c.registered_trees), 0)::int AS registered_trees, COALESCE(sum(c.alive_trees), 0)::int AS alive_trees,
+      COALESCE(sum(c.dead_trees), 0)::int AS dead_trees, COALESCE(sum(c.unknown_trees), 0)::int AS unknown_trees`;
+    const inYear = `($2::uuid IS NULL OR s.planting_year_id = $2 OR s.planting_year_id IS NULL)`;
+    const [sectors, subSectors] = await Promise.all([
+      this.db.query(
+        `WITH c AS (${counts})
+         SELECT s.id, s.planting_year_id, py.year_label, ${stats('s')}
+           FROM sectors s LEFT JOIN planting_years py ON py.id = s.planting_year_id LEFT JOIN c ON c.sector_id = s.id
+          WHERE s.project_id = $1 AND ${inYear}
+          GROUP BY s.id, py.year_label
+         HAVING s.active OR COALESCE(sum(c.registered_trees), 0) > 0
+          ORDER BY s.short_code, py.year_label`,
+        params,
+      ),
+      this.db.query(
+        `WITH c AS (${counts})
+         SELECT ss.id, ss.sector_id, ${stats('ss')}
+           FROM sub_sectors ss JOIN sectors s ON s.id = ss.sector_id LEFT JOIN c ON c.sub_sector_id = ss.id
+          WHERE ss.project_id = $1 AND ${inYear}
+          GROUP BY ss.id, s.id
+         HAVING (ss.active AND s.active) OR COALESCE(sum(c.registered_trees), 0) > 0
+          ORDER BY ss.short_code`,
+        params,
+      ),
+    ]);
+
+    const withRates = <T extends { area_hectares: number | null; registered_trees: number; alive_trees: number; dead_trees: number }>(r: T) => ({
+      ...r,
+      trees_per_hectare: r.area_hectares ? Math.round((r.registered_trees / r.area_hectares) * 10) / 10 : null,
+      alive_share: r.alive_trees + r.dead_trees ? Math.round((r.alive_trees / (r.alive_trees + r.dead_trees)) * 1000) / 1000 : null,
+    });
+    const areas = sectors.rows.map((s) => ({
+      kind: 'sector' as const,
+      ...withRates(s),
+      sub_sectors: subSectors.rows.filter((ss) => ss.sector_id === s.id).map((ss) => ({ kind: 'sub_sector' as const, ...withRates(ss) })),
+    }));
+    const sum = (k: 'registered_trees' | 'alive_trees' | 'dead_trees' | 'unknown_trees') => areas.reduce((n, a) => n + a[k], 0);
+    const hectares = areas.reduce((n, a) => n + (a.area_hectares ?? 0), 0);
+    const totals = withRates({
+      registered_trees: sum('registered_trees'),
+      alive_trees: sum('alive_trees'),
+      dead_trees: sum('dead_trees'),
+      unknown_trees: sum('unknown_trees'),
+      area_hectares: Math.round(hectares * 10000) / 10000,
+    });
+    return {
+      generated_at: new Date().toISOString(),
+      project,
+      planting_year: year,
+      totals,
+      sectors: areas,
+    };
   }
 }
