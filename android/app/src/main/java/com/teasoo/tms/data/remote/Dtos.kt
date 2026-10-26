@@ -156,6 +156,19 @@ data class BootstrapResponse(
     @SerialName("custom_fields") val customFields: List<CustomFieldDto> = emptyList(),
     @SerialName("planting_year_vendors") val plantingYearVendors: List<PlantingYearVendorDto> = emptyList(),
     @SerialName("data_generation") val dataGeneration: Long = 1,
+    @SerialName("species_images") val speciesImages: List<SpeciesImageDto> = emptyList(),
+)
+
+@Serializable
+data class SpeciesImageDto(
+    val id: String,
+    @SerialName("species_id") val speciesId: String,
+    @SerialName("sort_order") val sortOrder: Int = 0,
+    val caption: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    @SerialName("byte_size") val byteSize: Long? = null,
+    @SerialName("updated_at") val updatedAt: String? = null,
 )
 
 // ---------------------------------------------------------------- field records

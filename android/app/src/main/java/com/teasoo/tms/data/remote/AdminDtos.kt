@@ -641,3 +641,6 @@ data class AnalyticsSummary(
     @SerialName("officer_activity") val officers: List<AnalyticsOfficer> = emptyList(),
     val notes: List<String> = emptyList(),
 )
+
+@kotlinx.serialization.Serializable
+data class SpeciesImagesResponse(val images: List<SpeciesImageDto>)

@@ -42,7 +42,7 @@ class LocalStoreTest {
         trees = TreeRepository(db)
         // The engine's network collaborators are not exercised by these tests.
         val api = Proxy.newProxyInstance(TmsApi::class.java.classLoader, arrayOf(TmsApi::class.java)) { _, _, _ -> error("no network in tests") } as TmsApi
-        engine = SyncEngine(db, api, SessionStore(context), ReferenceRepository(db), OkHttpClient())
+        engine = SyncEngine(db, api, SessionStore(context), ReferenceRepository(db), OkHttpClient(), SpeciesImageStore(context, api, db))
         engine.retentionDays = 0 // offloading rules are tested directly; retention has its own test
         val r = db.reference()
         r.upsertProjects(listOf(ProjectEntity("p1", "Trees for Life", "T4L", "ACTIVE", "PROJECT", null)))
@@ -311,6 +311,20 @@ class LocalStoreTest {
     }
 
     @Test
+    fun speciesReferencePhotosFollowServerChanges() = runBlocking {
+        val repo = ReferenceRepository(db)
+        fun change(seq: Long, id: String, order: Int, deleted: Boolean = false) = ChangeDto(
+            seq, "species_image",
+            buildJsonObject { put("id", id); if (!deleted) { put("species_id", "sp1"); put("sort_order", order); put("width", 1200); put("height", 1600) } },
+            deleted,
+        )
+        repo.applyChanges(ChangesResponse(listOf(change(1, "img2", 1), change(2, "img1", 0)), "2", false, "x"))
+        assertEquals(listOf("img1", "img2"), db.reference().speciesImages().first().map { it.id })
+        repo.applyChanges(ChangesResponse(listOf(change(3, "img1", 0, deleted = true)), "3", false, "x"))
+        assertEquals(listOf("img2"), db.reference().speciesImages().first().map { it.id })
+    }
+
+    @Test
     fun serverDeletionsRemoveConfigurationFromThePhone() = runBlocking {
         val tomb = ChangesResponse(
             changes = listOf(ChangeDto(1, "species", buildJsonObject { put("id", "sp1") }, deleted = true)),
@@ -326,7 +340,7 @@ class LocalStoreTest {
         val api = Proxy.newProxyInstance(TmsApi::class.java.classLoader, arrayOf(TmsApi::class.java)) { _, m, _ ->
             if (m.name == "changes") ChangesResponse(emptyList(), "0", false, "x", dataGeneration = generation.get()) else error("no network in tests")
         } as TmsApi
-        val e = SyncEngine(db, api, SessionStore(context), ReferenceRepository(db), OkHttpClient())
+        val e = SyncEngine(db, api, SessionStore(context), ReferenceRepository(db), OkHttpClient(), SpeciesImageStore(context, api, db))
         var backedUp = 0
         e.onReset = { backedUp++ }
         e.checkDataGeneration() // first contact: remembers generation 1

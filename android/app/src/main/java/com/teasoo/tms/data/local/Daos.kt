@@ -60,6 +60,11 @@ interface ReferenceDao {
     @Query("DELETE FROM sectors WHERE id = :id") suspend fun deleteSector(id: String)
     @Query("DELETE FROM sub_sectors WHERE id = :id") suspend fun deleteSubSector(id: String)
     @Query("DELETE FROM species WHERE id = :id") suspend fun deleteSpecies(id: String)
+    @Query("SELECT * FROM species_images ORDER BY speciesId, sortOrder, id") fun speciesImages(): Flow<List<SpeciesImageEntity>>
+    @Query("SELECT * FROM species_images") suspend fun allSpeciesImages(): List<SpeciesImageEntity>
+    @Upsert suspend fun upsertSpeciesImages(rows: List<SpeciesImageEntity>)
+    @Query("DELETE FROM species_images WHERE id = :id") suspend fun deleteSpeciesImage(id: String)
+    @Query("DELETE FROM species_images WHERE id NOT IN (:keep)") suspend fun pruneSpeciesImages(keep: List<String>)
     @Query("DELETE FROM statuses WHERE id = :id") suspend fun deleteStatus(id: String)
     @Query("DELETE FROM vendors WHERE id = :id") suspend fun deleteVendor(id: String)
     @Query("DELETE FROM assignments WHERE id = :id") suspend fun deleteAssignment(id: String)

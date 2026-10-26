@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.teasoo.tms.data.local.*
 import com.teasoo.tms.data.remote.*
 import com.teasoo.tms.data.repo.ReferenceRepository
+import com.teasoo.tms.data.repo.SpeciesImageStore
 import com.teasoo.tms.data.session.SessionState
 import com.teasoo.tms.data.session.SessionStore
 import com.teasoo.tms.domain.Backoff
@@ -41,6 +42,7 @@ class SyncEngine @Inject constructor(
     private val session: SessionStore,
     private val reference: ReferenceRepository,
     @Named("upload") private val uploadClient: OkHttpClient,
+    private val speciesImages: SpeciesImageStore,
 ) {
     suspend fun run(): SyncOutcome {
         val current = session.current() as? SessionState.Active ?: return SyncOutcome.Blocked("Sign in to sync.")
@@ -52,6 +54,8 @@ class SyncEngine @Inject constructor(
             uploadMedia()
             pull()
             cleanupMedia()
+            // Reference photos are a convenience: a failed download never fails the sync.
+            runCatching { speciesImages.prefetch() }
             db.kv().put(KeyValueEntity(Keys.LAST_SUCCESSFUL_SYNC, Instant.now().toString()))
             db.kv().remove(Keys.LAST_SYNC_ERROR)
             SyncOutcome.Success

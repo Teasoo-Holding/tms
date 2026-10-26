@@ -95,6 +95,66 @@ private val TREE_COLOR = Color(0xFF4CAF50)
 
 fun formatHeight(cm: Double): String = if (cm >= 100) "%.2f m".format(cm / 100) else "${cm.roundToInt()} cm"
 
+/** Units a height can be typed in, with their size in centimetres. Heights are stored in centimetres. */
+enum class HeightUnit(val code: String, val label: String, val cm: Double) {
+    CM("cm", "cm", 1.0), M("m", "m", 100.0), IN("in", "inches", 2.54), FT("ft", "feet", 30.48);
+
+    companion object {
+        fun of(code: String?) = entries.find { it.code == code } ?: CM
+    }
+}
+
+private fun formatIn(cm: Double, unit: HeightUnit): String {
+    val v = cm / unit.cm
+    return if (v == kotlin.math.floor(v)) v.toLong().toString() else "%.2f".format(java.util.Locale.US, v).trimEnd('0').trimEnd('.')
+}
+
+/** Optional tree height: a number and its unit (cm unless the officer picks another, which is remembered). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HeightInput(cm: Double?, onChange: (Double?) -> Unit, unit: HeightUnit, onUnit: (HeightUnit) -> Unit) {
+    var text by remember { mutableStateOf(cm?.let { formatIn(it, unit) }.orEmpty()) }
+    // A cleared form (next tree) clears the box too.
+    LaunchedEffect(cm) { if (cm == null && text.toDoubleOrNull() != null) text = "" }
+    var menu by remember { mutableStateOf(false) }
+    val value = text.replace(',', '.').toDoubleOrNull()
+    val invalid = text.isNotBlank() && (value == null || value <= 0 || value * unit.cm > 10_000)
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            text,
+            { raw ->
+                text = raw.filter { it.isDigit() || it == '.' || it == ',' }.take(8)
+                val v = text.replace(',', '.').toDoubleOrNull()
+                onChange(v?.takeIf { it > 0 && it * unit.cm <= 10_000 }?.let { it * unit.cm })
+            },
+            label = { Text("Tree height (optional)") },
+            singleLine = true, isError = invalid,
+            supportingText = if (invalid) { { Text("Enter a height up to 100 m.") } } else null,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.weight(1f),
+        )
+        ExposedDropdownMenuBox(menu, { menu = it }, modifier = Modifier.width(132.dp)) {
+            OutlinedTextField(
+                unit.label, {}, readOnly = true, label = { Text("Unit") }, singleLine = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(menu) },
+                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            )
+            ExposedDropdownMenu(menu, { menu = false }) {
+                HeightUnit.entries.forEach { u ->
+                    DropdownMenuItem(text = { Text(u.label) }, onClick = {
+                        menu = false
+                        if (u != unit) {
+                            onUnit(u)
+                            // Keep the same height, shown in the new unit.
+                            cm?.let { text = formatIn(it, u) }
+                        }
+                    })
+                }
+            }
+        }
+    }
+}
+
 /** Height entry for an observation: type it in, or measure it on the photo just taken. */
 @Composable
 fun HeightSection(

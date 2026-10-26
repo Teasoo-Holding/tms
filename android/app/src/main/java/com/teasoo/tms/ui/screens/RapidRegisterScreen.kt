@@ -287,11 +287,11 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
                 )
             }
 
-            Picker("Species", species, species.find { it.id == s?.speciesId }, { it.commonName?.let { c -> "$c (${it.scientificName})" } ?: it.scientificName },
-                { vm.setSpecies(it.id) })
+            SpeciesChooser(species, s?.speciesId, vm::setSpecies)
             StatusSelector(statuses, s?.statusId, vm::setStatus)
             PhotoCapture(e.photos, vm.photoStore, onAdd = vm::addPhoto, onRemove = vm::removePhoto, required = photoMissing)
             if (SHOW_HEIGHT) HeightSection(e.height, vm::setHeight, e.photos, referenceCm, vm::setReferenceCm)
+            else HeightField(e.height, vm::setHeight)
             CustomFieldsForm(treeFieldDefs, e.treeFields, vm::setTreeField, showFieldErrors)
             CustomFieldsForm(observationFieldDefs, e.observationFields, vm::setObservationField, showFieldErrors)
 

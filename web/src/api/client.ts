@@ -118,9 +118,11 @@ async function send(url: string, init: RequestInit): Promise<Response> {
 
 async function raw(method: string, path: string, body: unknown, authed: boolean, retry = true): Promise<any> {
   const headers: Record<string, string> = {};
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  // Multipart bodies (file uploads) get their Content-Type, with the boundary, from the browser.
+  const form = body instanceof FormData;
+  if (body !== undefined && !form) headers['Content-Type'] = 'application/json';
   if (authed && session) headers.Authorization = `Bearer ${session.access_token}`;
-  const res = await send(BASE + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const res = await send(BASE + path, { method, headers, body: body === undefined ? undefined : form ? body : JSON.stringify(body) });
   const text = await res.text();
   let data: any = null;
   try {
@@ -144,6 +146,16 @@ export const api = {
   post: <T = any>(path: string, body?: unknown) => raw('POST', path, body ?? {}, true) as Promise<T>,
   patch: <T = any>(path: string, body: unknown) => raw('PATCH', path, body, true) as Promise<T>,
   del: <T = any>(path: string) => raw('DELETE', path, undefined, true) as Promise<T>,
+  /** Multipart upload (FormData with files). */
+  upload: <T = any>(path: string, form: FormData) => raw('POST', path, form, true) as Promise<T>,
+  /** An authenticated binary response (e.g. an image), for use as an object URL. */
+  async blob(path: string): Promise<Blob> {
+    const go = () => send(BASE + path, { headers: { Authorization: `Bearer ${session?.access_token}` } });
+    let res = await go();
+    if (res.status === 401 && (await refresh())) res = await go();
+    if (!res.ok) throw new ApiError(res.status, 'DOWNLOAD_FAILED', 'The file could not be loaded.');
+    return res.blob();
+  },
   /** Downloads an authenticated file (exports). */
   async download(path: string, filename: string) {
     const go = () => send(BASE + path, { headers: { Authorization: `Bearer ${session?.access_token}` } });

@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import request from 'supertest';
+import sharp from 'sharp';
 import { bootApp, resetDatabase, Session, sql } from './harness';
 import { createOp, Fixtures, loadFixtures, observationOp, treePayload } from './fixtures';
 
@@ -697,6 +698,106 @@ describe('planting date, photos and the tree-density map', () => {
     const link = (await admin.post(`/projects/${f.projectId}/share-links`, { label: 'Density' }).expect(201)).body;
     const shared = (await request(app.getHttpServer()).get(`/api/v1/share/${link.token}/density?planting_year_id=${year}`).expect(200)).body;
     expect(shared.sectors.find((x: any) => x.id === sector).registered_trees).toBe(3);
+  });
+});
+
+describe('species reference images', () => {
+  let speciesId: string;
+  let ids: string[];
+  const png = (w: number, h: number) => sharp({ create: { width: w, height: h, channels: 3, background: { r: 30, g: 120, b: 40 } } }).png().toBuffer();
+  const upload = (s: Session, id: string) => request(app.getHttpServer()).post(`/api/v1/admin/species/${id}/images`).set('Authorization', `Bearer ${s.token}`);
+  const bytes = (req: request.Test) =>
+    req.buffer(true).parse((res, cb) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+
+  beforeAll(async () => {
+    speciesId = (await admin.post('/tree-species', { scientific_name: 'Picturus exemplaris', common_name: 'Picture tree' }).expect(201)).body.id;
+  });
+
+  it('lets an administrator upload several photos, re-encoded with thumbnails, in order', async () => {
+    const res = await upload(admin, speciesId)
+      .attach('file', await png(2400, 1200), { filename: 'wide.png', contentType: 'image/png' })
+      .attach('file', await sharp({ create: { width: 300, height: 500, channels: 3, background: '#884422' } }).jpeg().toBuffer(), { filename: 'small.jpg', contentType: 'image/jpeg' })
+      .expect(201);
+    expect(res.body.images).toHaveLength(2);
+    expect(res.body.images[0]).toEqual({
+      id: expect.any(String), species_id: speciesId, sort_order: 0, caption: null, width: 1600, height: 800, byte_size: expect.any(Number), updated_at: expect.any(String),
+    });
+    expect(res.body.images[1]).toMatchObject({ sort_order: 1, width: 300, height: 500 }); // never enlarged
+    ids = res.body.images.map((i: any) => i.id);
+    const more = await upload(admin, speciesId).attach('file', await png(100, 100), { filename: 'c.png', contentType: 'image/png' }).expect(201);
+    expect(more.body.images[0].sort_order).toBe(2);
+    ids.push(more.body.images[0].id);
+    const [audit] = await sql(`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'species_image.create'`);
+    expect(audit.n).toBe(3);
+  });
+
+  it('refuses other users, other file types and unreadable images', async () => {
+    await upload(officer, speciesId).attach('file', await png(10, 10), { filename: 'a.png', contentType: 'image/png' }).expect(403);
+    const gif = await upload(admin, speciesId).attach('file', Buffer.from('GIF89a'), { filename: 'a.gif', contentType: 'image/gif' }).expect(400);
+    expect(gif.body.code).toBe('IMAGE_TYPE_UNSUPPORTED');
+    const broken = await upload(admin, speciesId).attach('file', Buffer.from('not an image'), { filename: 'b.jpg', contentType: 'image/jpeg' }).expect(400);
+    expect(broken.body.code).toBe('IMAGE_INVALID');
+    expect((await upload(admin, speciesId).expect(400)).body.code).toBe('IMAGE_REQUIRED');
+    const big = await upload(admin, speciesId).attach('file', Buffer.alloc(15 * 1024 * 1024 + 1), { filename: 'big.jpg', contentType: 'image/jpeg' }).expect(400);
+    expect(big.body.code).toBe('IMAGE_TOO_LARGE');
+    await officer.patch(`/admin/species-images/${ids[0]}`, { caption: 'x' }).expect(403);
+    await officer.del(`/admin/species-images/${ids[0]}`).expect(403);
+  });
+
+  it('lists and serves the images to any signed-in user', async () => {
+    const list = await exec.get(`/species/${speciesId}/images`).expect(200);
+    expect(list.body.images.map((i: any) => i.id)).toEqual(ids);
+    const thumb = await bytes(officer.get(`/species-images/${ids[0]}/content?size=thumb`)).expect(200);
+    expect(thumb.headers['content-type']).toBe('image/jpeg');
+    expect(thumb.headers['cache-control']).toBe('private, max-age=86400');
+    const tm = await sharp(thumb.body as Buffer).metadata();
+    expect([tm.format, tm.width, tm.height]).toEqual(['jpeg', 400, 200]);
+    const full = await bytes(officer.get(`/species-images/${ids[0]}/content`)).expect(200);
+    expect((full.body as Buffer).length).toBe(list.body.images[0].byte_size);
+    expect((await sharp(full.body as Buffer).metadata()).width).toBe(1600);
+    await officer.get(`/species-images/${randomUUID()}/content`).expect(404);
+    await request(app.getHttpServer()).get(`/api/v1/species-images/${ids[0]}/content`).expect(401);
+  });
+
+  it('reorders, captions and deletes, and phones receive the changes', async () => {
+    const boot = await officer.get('/mobile/bootstrap').expect(200);
+    expect(boot.body.species_images.filter((i: any) => i.species_id === speciesId).map((i: any) => i.id).sort()).toEqual([...ids].sort());
+    const cursor = boot.body.cursor;
+
+    const patched = await admin.patch(`/admin/species-images/${ids[2]}`, { sort_order: -1, caption: 'Leaves' }).expect(200);
+    expect(patched.body).toMatchObject({ id: ids[2], sort_order: -1, caption: 'Leaves' });
+    expect((await admin.get(`/species/${speciesId}/images`).expect(200)).body.images[0].id).toBe(ids[2]);
+    expect((await admin.patch(`/admin/species-images/${ids[2]}`, { caption: null }).expect(200)).body.caption).toBeNull();
+    await admin.patch(`/admin/species-images/${ids[2]}`, {}).expect(400);
+
+    const [{ object_key: key }] = await sql('SELECT object_key FROM species_images WHERE id = $1', [ids[1]]);
+    await admin.del(`/admin/species-images/${ids[1]}`).expect(204);
+    await admin.del(`/admin/species-images/${ids[1]}`).expect(404);
+    await officer.get(`/species-images/${ids[1]}/content`).expect(404);
+    const changes = (await officer.get(`/sync/changes?cursor=${cursor}`).expect(200)).body.changes.filter((c: any) => c.entity_type === 'species_image');
+    expect(changes).toEqual([
+      expect.objectContaining({ entity_type: 'species_image', data: expect.objectContaining({ id: ids[2], caption: null, sort_order: -1 }) }),
+      expect.objectContaining({ entity_type: 'species_image', deleted: true, data: { id: ids[1] } }),
+    ]);
+    const actions = await sql(`SELECT action FROM audit_logs WHERE entity_type = 'species_image' AND action <> 'species_image.create' ORDER BY created_at`);
+    expect(actions.map((a) => a.action)).toEqual(['species_image.update', 'species_image.update', 'species_image.delete']);
+    await new Promise((r) => setTimeout(r, 50)); // stored files are removed after the response
+    expect(fs.existsSync(path.join(process.env.LOCAL_STORAGE_DIR!, key))).toBe(false);
+  });
+
+  it('removes the photos with their species', async () => {
+    const cursor = (await officer.get('/mobile/bootstrap').expect(200)).body.cursor;
+    const [{ thumb_key: key }] = await sql('SELECT thumb_key FROM species_images WHERE id = $1', [ids[0]]);
+    await admin.del(`/tree-species/${speciesId}`).expect(200);
+    expect(await sql('SELECT count(*)::int AS n FROM species_images WHERE species_id = $1', [speciesId])).toEqual([{ n: 0 }]);
+    const tombstones = (await officer.get(`/sync/changes?cursor=${cursor}`).expect(200)).body.changes.filter((c: any) => c.deleted);
+    expect(tombstones.map((c: any) => c.entity_type).sort()).toEqual(['species', 'species_image', 'species_image']);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fs.existsSync(path.join(process.env.LOCAL_STORAGE_DIR!, key))).toBe(false);
   });
 });
 

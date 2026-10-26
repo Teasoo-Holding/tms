@@ -116,7 +116,7 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
 
             val heights = observations.filter { it.id !in superseded && it.heightCm != null }
                 .mapNotNull { o -> runCatching { java.time.Instant.parse(o.observedAt) }.getOrNull()?.let { it to o.heightCm!! } }
-            if (SHOW_HEIGHT && heights.isNotEmpty()) {
+            if (heights.isNotEmpty()) {
                 Text("Growth", style = MaterialTheme.typography.titleMedium)
                 ElevatedCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -144,7 +144,7 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
                             "Recorded by ${if (o.recordedBy == userId) "you" else o.recordedByName ?: "another user"}",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        if (SHOW_HEIGHT) o.heightCm?.let { cm ->
+                        o.heightCm?.let { cm ->
                             Text("Height ${formatHeight(cm)}" + if (o.heightMethod == "PHOTO_REFERENCE") " · measured on photo" else "", style = MaterialTheme.typography.bodyMedium)
                         }
                         displayFields(fieldDefs.filter { it.appliesTo == "OBSERVATION" }, o.customFieldsJson).forEach { (label, value) ->

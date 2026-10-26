@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Eco
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material3.*
@@ -83,6 +84,7 @@ fun ReferenceDataScreen(onBack: () -> Unit, vm: ReferenceDataViewModel = hiltVie
     var tab by rememberSaveable { mutableStateOf(RefTab.SPECIES) }
     var editing by remember { mutableStateOf<Any?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var photosFor by remember { mutableStateOf<AdminSpeciesDto?>(null) }
     val actions = rememberItemActions()
     CollectMessages(vm, snackbar)
 
@@ -118,6 +120,7 @@ fun ReferenceDataScreen(onBack: () -> Unit, vm: ReferenceDataViewModel = hiltVie
                             onActions = {
                                 actions.open(
                                     s.displayName(), onEdit = edit, active = s.active,
+                                    extra = listOf(SheetAction("Reference photos", Icons.Default.PhotoLibrary) { photosFor = s }),
                                     onSetActive = { on -> vm.saveSpecies(s.id, SpeciesRequest(s.scientificName, s.commonName, s.code, on)) },
                                     delete = PendingDelete(s.displayName(), run = { done -> vm.deleteSpecies(s, done) },
                                         deactivate = { done: () -> Unit -> vm.saveSpecies(s.id, SpeciesRequest(s.scientificName, s.commonName, s.code, false), done); Unit }.takeIf { s.active }),
@@ -171,6 +174,7 @@ fun ReferenceDataScreen(onBack: () -> Unit, vm: ReferenceDataViewModel = hiltVie
     }
 
     ItemActionsHost(actions, vm)
+    photosFor?.let { s -> SpeciesPhotosDialog(s, onClose = { photosFor = null }) }
     val close = { adding = false; editing = null }
     when (val e = editing) {
         is AdminSpeciesDto -> SpeciesDialog(e, saving, formError, { vm.saveSpecies(e.id, it, close) }, close)

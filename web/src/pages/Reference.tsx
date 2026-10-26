@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 import { api } from '../api/client';
+import { SpeciesCover, SpeciesImagesEditor } from '../components/SpeciesImages';
 import { ActivePill, Chevron, clean, Details, EmptyState, ErrorNotice, Field, Modal, PageHeader, RowMenu, Tabs, useDelete, useForm } from '../components/ui';
 
 export type Kind = 'tree-species' | 'tree-statuses' | 'vendors';
@@ -58,6 +59,7 @@ export function ReferencePage() {
   const main = cfg.columns.filter((c) => c.main);
   const rest = cfg.columns.filter((c) => !c.main);
   const show = (c: Col, r: any) => (c.type === 'bool' ? (r[c.key] ? 'Yes' : 'No') : r[c.key] ?? '—');
+  const photos = kind === 'tree-species';
   return (
     <div>
       <PageHeader title="Lists" actions={<button className="primary" onClick={() => setEditing({})}>+ {cfg.singular[0].toUpperCase() + cfg.singular.slice(1)}</button>} />
@@ -69,6 +71,7 @@ export function ReferencePage() {
             <thead>
               <tr>
                 <th className="expander" />
+                {photos && <th>Photo</th>}
                 {main.map((c) => <th key={c.key}>{c.label}</th>)}
                 <th>State</th>
                 <th className="actions" />
@@ -79,6 +82,7 @@ export function ReferencePage() {
                 <Fragment key={r.id}>
                   <tr className="clickable" onClick={() => setOpen(open === r.id ? null : r.id)} aria-expanded={open === r.id}>
                     <td className="expander"><Chevron open={open === r.id} /></td>
+                    {photos && <td><SpeciesCover speciesId={r.id} name={cfg.name(r)} /></td>}
                     {main.map((c) => <td key={c.key} className={c.key === 'short_code' ? 'mono' : ''}>{show(c, r)}</td>)}
                     <td><ActivePill active={r.active} /></td>
                     <td className="actions">
@@ -86,7 +90,7 @@ export function ReferencePage() {
                         items={[
                           { label: 'Edit', onClick: () => setEditing(r) },
                           { label: r.active ? 'Deactivate' : 'Activate', onClick: () => toggle.mutate(r) },
-                          { label: 'Delete', danger: true, onClick: () => del.ask({ what: cfg.singular, name: cfg.name(r), path: `/${kind}/${r.id}` }) },
+                          { label: 'Delete', danger: true, onClick: () => del.ask({ what: cfg.singular, name: cfg.name(r), path: `/${kind}/${r.id}`, note: photos ? 'Its photos are deleted with it.' : undefined }) },
                         ]}
                       />
                     </td>
@@ -94,7 +98,7 @@ export function ReferencePage() {
                   {open === r.id && (
                     <tr className="details-row">
                       <td />
-                      <td colSpan={main.length + 2}>
+                      <td colSpan={main.length + (photos ? 3 : 2)}>
                         <Details items={rest.map((c) => [c.label, show(c, r)])} />
                       </td>
                     </tr>
@@ -128,7 +132,7 @@ export function ReferenceForm({ kind, row, onClose }: { kind: Kind; row: any; on
     onSuccess: onClose,
   });
   return (
-    <Modal title={`${isNew ? 'Add' : 'Edit'} ${cfg.singular}`} onClose={onClose}>
+    <Modal title={`${isNew ? 'Add' : 'Edit'} ${cfg.singular}`} onClose={onClose} wide={kind === 'tree-species' && !isNew}>
       <form className="stack" onSubmit={(e) => (e.preventDefault(), save.mutate())}>
         <ErrorNotice error={save.error} />
         {!isNew && cfg.note && <p className="muted" style={{ margin: 0 }}>{cfg.note}</p>}
@@ -147,6 +151,12 @@ export function ReferenceForm({ kind, row, onClose }: { kind: Kind; row: any; on
           <button className="primary" disabled={save.isPending}>Save</button>
         </div>
       </form>
+      {kind === 'tree-species' && (
+        <section className="stack" style={{ marginTop: 16, gap: 8 }}>
+          <h3 style={{ margin: 0 }}>Photos</h3>
+          {isNew ? <p className="muted" style={{ margin: 0 }}>Save the species first, then add its photos.</p> : <SpeciesImagesEditor speciesId={row.id} name={cfg.name(row)} />}
+        </section>
+      )}
     </Modal>
   );
 }

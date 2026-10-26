@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { AccessService, AreaGrant } from '../common/access.service';
 import { AuthUser } from '../common/auth.decorators';
+import { SPECIES_IMAGE_COLUMNS } from '../admin/species-images.controller';
 import { Db, Queryable } from '../database/db.service';
 
 /** Row shapes sent to devices. Bootstrap and the change feed use the same loaders. */
@@ -17,6 +18,7 @@ const LOADERS: Record<string, string> = {
   sub_sector: `SELECT id, sector_id, project_id, name, short_code, description, reference_latitude, reference_longitude,
                       ST_AsGeoJSON(boundary_geometry)::json AS boundary, active, updated_at FROM sub_sectors WHERE id = ANY($1)`,
   species: `SELECT id, scientific_name, common_name, code, active, updated_at FROM tree_species WHERE id = ANY($1)`,
+  species_image: `SELECT ${SPECIES_IMAGE_COLUMNS} FROM species_images WHERE id = ANY($1)`,
   status: `SELECT id, code, name, description, is_terminal, allows_replacement, requires_photo, sort_order, active, updated_at
              FROM tree_statuses WHERE id = ANY($1)`,
   vendor: `SELECT id, name, short_code, active, updated_at FROM vendors WHERE id = ANY($1)`,
@@ -41,7 +43,13 @@ const LOADERS: Record<string, string> = {
 };
 
 const AREA_SCOPED = new Set(['tree', 'observation', 'media']);
-const REFERENCE_TYPES = ['species', 'status', 'vendor'];
+/** Global reference data every signed-in user receives: entity type → [table, bootstrap key]. */
+const REFERENCE_TYPES: Record<string, [string, string]> = {
+  species: ['tree_species', 'species'],
+  status: ['tree_statuses', 'statuses'],
+  vendor: ['vendors', 'vendors'],
+  species_image: ['species_images', 'species_images'],
+};
 
 @Injectable()
 export class SyncDataService {
@@ -102,10 +110,7 @@ export class SyncDataService {
           await this.load(tx, 'serial_allocation', await idsOf(`SELECT id FROM serial_allocations WHERE active AND ${projectFilter}`, [projectIds]))
         ).filter((r) => this.visible(user, grants, 'serial_allocation', r)),
       };
-      for (const t of REFERENCE_TYPES) {
-        const table = t === 'species' ? 'tree_species' : t === 'status' ? 'tree_statuses' : 'vendors';
-        data[t === 'species' ? 'species' : t === 'status' ? 'statuses' : 'vendors'] = await this.load(tx, t, await idsOf(`SELECT id FROM ${table}`));
-      }
+      for (const [t, [table, key]] of Object.entries(REFERENCE_TYPES)) data[key] = await this.load(tx, t, await idsOf(`SELECT id FROM ${table}`));
       return {
         cursor: String(c[0].cursor),
         server_time: new Date().toISOString(),

@@ -138,6 +138,7 @@ private fun VisitCard(r: MyVisitRow, firstPhoto: suspend (String) -> MediaEntity
                         listOfNotNull(
                             when { r.isInitial -> "Registered"; r.isCorrection -> "Correction"; else -> "Visit" },
                             listOfNotNull(r.sectorCode, r.subSectorCode).joinToString("/").ifBlank { null },
+                            r.heightCm?.let(::formatHeight),
                         ).joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                     )

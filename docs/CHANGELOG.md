@@ -7,6 +7,20 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-10-26: Species reference photos, tree height, whole photos, keyboard (migration 008)
+- **Species photos:**
+  - Admins add several reference photos per species, on the web (edit a species) or the phone (Reference data → long-press → Reference photos).
+  - Phones download them after each sync and keep them for offline use.
+  - Officers choose the species from picture cards and can swipe through all of a species' photos full screen, then choose it.
+- **API:**
+  - `POST /admin/species/:id/images`, `PATCH`/`DELETE /admin/species-images/:id`
+  - `GET /species/:id/images`
+  - `GET /species-images/:id/content?size=thumb|full`
+  - `species_images` in the phone sync
+- **Tree height:** an optional field on registration and visits, in cm (default), m, inches or feet; stored in cm. Shown on the tree page (with a growth chart), in My visits and on the web.
+- **Photos:** previews and the tree page show the whole photo at its own shape, not cropped. Tap for full screen with pinch-to-zoom.
+- **Keyboard:** screens are laid out above the keyboard, so the field being typed in (e.g. the note) stays visible.
+
 ## 2026-10-23: Simpler field app, project/year tree IDs, density map (migration 007)
 - **Android:**
   - The home screen has a large "Start field session" button. During a session it shows one large "Register trees" button and a red "End session" button. "Map" and "Visit trees" are gone; use Find a tree to visit a tree.
