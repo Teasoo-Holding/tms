@@ -130,7 +130,7 @@ fun ImageViewerDialog(image: ImageBitmap?, description: String, onClose: () -> U
                     )
                 }
                 overlay()
-                IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)) {
+                IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).topSafe().padding(8.dp)) {
                     Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                 }
             }
@@ -176,7 +176,7 @@ fun PhotoViewer(m: MediaEntity, load: PhotoSource, measurement: HeightMeasuremen
                         Canvas(Modifier.fillMaxSize()) { drawMeasurement(measurement.points, rect) }
                     }
                 }
-                IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)) {
+                IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).topSafe().padding(8.dp)) {
                     Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
                 }
                 measurement?.heightCm()?.let { cm ->

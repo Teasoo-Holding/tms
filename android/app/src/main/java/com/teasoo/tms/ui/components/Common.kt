@@ -7,6 +7,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -139,3 +140,18 @@ fun Notice(text: String, color: Color = MaterialTheme.colorScheme.secondaryConta
 
 private val DISPLAY = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT).withZone(ZoneId.systemDefault())
 fun formatInstant(iso: String?): String = iso?.let { runCatching { DISPLAY.format(Instant.parse(it)) }.getOrDefault(it) } ?: "—"
+
+/**
+ * Keeps controls clear of the system navigation buttons/gesture bar at the bottom of the screen. Full-screen dialogs
+ * do not get the bar's size on every device, so at least [min] is always kept free.
+ */
+fun Modifier.bottomSafe(min: androidx.compose.ui.unit.Dp = 40.dp) = composed {
+    windowInsetsPadding(
+        WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal).union(WindowInsets(bottom = min)),
+    )
+}
+
+/** The same for the status bar and camera cut-out at the top. */
+fun Modifier.topSafe(min: androidx.compose.ui.unit.Dp = 28.dp) = composed {
+    windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal).union(WindowInsets(top = min)))
+}

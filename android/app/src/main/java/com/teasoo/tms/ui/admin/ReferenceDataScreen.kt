@@ -10,6 +10,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Eco
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Refresh
@@ -19,6 +21,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.KeyboardType
@@ -34,7 +39,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import javax.inject.Inject
 
 @HiltViewModel
-class ReferenceDataViewModel @Inject constructor(@ApplicationContext context: Context, private val api: AdminApi) : AdminBaseViewModel(context) {
+class ReferenceDataViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val api: AdminApi,
+    val photoStore: com.teasoo.tms.data.repo.PhotoStore,
+) : AdminBaseViewModel(context) {
     val species = MutableStateFlow<List<AdminSpeciesDto>?>(null)
     val statuses = MutableStateFlow<List<AdminStatusDto>?>(null)
     val vendors = MutableStateFlow<List<AdminVendorDto>?>(null)
@@ -54,6 +63,30 @@ class ReferenceDataViewModel @Inject constructor(@ApplicationContext context: Co
 
     fun saveSpecies(id: String?, r: SpeciesRequest, onDone: () -> Unit = {}) =
         save(if (id == null) "Species added" else "Species saved", onDone, ::refresh) { if (id == null) api.createSpecies(r) else api.updateSpecies(id, r.toPatchBody()) }
+
+    /**
+     * A new species with its reference photos (optional). The species is kept even if a photo fails to upload;
+     * the message says so and the photos can be added later from the species' actions.
+     */
+    fun createSpecies(r: SpeciesRequest, photos: List<android.net.Uri>, onDone: () -> Unit) = save(null, onDone, ::refresh) {
+        val created = api.createSpecies(r)
+        val failed = if (photos.isEmpty()) 0 else runCatching {
+            val parts = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                photos.mapIndexed { i, uri ->
+                    val type = context.contentResolver.getType(uri) ?: "image/jpeg"
+                    val bytes = context.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+                    okhttp3.MultipartBody.Part.createFormData("file", "photo$i.jpg", bytes.toRequestBody(type.toMediaType()))
+                }
+            }
+            api.uploadSpeciesImages(created.id, parts)
+            0
+        }.getOrDefault(photos.size)
+        photos.filter { it.scheme == "file" }.forEach { u -> u.path?.let { java.io.File(it).delete() } }
+        messages.tryEmit(
+            if (failed > 0) "${r.commonName ?: r.scientificName} added, but the photos did not upload. Add them from Reference photos."
+            else "${r.commonName ?: r.scientificName} added" + if (photos.isNotEmpty()) " with ${photos.size} photo${if (photos.size == 1) "" else "s"}" else "",
+        )
+    }
 
     fun createStatus(r: StatusRequest, onDone: () -> Unit) = save("Status added", onDone, ::refresh) { api.createStatus(r) }
     fun updateStatus(id: String, p: StatusPatch, onDone: () -> Unit = {}) = save("Status saved", onDone, ::refresh) { api.updateStatus(id, p.toPatchBody()) }
@@ -177,12 +210,12 @@ fun ReferenceDataScreen(onBack: () -> Unit, vm: ReferenceDataViewModel = hiltVie
     photosFor?.let { s -> SpeciesPhotosDialog(s, onClose = { photosFor = null }) }
     val close = { adding = false; editing = null }
     when (val e = editing) {
-        is AdminSpeciesDto -> SpeciesDialog(e, saving, formError, { vm.saveSpecies(e.id, it, close) }, close)
+        is AdminSpeciesDto -> SpeciesDialog(e, saving, formError, vm.photoStore, { r, _ -> vm.saveSpecies(e.id, r, close) }, onPhotos = { close(); photosFor = e }, onDismiss = close)
         is AdminStatusDto -> StatusDialog(e, saving, formError, onCreate = {}, onUpdate = { vm.updateStatus(e.id, it, close) }, onDismiss = close)
         is AdminVendorDto -> VendorDialog(e, saving, formError, { vm.saveVendor(e.id, it, close) }, close)
     }
     if (adding) when (tab) {
-        RefTab.SPECIES -> SpeciesDialog(null, saving, formError, { vm.saveSpecies(null, it, close) }, close)
+        RefTab.SPECIES -> SpeciesDialog(null, saving, formError, vm.photoStore, { r, photos -> vm.createSpecies(r, photos, close) }, onPhotos = null, onDismiss = close)
         RefTab.STATUSES -> StatusDialog(null, saving, formError, onCreate = { vm.createStatus(it, close) }, onUpdate = {}, onDismiss = close)
         RefTab.VENDORS -> VendorDialog(null, saving, formError, { vm.saveVendor(null, it, close) }, close)
     }
@@ -209,7 +242,7 @@ private fun RefRow(
     italicSubtitle: Boolean = false,
     dot: (@Composable () -> Unit)? = null,
 ) {
-    ActionItem(onClick = onClick, onActions = onActions) {
+    ActionItem(onClick = onClick, onActions = onActions, onEdit = onClick, editLabel = "Edit $title") {
         Row(Modifier.padding(horizontal = 16.dp).heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
             dot?.let { it(); Spacer(Modifier.width(12.dp)) }
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
@@ -221,21 +254,73 @@ private fun RefRow(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SpeciesDialog(existing: AdminSpeciesDto?, saving: Boolean, error: String?, onSave: (SpeciesRequest) -> Unit, onDismiss: () -> Unit) {
+private fun SpeciesDialog(
+    existing: AdminSpeciesDto?,
+    saving: Boolean,
+    error: String?,
+    photoStore: com.teasoo.tms.data.repo.PhotoStore,
+    onSave: (SpeciesRequest, List<android.net.Uri>) -> Unit,
+    onPhotos: (() -> Unit)?,
+    onDismiss: () -> Unit,
+) {
     var scientific by remember { mutableStateOf(existing?.scientificName.orEmpty()) }
     var common by remember { mutableStateOf(existing?.commonName.orEmpty()) }
     var code by remember { mutableStateOf(existing?.code.orEmpty()) }
     var active by remember { mutableStateOf(existing?.active ?: true) }
+    // Reference photos picked while adding a species (optional); uploaded right after it is created.
+    val photos = remember { mutableStateListOf<android.net.Uri>() }
+    var camera by remember { mutableStateOf(false) }
+    val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(20)) { photos.addAll(it) }
     FormDialog(
         if (existing == null) "Add species" else "Edit species", if (existing == null) "Add" else "Save", scientific.isNotBlank(), saving, error,
-        onConfirm = { onSave(SpeciesRequest(scientific.trim(), common.trim().ifBlank { null }, code.trim().ifBlank { null }, active)) },
+        onConfirm = { onSave(SpeciesRequest(scientific.trim(), common.trim().ifBlank { null }, code.trim().ifBlank { null }, active), photos.toList()) },
         onDismiss = onDismiss,
     ) {
         TextInput(scientific, { scientific = it }, "Scientific name")
         TextInput(common, { common = it }, "Common name (optional)")
         TextInput(code, { code = it.take(32) }, "Code (optional)")
         SwitchRow("Active", active, { active = it })
+        if (existing == null) {
+            Text("Reference photos (optional)", style = MaterialTheme.typography.titleSmall)
+            if (photos.isNotEmpty()) FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                photos.forEach { uri -> PickedPhoto(uri) { photos.remove(uri) } }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { picker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                    Icon(Icons.Default.PhotoLibrary, null); Spacer(Modifier.width(6.dp)); Text("Gallery")
+                }
+                OutlinedButton(onClick = { camera = true }) { Icon(Icons.Default.CameraAlt, null); Spacer(Modifier.width(6.dp)); Text("Camera") }
+            }
+            Text("You can also add or change photos later.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else if (onPhotos != null) {
+            OutlinedButton(onClick = onPhotos, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.PhotoLibrary, null); Spacer(Modifier.width(6.dp)); Text("Reference photos") }
+        }
+    }
+    if (camera) com.teasoo.tms.ui.components.CameraCaptureDialog(photoStore, onCaptured = { camera = false; photos.add(android.net.Uri.fromFile(it.file)) }, onDismiss = { camera = false })
+}
+
+/** A picked photo before it is uploaded, with a button to leave it out. */
+@Composable
+private fun PickedPhoto(uri: android.net.Uri, onRemove: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val image by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, uri) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    android.graphics.BitmapFactory.decodeStream(input, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 })
+                }?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
+    Box(Modifier.size(72.dp)) {
+        Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxSize()) {
+            image?.let { androidx.compose.foundation.Image(it, null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+        }
+        IconButton(onClick = onRemove, modifier = Modifier.align(Alignment.TopEnd).size(28.dp)) {
+            Icon(Icons.Default.Close, "Remove photo", tint = MaterialTheme.colorScheme.onSurface)
+        }
     }
 }
 

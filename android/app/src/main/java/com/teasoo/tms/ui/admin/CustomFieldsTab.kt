@@ -85,7 +85,7 @@ private fun AdminCustomFieldDto.toPatch() = CustomFieldPatch(label, options, req
 
 @Composable
 private fun FieldCard(f: AdminCustomFieldDto, onEdit: () -> Unit, onActions: () -> Unit) {
-    ActionItem(onClick = onEdit, onActions = onActions) {
+    ActionItem(onClick = onEdit, onActions = onActions, onEdit = onEdit, editLabel = "Edit ${f.label}") {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             ItemTitle(f.label, f.active)
             ItemSubtitle(listOfNotNull(fieldTypeLabel(f.fieldType), "Required".takeIf { f.required }, "Remembered".takeIf { f.sticky }).joinToString(" · "))

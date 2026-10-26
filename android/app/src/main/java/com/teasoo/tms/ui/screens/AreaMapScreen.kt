@@ -82,16 +82,53 @@ internal fun hectares(geoJson: String?): Double? = runCatching {
     kotlin.math.abs(sum * r * r / 2) / 10_000
 }.getOrNull()
 
-/** Five shades of green from sparse to dense, relative to the densest area shown; grey when nothing is recorded. */
-private val DENSITY_SHADES = listOf("#e5f5e0", "#a1d99b", "#74c476", "#31a354", "#006d2c")
-internal fun densityColor(perHa: Double?, max: Double): String = when {
-    perHa == null || perHa <= 0 || max <= 0 -> "#d9d9d9"
-    else -> DENSITY_SHADES[((perHa / max) * DENSITY_SHADES.size).toInt().coerceIn(0, DENSITY_SHADES.lastIndex)]
+private const val ALIVE_DOT = "#2e9e4f"
+private const val DEAD_DOT = "#d32f2f"
+private const val UNSEEN_DOT = "#8d8d8d"
+private const val MAX_DOTS_PER_AREA = 1_500
+private const val MAX_DOTS = 20_000
+
+/** How many trees each dot stands for, so very large plantings still draw quickly. */
+internal fun treesPerDot(areaTrees: List<Int>): Int {
+    val total = areaTrees.sum()
+    val biggest = areaTrees.maxOrNull() ?: 0
+    return maxOf(1, (total + MAX_DOTS - 1) / MAX_DOTS, (biggest + MAX_DOTS_PER_AREA - 1) / MAX_DOTS_PER_AREA)
 }
 
 /**
- * For administrators: each surveyed sector and sub-sector, drawn from its corner points and shaded by how many trees
- * per hectare have been registered in it. Trees have no GPS of their own, so density is shown per area, not as points.
+ * [count] points scattered inside a polygon's outer ring. Trees have no GPS, so the positions only illustrate how
+ * many trees an area holds; they are seeded by the area so the picture is the same every time.
+ */
+internal fun scatter(ring: List<Pair<Double, Double>>, count: Int, seed: Long): List<Pair<Double, Double>> {
+    if (ring.size < 4 || count <= 0) return emptyList()
+    val minX = ring.minOf { it.first }; val maxX = ring.maxOf { it.first }
+    val minY = ring.minOf { it.second }; val maxY = ring.maxOf { it.second }
+    fun inside(x: Double, y: Double): Boolean {
+        var hit = false
+        var j = ring.size - 1
+        for (i in ring.indices) {
+            val (xi, yi) = ring[i]; val (xj, yj) = ring[j]
+            if ((yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) hit = !hit
+            j = i
+        }
+        return hit
+    }
+    val random = java.util.Random(seed)
+    val out = ArrayList<Pair<Double, Double>>(count)
+    var attempts = 0
+    while (out.size < count && attempts < count * 50) {
+        attempts++
+        val x = minX + random.nextDouble() * (maxX - minX)
+        val y = minY + random.nextDouble() * (maxY - minY)
+        if (inside(x, y)) out += x to y
+    }
+    return out
+}
+
+/**
+ * For administrators: each surveyed sector and sub-sector, drawn from its corner points, with one dot per registered
+ * tree scattered inside it (green alive, red dead, grey not yet visited), so planting density shows at a glance.
+ * Trees have no GPS of their own: the number of dots per area is exact, their positions inside it are illustrative.
  * Works offline from the data on this phone; a licensed basemap is shown only when MAP_STYLE_URL is configured.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -121,7 +158,11 @@ fun AreaMapScreen(app: AppViewModel, onBack: () -> Unit, vm: AreaMapViewModel = 
             inside.sumOf { it.trees }, inside.sumOf { it.alive }, inside.sumOf { it.dead },
         )
     }
-    val maxDensity = (subDensity.values + sectorDensity.values).mapNotNull { it.perHectare }.maxOrNull() ?: 0.0
+    // Areas whose trees are drawn: sub-sectors with an outline, and sectors that are not split into outlined sub-sectors.
+    val splitSectors = sectors.filter { s -> subs.any { it.sectorId == s.id && it.boundaryJson != null } }.map { it.id }.toSet()
+    val dotted = subs.filter { it.boundaryJson != null }.mapNotNull { subDensity[it.id] } +
+        sectors.filter { it.id !in splitSectors && it.boundaryJson != null }.mapNotNull { sectorDensity[it.id] }
+    val perDot = treesPerDot(dotted.map { it.trees })
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     Scaffold(topBar = {
         TopAppBar(title = { Text("Tree density map") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
@@ -154,10 +195,10 @@ fun AreaMapScreen(app: AppViewModel, onBack: () -> Unit, vm: AreaMapViewModel = 
                     }
                 },
                 update = { view ->
-                    view.getMapAsync { map -> map.setStyle(styleBuilder()) { style -> render(map, style, sectors, subs, sectorDensity, subDensity, maxDensity) } }
+                    view.getMapAsync { map -> map.setStyle(styleBuilder()) { style -> render(map, style, sectors, subs, sectorDensity, subDensity, splitSectors, perDot) } }
                 },
             )
-            DensityList(sectors, subs, sectorDensity, subDensity, maxDensity, Modifier.fillMaxWidth().weight(0.9f))
+            DensityList(sectors, subs, sectorDensity, subDensity, perDot, Modifier.fillMaxWidth().weight(0.9f))
         }
     }
 }
@@ -173,43 +214,59 @@ private fun render(
     subs: List<SubSectorEntity>,
     sectorDensity: Map<String, AreaDensity>,
     subDensity: Map<String, AreaDensity>,
-    max: Double,
+    splitSectors: Set<String>,
+    perDot: Int,
 ) {
     val polygons = mutableListOf<Feature>()
-    val points = mutableListOf<Feature>()
+    val dots = mutableListOf<Feature>()
     val bounds = LatLngBounds.Builder()
     var count = 0
-    fun add(kind: String, lat: Double, lon: Double, boundary: String?, d: AreaDensity?) {
+    fun add(kind: String, id: String, lat: Double, lon: Double, boundary: String?, d: AreaDensity?, withDots: Boolean) {
         bounds.include(LatLng(lat, lon)); count++
-        val color = densityColor(d?.perHectare, max)
         val polygon = boundary?.let { runCatching { Polygon.fromJson(it) }.getOrNull() }
         if (polygon != null) {
-            polygons += Feature.fromGeometry(polygon).apply { addStringProperty("kind", kind); addStringProperty("color", color) }
+            polygons += Feature.fromGeometry(polygon).apply { addStringProperty("kind", kind) }
             polygon.coordinates().flatten().forEach { bounds.include(LatLng(it.latitude(), it.longitude())); count++ }
-        } else {
-            // No corner points yet: a dot at the reference point, sized by the number of trees.
-            points += Feature.fromGeometry(Point.fromLngLat(lon, lat)).apply {
-                addStringProperty("color", if ((d?.trees ?: 0) > 0) "#31a354" else "#9e9e9e")
-                addNumberProperty("radius", 6f + kotlin.math.min(14f, kotlin.math.sqrt((d?.trees ?: 0).toFloat())))
-            }
+        }
+        if (!withDots || d == null || d.trees == 0) return
+        val unseen = (d.trees - d.alive - d.dead).coerceAtLeast(0)
+        val colours = List((d.alive + perDot - 1) / perDot) { ALIVE_DOT } + List((d.dead + perDot - 1) / perDot) { DEAD_DOT } +
+            List((unseen + perDot - 1) / perDot) { UNSEEN_DOT }
+        val ring = polygon?.coordinates()?.firstOrNull()?.map { it.longitude() to it.latitude() }
+        val spots = if (ring != null) scatter(ring, colours.size, id.hashCode().toLong())
+        else List(colours.size) { lon to lat } // no corner points: stacked on the reference point
+        // Mix the colours so dead and unvisited trees are spread through the area rather than clustered.
+        val mixed = colours.shuffled(java.util.Random(id.hashCode().toLong() xor 0x5DEECE66DL))
+        spots.forEachIndexed { i, (x, y) ->
+            dots += Feature.fromGeometry(Point.fromLngLat(x, y)).apply { addStringProperty("color", mixed[i]) }
         }
     }
-    // Sectors that are split into sub-sectors are shown by their sub-sectors; the sector outline is drawn on top.
     sectors.forEach { s ->
-        val split = subs.any { it.sectorId == s.id && it.boundaryJson != null }
-        add(if (split) "sector_outline" else "area", s.referenceLatitude, s.referenceLongitude, s.boundaryJson, sectorDensity[s.id])
+        val split = s.id in splitSectors
+        add(if (split) "sector_outline" else "area", s.id, s.referenceLatitude, s.referenceLongitude, s.boundaryJson, sectorDensity[s.id], withDots = !split)
     }
-    subs.forEach { add("area", it.referenceLatitude, it.referenceLongitude, it.boundaryJson, subDensity[it.id]) }
+    subs.forEach { add("area", it.id, it.referenceLatitude, it.referenceLongitude, it.boundaryJson, subDensity[it.id], withDots = true) }
     style.addSource(GeoJsonSource("areas", FeatureCollection.fromFeatures(polygons)))
-    style.addSource(GeoJsonSource("refs", FeatureCollection.fromFeatures(points)))
-    style.addLayer(FillLayer("area-fill", "areas").withProperties(fillColor(get("color")), fillOpacity(0.75f)).also { it.setFilter(eq(get("kind"), literal("area"))) })
+    style.addSource(GeoJsonSource("trees", FeatureCollection.fromFeatures(dots)))
+    style.addLayer(FillLayer("area-fill", "areas").withProperties(fillColor("#e3efe5"), fillOpacity(0.6f)).also { it.setFilter(eq(get("kind"), literal("area"))) })
     style.addLayer(LineLayer("area-lines", "areas").withProperties(lineColor("#1d6b45"), lineWidth(1.5f)))
     style.addLayer(
         LineLayer("sector-lines", "areas").withProperties(lineColor("#0b2e1d"), lineWidth(3f))
             .also { it.setFilter(eq(get("kind"), literal("sector_outline"))) },
     )
+    // Small dots that grow a little as the map is zoomed in.
     style.addLayer(
-        CircleLayer("ref-points", "refs").withProperties(circleRadius(get("radius")), circleColor(get("color")), circleStrokeColor("#ffffff"), circleStrokeWidth(2f)),
+        CircleLayer("tree-dots", "trees").withProperties(
+            circleColor(get("color")),
+            circleRadius(
+                org.maplibre.android.style.expressions.Expression.interpolate(
+                    org.maplibre.android.style.expressions.Expression.linear(), org.maplibre.android.style.expressions.Expression.zoom(),
+                    org.maplibre.android.style.expressions.Expression.stop(12, 1.5f), org.maplibre.android.style.expressions.Expression.stop(16, 3f),
+                    org.maplibre.android.style.expressions.Expression.stop(19, 6f),
+                ),
+            ),
+            circleOpacity(0.9f),
+        ),
     )
     if (count >= 2) map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), 48))
     else if (count == 1) map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(sectors.firstOrNull()?.referenceLatitude ?: 0.0, sectors.firstOrNull()?.referenceLongitude ?: 0.0), 14.0))
@@ -224,44 +281,45 @@ private fun DensityList(
     subs: List<SubSectorEntity>,
     sectorDensity: Map<String, AreaDensity>,
     subDensity: Map<String, AreaDensity>,
-    max: Double,
+    perDot: Int,
     modifier: Modifier,
 ) {
     androidx.compose.foundation.lazy.LazyColumn(modifier, contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { DensityLegend(max) }
+        item { DensityLegend(perDot) }
         if (sectors.isEmpty()) item { Notice("No surveyed areas for this planting year on this phone. Sync, or add the year's sectors in Projects.") }
         sectors.forEach { sector ->
-            item(key = sector.id) { DensityRow(sectorDensity[sector.id], max, heading = true) }
-            subs.filter { it.sectorId == sector.id }.forEach { ss -> item(key = ss.id) { DensityRow(subDensity[ss.id], max, heading = false) } }
+            item(key = sector.id) { DensityRow(sectorDensity[sector.id], heading = true) }
+            subs.filter { it.sectorId == sector.id }.forEach { ss -> item(key = ss.id) { DensityRow(subDensity[ss.id], heading = false) } }
         }
     }
 }
 
 @Composable
-private fun DensityLegend(max: Double) {
+private fun DensityLegend(perDot: Int) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("Trees per hectare", style = MaterialTheme.typography.titleSmall)
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("0", style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.width(4.dp))
-            DENSITY_SHADES.forEach { c ->
-                androidx.compose.foundation.layout.Box(Modifier.size(width = 28.dp, height = 14.dp).background(androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(c))))
+        Text(if (perDot == 1) "Each dot is one tree" else "Each dot is $perDot trees", style = MaterialTheme.typography.titleSmall)
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(ALIVE_DOT to "Alive", DEAD_DOT to "Dead", UNSEEN_DOT to "Not visited yet").forEach { (c, label) ->
+                Dot(c); Text(label, style = MaterialTheme.typography.bodySmall); Spacer(Modifier.width(6.dp))
             }
-            Spacer(Modifier.width(4.dp))
-            Text(if (max > 0) max.oneDecimal() else "—", style = MaterialTheme.typography.bodySmall)
         }
-        Text("Shaded from the area's corner points and the trees registered in it. Grey = no trees yet.", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Trees have no GPS: the number of dots in each area is exact, their positions inside it are illustrative.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun DensityRow(d: AreaDensity?, max: Double, heading: Boolean) {
+private fun Dot(color: String, size: androidx.compose.ui.unit.Dp = 12.dp) {
+    androidx.compose.foundation.layout.Box(
+        Modifier.size(size).background(androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(color)), androidx.compose.foundation.shape.CircleShape),
+    )
+}
+
+@Composable
+private fun DensityRow(d: AreaDensity?, heading: Boolean) {
     d ?: return
     Row(Modifier.fillMaxWidth().padding(start = if (heading) 0.dp else 16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        androidx.compose.foundation.layout.Box(
-            Modifier.size(16.dp).background(androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(densityColor(d.perHectare, max)))),
-        )
+        Dot(if (d.trees > 0) ALIVE_DOT else UNSEEN_DOT, 14.dp)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(d.label, style = if (heading) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium)

@@ -183,6 +183,9 @@ fun ActionItem(
     onActions: () -> Unit,
     modifier: Modifier = Modifier,
     tonal: Boolean = false,
+    /** Shows a pencil button at the right end of the item. */
+    onEdit: (() -> Unit)? = null,
+    editLabel: String = "Edit",
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val currentActions by rememberUpdatedState(onActions)
@@ -214,7 +217,12 @@ fun ActionItem(
                 .combinedClickable(onClick = { (onClick ?: onActions)() }, onLongClick = onActions, onLongClickLabel = "More actions")
                 .semantics { customActions = listOf(CustomAccessibilityAction("More actions") { currentActions(); true }) },
         ) {
-            Column(Modifier.heightIn(min = 56.dp), content = content)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).heightIn(min = 56.dp), content = content)
+                if (onEdit != null) IconButton(onClick = onEdit, modifier = Modifier.padding(end = 4.dp).size(48.dp)) {
+                    Icon(Icons.Default.Edit, contentDescription = editLabel, tint = MaterialTheme.colorScheme.primary)
+                }
+            }
         }
     }
 }

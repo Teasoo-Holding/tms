@@ -1,8 +1,8 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 import { api } from '../api/client';
-import { SpeciesCover, SpeciesImagesEditor } from '../components/SpeciesImages';
-import { ActivePill, Chevron, clean, Details, EmptyState, ErrorNotice, Field, Modal, PageHeader, RowMenu, Tabs, useDelete, useForm } from '../components/ui';
+import { PendingPhoto, PendingPhotos, SpeciesCover, SpeciesImagesEditor, uploadPendingPhotos } from '../components/SpeciesImages';
+import { ActivePill, Chevron, clean, Details, EditButton, EmptyState, ErrorNotice, Field, Modal, PageHeader, RowMenu, Tabs, useDelete, useForm } from '../components/ui';
 
 export type Kind = 'tree-species' | 'tree-statuses' | 'vendors';
 /** `main` columns show in the table; the rest open in the row's details. */
@@ -86,6 +86,7 @@ export function ReferencePage() {
                     {main.map((c) => <td key={c.key} className={c.key === 'short_code' ? 'mono' : ''}>{show(c, r)}</td>)}
                     <td><ActivePill active={r.active} /></td>
                     <td className="actions">
+                      <EditButton name={cfg.name(r)} onClick={() => setEditing(r)} />
                       <RowMenu
                         items={[
                           { label: 'Edit', onClick: () => setEditing(r) },
@@ -116,23 +117,40 @@ export function ReferencePage() {
   );
 }
 
-export function ReferenceForm({ kind, row, onClose }: { kind: Kind; row: any; onClose: () => void }) {
+export function ReferenceForm({ kind, row: initial, onClose }: { kind: Kind; row: any; onClose: () => void }) {
   const cfg = CONFIG[kind];
+  // A new species whose photos did not all upload stays open, as an edit of the saved species.
+  const [row, setRow] = useState<any>(initial);
   const isNew = !row.id;
+  const species = kind === 'tree-species';
+  /** Photos picked for a new species (uploaded after it is created), or ones whose upload failed. */
+  const [photos, setPhotos] = useState<PendingPhoto[]>([]);
+  const failed = photos.filter((p) => p.error);
   const f = useForm<Record<string, any>>(Object.fromEntries(cfg.columns.map((c) => [c.key, row[c.key] ?? (c.type === 'bool' ? false : c.type === 'number' ? 0 : '')])));
   const save = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       const body: Record<string, any> = clean({ ...f.values });
       cfg.columns.forEach((c) => {
         if (c.type === 'number') body[c.key] = Number(body[c.key] ?? 0);
         if (!isNew && c.immutable) delete body[c.key];
       });
-      return isNew ? api.post(`/${kind}`, body) : api.patch(`/${kind}/${row.id}`, body);
+      const saved = isNew ? await api.post(`/${kind}`, body) : await api.patch(`/${kind}/${row.id}`, body);
+      // Upload failures do not fail the save: the species is kept and the failed photos are listed to retry.
+      return { saved, left: photos.length ? await uploadPendingPhotos(saved.id, photos) : [] };
     },
-    onSuccess: onClose,
+    onSuccess: ({ saved, left }) => {
+      if (left.length === 0) return onClose();
+      setRow(saved);
+      setPhotos(left);
+    },
   });
+  const retry = useMutation({
+    mutationFn: () => uploadPendingPhotos(row.id, photos),
+    onSuccess: setPhotos,
+  });
+  const busy = save.isPending || retry.isPending;
   return (
-    <Modal title={`${isNew ? 'Add' : 'Edit'} ${cfg.singular}`} onClose={onClose} wide={kind === 'tree-species' && !isNew}>
+    <Modal title={`${isNew ? 'Add' : 'Edit'} ${cfg.singular}`} onClose={onClose} wide={species}>
       <form className="stack" onSubmit={(e) => (e.preventDefault(), save.mutate())}>
         <ErrorNotice error={save.error} />
         {!isNew && cfg.note && <p className="muted" style={{ margin: 0 }}>{cfg.note}</p>}
@@ -146,15 +164,32 @@ export function ReferenceForm({ kind, row, onClose }: { kind: Kind; row: any; on
         {cfg.columns.filter((c) => c.type === 'bool').map((c) => (
           <label className="check" key={c.key}><input type="checkbox" {...f.bindCheck(c.key)} /> {c.label}</label>
         ))}
+        {species && (isNew || photos.length > 0) && (
+          <section className="stack" style={{ marginTop: 8, gap: 8 }}>
+            <h3 style={{ margin: 0 }}>{isNew ? 'Photos' : 'Photos not uploaded'}</h3>
+            {failed.length > 0 && (
+              <div className="notice warning" role="alert">
+                The species is saved, but {failed.length === 1 ? '1 photo' : `${failed.length} photos`} could not be uploaded: {failed.map((p) => p.file.name).join(', ')}.
+                Retry, or remove {failed.length === 1 ? 'it' : 'them'}.
+                <div style={{ marginTop: 8 }}>
+                  <button type="button" onClick={() => retry.mutate()} disabled={busy}>{retry.isPending ? 'Uploading…' : 'Retry upload'}</button>
+                </div>
+              </div>
+            )}
+            <PendingPhotos photos={photos} onChange={setPhotos} picking={isNew} busy={busy} />
+          </section>
+        )}
         <div className="form-actions">
           <button type="button" onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={save.isPending}>Save</button>
+          <button className="primary" disabled={busy}>
+            {save.isPending && photos.length ? 'Saving and uploading…' : 'Save'}
+          </button>
         </div>
       </form>
-      {kind === 'tree-species' && (
+      {species && !isNew && (
         <section className="stack" style={{ marginTop: 16, gap: 8 }}>
           <h3 style={{ margin: 0 }}>Photos</h3>
-          {isNew ? <p className="muted" style={{ margin: 0 }}>Save the species first, then add its photos.</p> : <SpeciesImagesEditor speciesId={row.id} name={cfg.name(row)} />}
+          <SpeciesImagesEditor speciesId={row.id} name={cfg.name(row)} />
         </section>
       )}
     </Modal>
