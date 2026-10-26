@@ -1,6 +1,6 @@
 /**
- * Feature switches for the portal. Height recording is withdrawn for now: the height and growth UI
- * (dashboard chart, tree growth chart, observation heights, visits column, photo measurement markers)
- * stays in the code behind this flag so it can be brought back by setting it to true.
+ * Feature switches for the portal. Heights (entered on the phone, stored in cm) are shown: dashboard chart,
+ * tree growth chart, observation heights, visit details and photo measurement markers. Setting this to
+ * false hides them all again.
  */
-export const SHOW_HEIGHT = false;
+export const SHOW_HEIGHT = true;

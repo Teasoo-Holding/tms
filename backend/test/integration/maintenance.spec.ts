@@ -126,12 +126,14 @@ describe('clear all data', () => {
 
   it('clears field data, keeps configuration and accounts, and tells phones to reset', async () => {
     const genBefore = (await officer.get('/mobile/bootstrap').expect(200)).body.data_generation;
+    await sql(`INSERT INTO species_images (species_id, object_key, thumb_key) SELECT id, 'species/x.jpg', 'species/x.thumb.jpg' FROM tree_species LIMIT 1`);
     await sync(officer, [observationOp((await sql('SELECT id FROM trees LIMIT 1'))[0].id, f.status.ALIVE)]);
     const res = (await admin.post('/admin/clear-data', { scope: 'FIELD_DATA', confirm: 'DELETE ALL DATA', password: PASSWORD }).expect(200)).body;
     expect(res.trees).toBeGreaterThan(0);
     expect(res.data_generation).toBe(genBefore + 1);
     expect(await sql('SELECT count(*)::int AS n FROM trees')).toEqual([{ n: 0 }]);
     expect((await sql('SELECT count(*)::int AS n FROM projects'))[0].n).toBeGreaterThan(0);
+    expect(await sql('SELECT count(*)::int AS n FROM species_images')).toEqual([{ n: 1 }]); // reference photos stay
     const boot = (await officer.get('/mobile/bootstrap').expect(200)).body;
     expect(boot.data_generation).toBe(genBefore + 1);
     expect((await officer.get('/sync/changes?cursor=0&limit=1').expect(200)).body.data_generation).toBe(genBefore + 1);
@@ -140,6 +142,7 @@ describe('clear all data', () => {
   it('can clear everything except accounts, keeping the Alive and Dead statuses', async () => {
     await admin.post('/admin/clear-data', { scope: 'EVERYTHING', confirm: 'DELETE ALL DATA', password: PASSWORD }).expect(200);
     expect(await sql('SELECT count(*)::int AS n FROM projects')).toEqual([{ n: 0 }]);
+    expect(await sql('SELECT count(*)::int AS n FROM species_images')).toEqual([{ n: 0 }]);
     expect((await sql('SELECT code FROM tree_statuses ORDER BY sort_order')).map((r) => r.code)).toEqual(['ALIVE', 'DEAD']);
     expect((await sql('SELECT count(*)::int AS n FROM users'))[0].n).toBeGreaterThanOrEqual(4);
     expect((await sql(`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'data.clear'`))[0].n).toBe(2);

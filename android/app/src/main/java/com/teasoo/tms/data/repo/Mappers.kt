@@ -30,6 +30,7 @@ fun resolveScheme(active: List<IdSchemeEntity>, yearId: String?, @Suppress("UNUS
     active.firstOrNull { it.vendorId == null && it.plantingYearId != null && it.plantingYearId == yearId }
         ?: active.firstOrNull { it.vendorId == null && it.plantingYearId == null }
 fun SubSectorDto.toEntity() = SubSectorEntity(id, sectorId, projectId, name, shortCode, referenceLatitude, referenceLongitude, boundary.asText(), active)
+fun SpeciesImageDto.toEntity() = SpeciesImageEntity(id, speciesId, sortOrder, caption, width, height, updatedAt)
 fun SpeciesDto.toEntity() = SpeciesEntity(id, scientificName, commonName, active)
 fun StatusDto.toEntity() = StatusEntity(id, code, name, isTerminal, allowsReplacement, requiresPhoto, sortOrder, active)
 fun VendorDto.toEntity() = VendorEntity(id, name, shortCode, active)

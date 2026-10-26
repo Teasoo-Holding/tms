@@ -11,7 +11,7 @@ import { OBJECT_STORAGE, ObjectStorage } from './storage';
 export const CLEAR_CONFIRMATION = 'DELETE ALL DATA';
 
 const ClearBody = z.object({
-  /** FIELD_DATA: trees, visits, photos and sync history. EVERYTHING: also projects, areas, formats, species, statuses and vendors. */
+  /** FIELD_DATA: trees, visits, photos and sync history. EVERYTHING: also projects, areas, formats, species (with their photos), statuses and vendors. */
   scope: z.enum(['FIELD_DATA', 'EVERYTHING']),
   confirm: z.string(),
   password: z.string().min(1).max(200),
@@ -38,13 +38,15 @@ export class DataMaintenanceController {
 
     const result = await this.db.tx(async (tx) => {
       const { rows: media } = await tx.query('SELECT object_key, thumb_key FROM tree_media');
+      // Species reference photos belong to the reference data: kept with FIELD_DATA, removed with EVERYTHING.
+      if (b.scope === 'EVERYTHING') media.push(...(await tx.query('SELECT object_key, thumb_key FROM species_images')).rows);
       const counts = (
         await tx.query(`SELECT (SELECT count(*) FROM trees)::int AS trees, (SELECT count(*) FROM tree_observations)::int AS visits,
                                (SELECT count(*) FROM tree_media)::int AS photos, (SELECT count(*) FROM projects)::int AS projects`)
       ).rows[0];
       await tx.query(`TRUNCATE tree_media, tree_observations, tree_physical_id_history, conflict_records, sync_operations, sync_batches, trees`);
       if (b.scope === 'EVERYTHING') {
-        await tx.query(`TRUNCATE projects, tree_species, vendors, tree_statuses CASCADE`);
+        await tx.query(`TRUNCATE projects, species_images, tree_species, vendors, tree_statuses CASCADE`);
         // The working statuses are always present.
         await tx.query(`INSERT INTO tree_statuses (code, name, is_terminal, allows_replacement, requires_photo, sort_order)
                         VALUES ('ALIVE', 'Alive', false, false, true, 10), ('DEAD', 'Dead', true, true, true, 20)`);

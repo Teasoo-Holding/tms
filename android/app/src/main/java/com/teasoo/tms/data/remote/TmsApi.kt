@@ -21,6 +21,9 @@ interface TmsApi {
     @POST("api/v1/media/{id}/complete") suspend fun completeUpload(@Path("id") mediaId: String): MediaVerificationDto
     /** Short-lived link to a verified photo (any device's), for viewing. */
     @GET("api/v1/media/{id}/view-url") suspend fun mediaViewUrl(@Path("id") mediaId: String, @Query("size") size: String? = null): ViewUrlDto
+    /** A species reference photo's bytes ("thumb" or "full"). */
+    @retrofit2.http.Streaming
+    @GET("api/v1/species-images/{id}/content") suspend fun speciesImage(@Path("id") id: String, @Query("size") size: String): okhttp3.ResponseBody
 
     // Oversight: online-only views for administrators (and the read-only summary for executives).
     @GET("api/v1/reports/summary") suspend fun summary(@Query("project_id") projectId: String?): ReportSummary

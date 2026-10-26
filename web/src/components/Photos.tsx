@@ -7,7 +7,8 @@ import { fmtDateTime } from './ui';
 // Tree photos wherever a tree is shown: thumbnails (~320 px, signed URLs from /media/:id/view-url?size=thumb)
 // that open a full-size viewer. Photos still uploading or failed show a placeholder instead.
 
-export const fmtHeight = (cm: number) => (cm >= 100 ? `${(cm / 100).toFixed(2)} m` : `${cm.toFixed(cm % 1 ? 1 : 0)} cm`);
+/** 85 cm, 42.5 cm; 1.2 m, 1.25 m from 100 cm up. */
+export const fmtHeight = (cm: number) => (cm >= 100 ? `${Number((cm / 100).toFixed(2))} m` : `${Number(cm.toFixed(1))} cm`);
 
 /** Becomes true once the element scrolls near the viewport, so photo URLs are only requested when needed. */
 function useInView<T extends Element>() {

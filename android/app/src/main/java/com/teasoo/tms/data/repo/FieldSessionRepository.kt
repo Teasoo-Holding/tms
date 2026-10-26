@@ -56,11 +56,16 @@ class FieldSessionRepository @Inject constructor(private val db: TmsDatabase) {
     suspend fun referenceCm(): Double = db.kv().get(REFERENCE_KEY)?.toDoubleOrNull() ?: 100.0
     suspend fun setReferenceCm(cm: Double) = db.kv().put(KeyValueEntity(REFERENCE_KEY, cm.toString()))
 
+    /** The unit this officer types tree heights in (cm unless they changed it); heights are always stored in cm. */
+    suspend fun heightUnit(): String = db.kv().get(HEIGHT_UNIT_KEY) ?: "cm"
+    suspend fun setHeightUnit(unit: String) = db.kv().put(KeyValueEntity(HEIGHT_UNIT_KEY, unit))
+
     private suspend fun save(session: FieldSession) =
         db.kv().put(KeyValueEntity(KEY, TmsJson.encodeToString(FieldSession.serializer(), session)))
 
     private companion object {
         const val KEY = "field.session"
         const val REFERENCE_KEY = "height.reference_cm"
+        const val HEIGHT_UNIT_KEY = "height.unit"
     }
 }

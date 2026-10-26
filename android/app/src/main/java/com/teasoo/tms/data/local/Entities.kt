@@ -70,6 +70,18 @@ data class SubSectorEntity(
     val active: Boolean,
 )
 
+/** A reference photo of what a species looks like, uploaded by an administrator; the image files are cached on the phone. */
+@Entity(tableName = "species_images", indices = [Index("speciesId")])
+data class SpeciesImageEntity(
+    @PrimaryKey val id: String,
+    val speciesId: String,
+    val sortOrder: Int,
+    val caption: String?,
+    val width: Int?,
+    val height: Int?,
+    val updatedAt: String?,
+)
+
 @Entity(tableName = "species")
 data class SpeciesEntity(
     @PrimaryKey val id: String,

@@ -186,6 +186,19 @@ components:
         base_revision: { type: [integer, 'null'], description: Required for tree updates (optimistic concurrency). }
         client_recorded_at: { type: string, format: date-time }
         payload: { type: object, description: 'CreateTree; {id, changes{species_id, vendor_id, planted_on, notes}}; or Observation.' }
+    SpeciesImage:
+      type: object
+      description: A reference photo of a species. Global reference data, synced to every signed-in user.
+      required: [id, species_id, sort_order, caption, width, height, byte_size, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        species_id: { type: string, format: uuid }
+        sort_order: { type: integer, description: Display order within the species (then by upload time). }
+        caption: { type: [string, 'null'] }
+        width: { type: [integer, 'null'], description: Of the stored full image (JPEG within 1600 × 1600 px). }
+        height: { type: [integer, 'null'] }
+        byte_size: { type: [integer, 'null'], description: Of the stored full image. }
+        updated_at: { type: string, format: date-time }
     MediaVerification:
       type: object
       properties:
@@ -238,7 +251,9 @@ paths:
   /mobile/bootstrap:
     get:
       summary: Assigned projects, ID schemes, planting years, areas (with boundaries), reference data and a change cursor.
-      description: Read in one REPEATABLE READ snapshot, so the cursor is consistent with the data.
+      description: >-
+        Read in one REPEATABLE READ snapshot, so the cursor is consistent with the data. Reference data includes
+        species, statuses, vendors and species_images (every SpeciesImage; fetch the bytes from /species-images/{id}/content).
       responses: { '200': { description: Bootstrap payload } }
   /mobile/trees:
     get:
@@ -279,7 +294,10 @@ paths:
         - { name: limit, in: query, schema: { type: integer, maximum: 2000 } }
       responses:
         '200':
-          description: '{ changes: [{ seq, entity_type, data }], next_cursor, has_more, assignment_fingerprint }. A changed fingerprint means the device should re-bootstrap.'
+          description: >-
+            { changes: [{ seq, entity_type, data, deleted? }], next_cursor, has_more, assignment_fingerprint }. A changed fingerprint means
+            the device should re-bootstrap. Deleted rows arrive as tombstones ({ deleted: true, data: { id } }). entity_type species_image
+            carries a SpeciesImage.
 
   /projects:
     get: { summary: Projects visible to the caller, responses: { '200': { description: Projects } } }
@@ -337,6 +355,56 @@ paths:
     post: { summary: Create species (admin), responses: { '201': { description: Species } } }
   /tree-species/{id}:
     patch: { summary: Update or deactivate species (admin), responses: { '200': { description: Species } } }
+    delete: { summary: Delete an unused species (admin) with its reference photos, responses: { '200': { description: Deleted }, '409': { description: IN_USE } } }
+  /admin/species/{speciesId}/images:
+    post:
+      summary: Upload reference photos of a species (admin)
+      description: >-
+        One or more "file" parts (JPEG, PNG or WebP, at most 15 MB each, up to 20 per request). Each is turned upright from its EXIF
+        orientation and stored as a JPEG within 1600 × 1600 px, with a thumbnail within 400 × 400 px. New photos go after the existing ones.
+      parameters: [{ name: speciesId, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [file], properties: { file: { type: array, items: { type: string, format: binary } } } }
+      responses:
+        '201':
+          description: Stored photos
+          content: { application/json: { schema: { type: object, properties: { images: { type: array, items: { $ref: '#/components/schemas/SpeciesImage' } } } } } }
+        '400': { description: 'IMAGE_REQUIRED, IMAGE_TYPE_UNSUPPORTED, IMAGE_TOO_LARGE or IMAGE_INVALID', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Not an administrator }
+        '404': { description: Species not found }
+  /admin/species-images/{id}:
+    patch:
+      summary: Reorder or caption a species photo (admin)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { sort_order: { type: integer }, caption: { type: [string, 'null'], maxLength: 500 } } }
+      responses: { '200': { description: Photo, content: { application/json: { schema: { $ref: '#/components/schemas/SpeciesImage' } } } }, '404': { description: Not found } }
+    delete:
+      summary: Delete a species photo (admin); phones receive a tombstone and the stored files are removed
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses: { '204': { description: Deleted }, '404': { description: Not found } }
+  /species/{speciesId}/images:
+    get:
+      summary: A species' reference photos, ordered by sort_order then upload time
+      parameters: [{ name: speciesId, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200':
+          description: Photos
+          content: { application/json: { schema: { type: object, properties: { images: { type: array, items: { $ref: '#/components/schemas/SpeciesImage' } } } } } }
+        '404': { description: Species not found }
+  /species-images/{id}/content:
+    get:
+      summary: The photo's bytes (JPEG), served directly rather than by redirect so the bearer token stays on the request
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: size, in: query, schema: { enum: [thumb, full], default: full } }
+      responses:
+        '200': { description: 'JPEG image; Cache-Control: private, max-age=86400', content: { image/jpeg: { schema: { type: string, format: binary } } } }
+        '404': { description: Not found }
   /tree-statuses:
     get: { summary: Statuses, responses: { '200': { description: Statuses } } }
     post: { summary: Create status (admin), responses: { '201': { description: Status } } }

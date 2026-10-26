@@ -177,6 +177,7 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
             if (amending) OutlinedTextField(reason, { vm.reason.value = it }, label = { Text("Reason for correction") }, modifier = Modifier.fillMaxWidth())
             PhotoCapture(photos, vm.photoStore, onAdd = vm::addPhoto, onRemove = vm::removePhoto, required = photoMissing)
             if (SHOW_HEIGHT) HeightSection(height, { vm.height.value = it }, photos, referenceCm, vm::setReferenceCm)
+            else HeightField(height, { vm.height.value = it })
             CustomFieldsForm(fieldDefs, fieldValues, vm::setField, showFieldErrors)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(

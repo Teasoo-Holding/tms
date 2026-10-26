@@ -45,11 +45,15 @@ object Routes {
 
 @Composable
 fun TmsApp(vm: AppViewModel = hiltViewModel()) = KeyboardAware {
-    when (val s = vm.sessionState.collectAsStateWithLifecycle().value) {
-        null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        is SessionState.SignedOut -> LoginScreen(vm, prefillEmail = "", reason = null)
-        is SessionState.RevalidationRequired -> LoginScreen(vm, prefillEmail = s.user.loginName, reason = s.reason)
-        is SessionState.Active -> MainNav(vm)
+    // The app draws edge to edge, so the window does not shrink for the keyboard: every screen is laid out above it
+    // instead, and a focused field scrolls into view rather than staying hidden behind the keyboard.
+    Box(Modifier.fillMaxSize().imePadding()) {
+        when (val s = vm.sessionState.collectAsStateWithLifecycle().value) {
+            null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            is SessionState.SignedOut -> LoginScreen(vm, prefillEmail = "", reason = null)
+            is SessionState.RevalidationRequired -> LoginScreen(vm, prefillEmail = s.user.loginName, reason = s.reason)
+            is SessionState.Active -> MainNav(vm)
+        }
     }
 }
 

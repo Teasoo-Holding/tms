@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { api, qs } from '../api/client';
 import { useIsAdmin } from '../auth';
 import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
-import { TreePhotos } from '../components/Photos';
+import { fmtHeight, TreePhotos } from '../components/Photos';
 import { Chevron, Details, EmptyState, ErrorNotice, fmtDate, fmtDateTime, fmtNum, PageHeader, StatusPill } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 
@@ -115,7 +115,7 @@ export function VisitsPage() {
                             ['Area', `${v.sector} / ${v.sub_sector}`],
                             ['Species', v.species],
                             ['Recorded by', v.recorded_by],
-                            SHOW_HEIGHT && v.height_cm != null ? ['Height', `${fmtNum(v.height_cm)} cm`] : ['', null],
+                            SHOW_HEIGHT && v.height_cm != null ? ['Height', fmtHeight(Number(v.height_cm))] : ['', null],
                             ['Remarks', v.remarks],
                             ['Correction reason', v.is_amendment ? v.amendment_reason : null],
                             ['Synced', fmtDateTime(v.synced_at)],

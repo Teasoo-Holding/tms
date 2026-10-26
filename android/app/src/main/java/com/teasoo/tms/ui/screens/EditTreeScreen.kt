@@ -89,7 +89,7 @@ fun EditTreeScreen(app: AppViewModel, onDone: () -> Unit, vm: EditTreeViewModel 
     }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TreeIdText(physicalId, "")
-            Picker("Species", species, species.find { it.id == speciesId }, { it.commonName ?: it.scientificName }, { vm.speciesId.value = it.id })
+            SpeciesChooser(species, speciesId, { vm.speciesId.value = it })
             OutlinedTextField(notes, { vm.notes.value = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
             val fieldDefs by vm.fieldDefs.collectAsStateWithLifecycle()
             val fieldValues by vm.fieldValues.collectAsStateWithLifecycle()

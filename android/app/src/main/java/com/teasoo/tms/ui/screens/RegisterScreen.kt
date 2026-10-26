@@ -288,7 +288,7 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
             }
 
             HorizontalDivider()
-            Picker("Species", species, species.find { it.id == f.speciesId }, { it.commonName?.let { c -> "$c (${it.scientificName})" } ?: it.scientificName }, { s -> vm.update { it.copy(speciesId = s.id) } })
+            SpeciesChooser(species, f.speciesId, { id -> vm.update { it.copy(speciesId = id) } })
             StatusSelector(statuses, f.statusId, { id -> vm.update { it.copy(statusId = id) } })
             OutlinedTextField(f.remarks, { v -> vm.update { it.copy(remarks = v) } }, label = { Text("Observation remarks") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(f.notes, { v -> vm.update { it.copy(notes = v) } }, label = { Text("Tree notes") }, modifier = Modifier.fillMaxWidth())
@@ -299,6 +299,7 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
             val showFieldErrors by vm.showFieldErrors.collectAsStateWithLifecycle()
             // Stick length is not remembered here; the default 1 m pole is offered.
             if (SHOW_HEIGHT) HeightSection(f.height, { h -> vm.form.update { it.copy(height = h) } }, f.photos, 100.0, {})
+            else HeightField(f.height, { h -> vm.form.update { it.copy(height = h) } })
             CustomFieldsForm(treeFieldDefs, f.treeFields, { k, v -> vm.form.update { it.copy(treeFields = it.treeFields + (k to v)) } }, showFieldErrors)
             CustomFieldsForm(observationFieldDefs, f.observationFields, { k, v -> vm.form.update { it.copy(observationFields = it.observationFields + (k to v)) } }, showFieldErrors)
 
@@ -352,24 +353,30 @@ fun PhotoCapture(photos: List<CapturedPhoto>, photoStore: PhotoStore, onAdd: (Ca
     )
 }
 
-/** A photo just taken, decoded small enough to show on the form. */
+/** A photo just taken, shown whole on the form (decoded small enough); tap to see it full screen. */
 @Composable
 private fun PhotoPreview(p: CapturedPhoto) {
-    val image by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, p.mediaId) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching {
-                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                android.graphics.BitmapFactory.decodeFile(p.file.path, bounds)
-                var sample = 1
-                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 900) sample *= 2
-                android.graphics.BitmapFactory.decodeFile(p.file.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
-            }.getOrNull()
-        }
+    var open by remember { mutableStateOf(false) }
+    val image by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, p.mediaId) { value = decodeFile(p.file, 1024) }
+    val img = image
+    if (img == null) {
+        Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+    } else {
+        FittedImage(img, "Photo of the tree") { open = true }
     }
-    Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth().height(240.dp)) {
-        Box(contentAlignment = Alignment.Center) {
-            image?.let { androidx.compose.foundation.Image(it, "Photo of the tree", contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
-                ?: CircularProgressIndicator()
-        }
+    if (open) {
+        val full by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, p.mediaId) { value = decodeFile(p.file, 2048) }
+        ImageViewerDialog(full, "Photo of the tree", onClose = { open = false })
     }
+}
+
+/** Decodes a JPEG on disk to at most about [maxPx] on its long edge. */
+private suspend fun decodeFile(file: java.io.File, maxPx: Int) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    runCatching {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(file.path, bounds)
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
+        android.graphics.BitmapFactory.decodeFile(file.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+    }.getOrNull()
 }

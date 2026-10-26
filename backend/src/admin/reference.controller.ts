@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Logger, Param, ParseUUIDPipe, Patch, Post, Req } from '@nestjs/common';
 import { Request } from 'express';
 import { z, ZodObject, ZodRawShape } from 'zod';
 import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
@@ -6,6 +6,7 @@ import { AuditService } from '../common/audit.service';
 import { badRequest, conflict, notFound } from '../common/errors';
 import { parse, shortCode } from '../common/validation';
 import { Db, isUniqueViolation } from '../database/db.service';
+import { OBJECT_STORAGE, ObjectStorage } from '../media/storage';
 
 const SpeciesBody = z.object({
   scientific_name: z.string().trim().min(1).max(200),
@@ -48,12 +49,16 @@ interface Resource {
   usage: string;
   /** Rows to remove along with it (links that only exist for this row). */
   cascade?: string[];
+  /** Stored files of rows removed with it ($1 = id), deleted from object storage afterwards. */
+  objects?: string;
 }
 
 const RESOURCES: Record<string, Resource> = {
   'tree-species': {
     table: 'tree_species', entity: 'species', schema: SpeciesBody, order: 'scientific_name',
     usage: 'SELECT count(*)::int AS n FROM trees WHERE species_id = $1',
+    // Reference photos go with the species (ON DELETE CASCADE, so phones get their tombstones).
+    objects: 'SELECT object_key, thumb_key FROM species_images WHERE species_id = $1',
   },
   'tree-statuses': {
     table: 'tree_statuses', entity: 'status', schema: StatusBody, order: 'sort_order, name', immutable: ['code'],
@@ -70,7 +75,9 @@ const PATHS = Object.keys(RESOURCES);
 
 @Controller()
 export class ReferenceController {
-  constructor(private readonly db: Db, private readonly audit: AuditService) {}
+  private readonly log = new Logger('Reference');
+
+  constructor(private readonly db: Db, private readonly audit: AuditService, @Inject(OBJECT_STORAGE) private readonly storage: ObjectStorage) {}
 
   /** Express 5 routes have no regex params, so the resource is read from the matched path. */
   private resource(req: Request): Resource {
@@ -128,17 +135,21 @@ export class ReferenceController {
   @Delete(PATHS.map((p) => `${p}/:id`))
   async remove(@CurrentUser() user: AuthUser, @Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
     const r = this.resource(req);
-    return this.db.tx(async (tx) => {
+    const keys = await this.db.tx(async (tx) => {
       const before = await this.db.one(tx, `SELECT * FROM ${r.table} WHERE id = $1 FOR UPDATE`, [id]);
       if (!before) throw notFound(r.entity);
       const { rows } = await tx.query(r.usage, [id]);
       const n = Number(rows[0].n);
       if (n > 0) throw conflict('IN_USE', `It is used by ${n} record${n === 1 ? '' : 's'}. Deactivate it instead.`, { count: n });
+      const objects = r.objects ? (await tx.query(r.objects, [id])).rows.flatMap((o) => [o.object_key, o.thumb_key]) : [];
       for (const sql of r.cascade ?? []) await tx.query(sql, [id]);
       await tx.query(`DELETE FROM ${r.table} WHERE id = $1`, [id]);
       await this.audit.record({ actorId: user.id, action: `${r.entity}.delete`, entityType: r.entity, entityId: id, before }, tx);
-      return { deleted: true };
+      return objects as string[];
     });
+    // Best effort, once the deletion has committed.
+    if (keys.length) void this.storage.deleteObjects(keys).catch((e) => this.log.warn(`Species image clean-up incomplete: ${e?.message ?? e}`));
+    return { deleted: true };
   }
 }
 

@@ -15,11 +15,11 @@
   li { margin: 0.6mm 0; }
   .sub { color: var(--muted); font-size: 10pt; margin-bottom: 5mm; }
   .grid { columns: 2; column-gap: 4mm; }
-  .card { background: var(--soft); border: 1px solid var(--line); border-radius: 3mm; padding: 2.5mm 3.5mm; margin-bottom: 3mm; font-size: 8.4pt; line-height: 1.27; }
+  .card { background: var(--soft); border: 1px solid var(--line); border-radius: 3mm; padding: 2.5mm 3.5mm; margin-bottom: 3mm; font-size: 8.0pt; line-height: 1.25; }
   .card h3 { break-after: avoid; }
   .card h3 { margin-top: 0; color: var(--green); }
-  table { width: 100%; border-collapse: collapse; margin: 2mm 0 3mm; font-size: 9.5pt; }
-  th, td { border: 1px solid var(--line); padding: 1.6mm 2mm; text-align: left; vertical-align: top; }
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0 3mm; font-size: 9pt; }
+  th, td { border: 1px solid var(--line); padding: 1.3mm 2mm; text-align: left; vertical-align: top; }
   th { background: var(--soft); }
   tr { break-inside: avoid; }
   td.n { width: 8mm; text-align: center; color: var(--muted); }
@@ -62,7 +62,7 @@
     <ul>
       <li><b>Simple home:</b> one large "Start field session" button. During a session, one large "Register trees" button and a red "End session" button. Large text and buttons.</li>
       <li><b>Field session:</b> choose project, planting year, vendor (if the year has vendors), sector and sub-sector once. Change sub-sector from a drop-down as you move.</li>
-      <li><b>Register trees:</b> type only the tree number. The full ID is built from the project's format; numbers run on per project and year, shared by all vendors, and the next one is suggested. Species and status are remembered. A photo is required, shown on the form with Retake and Remove. After saving, a confirmation shows the tree's ID before the next form. Date, time and planting date are recorded automatically.</li>
+      <li><b>Register trees:</b> type only the tree number. The full ID is built from the project's format; numbers run on per project and year, shared by all vendors, and the next one is suggested. Species are chosen from picture cards (the administrator's reference photos; open a card to swipe through all of them and choose). Species and status are remembered. Optional tree height in cm, m, inches or feet. A photo is required, shown whole on the form with Retake and Remove; tap it for full screen. After saving, a confirmation shows the tree's ID before the next form. Date, time and planting date are recorded automatically.</li>
       <li><b>Known IDs:</b> if a tree number is already registered, the app shows the tree's photo, last species and status, and offers "Record a visit".</li>
       <li><b>Find a tree:</b> search by tree number (with photos), open the tree and record a visit: Alive or Dead, a photo, a note and custom fields. The date and time are stamped automatically.</li>
       <li><b>Warnings:</b> the app warns if a tree is visited in a different sector than the one it was registered in.</li>
@@ -90,6 +90,7 @@
       <li><b>Vendors per planting year.</b></li>
       <li><b>Tree ID format:</b> one per project, shared by all vendors: fixed parts (project, year, fixed text) and changing parts (sector, sub-sector, tree number). Tree numbers run on per project and planting year. Changes affect new trees only.</li>
       <li><b>Custom fields:</b> extra fields such as a nursery batch number, collected at registration or at every visit. They can be remembered for the rest of the day.</li>
+      <li><b>Species photos:</b> several reference photos per species, uploaded on the web or the phone; phones keep them for offline use.</li>
       <li><b>Reference lists:</b> species, statuses and vendors. Anything can be edited, deactivated or deleted (long-press or swipe on the phone, ⋯ on the web). Items still in use are protected.</li>
       <li><b>Users:</b> sign in with a username, phone number or email. Admins can reset passwords and assign people to projects or areas. Each user's activity and last sync are shown.</li>
       <li><b>Conflicts and corrections:</b> resolve duplicate IDs and correct serial numbers. Every change is audited.</li>
@@ -128,6 +129,7 @@
   <tr><td class="n">A4</td><td>Areas → add sector <code>S01</code> with 4 corner points, then sub-sector <code>SS01</code> inside it.</td><td>Outlines are drawn and the sub-sector sits inside the sector. A sub-sector far outside the sector is refused.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">A5</td><td>Vendors → New vendor (e.g. <code>Konam</code>, code <code>KNM</code>) and link it to 2026.</td><td>The vendor is listed for 2026.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">A6</td><td>ID format → Change: Project, Year, Tree number; width 5.</td><td>The preview shows e.g. <code>TST-2026-00001</code>. There is no vendor option.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">A6b</td><td>Reference data → a species → add 2–3 reference photos (web: edit the species; phone: long-press → Reference photos).</td><td>The thumbnails appear; clicking one shows it full size.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">A7</td><td>Custom fields → add "Nursery batch" (text, remember during session).</td><td>The field is listed.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">A8</td><td>Officers → assign the field officer to the project. Set the project status to Active.</td><td>The assignment is listed and the project is Active.</td><td class="ok"><span class="box"></span></td></tr>
 </table>
@@ -137,7 +139,7 @@
   <tr><th>#</th><th>Do this</th><th>Expected result</th><th>✓</th></tr>
   <tr><td class="n">B1</td><td>Sign in on the phone with internet on, then wait for the first sync.</td><td>The home screen shows a large "Start field session" button; there is no Map button.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">B2</td><td>Turn on <b>airplane mode</b>. Start field session: project, 2026, vendor KNM, S01, SS01.</td><td>No "type of visit" or "planted on" is asked. Home shows the session, a large "Register trees" button and a red "End session" button.</td><td class="ok"><span class="box"></span></td></tr>
-  <tr><td class="n">B3</td><td>Register trees: tap the suggested number, take a photo, check the preview (try Retake once), choose Alive, enter a nursery batch, then Save tree.</td><td>A "Tree registered" pop-up shows <code>TST-2026-00001</code>. "Register next tree" opens an empty form with the batch remembered.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B3</td><td>Register trees: tap the suggested number, choose the species from its picture card (open its photos once), take a photo, check the whole photo shows (try Retake once), choose Alive, enter a height of 85 cm, add a note (the note box stays above the keyboard), enter a nursery batch, then Save tree.</td><td>A "Tree registered" pop-up shows <code>TST-2026-00001</code>. "Register next tree" opens an empty form with the batch remembered.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">B4</td><td>Register 4 more trees. Try saving one without a photo.</td><td>Saving is blocked until a photo is taken.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">B5</td><td>Type an already registered tree number.</td><td>"Already registered" appears with the tree's photo, species and status, plus "Record a visit to this tree".</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">B6</td><td>Home → Find a tree → type a number → open the tree → Record a visit → choose Dead, add a photo, Save visit.</td><td>The visit is saved. The date and time are stamped automatically (not editable).</td><td class="ok"><span class="box"></span></td></tr>

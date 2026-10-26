@@ -3,6 +3,7 @@ package com.teasoo.tms.ui.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -16,6 +17,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -65,28 +68,74 @@ private fun Thumbnail(m: MediaEntity, load: PhotoSource, onClick: () -> Unit) {
     }
 }
 
-/** The tree's most recent photo, large, at the top of anything that describes the tree; tap for full screen. */
+/** The tree's most recent photo, whole and at its own shape, at the top of anything that describes the tree; tap for full screen. */
 @Composable
 fun TreePhoto(media: List<MediaEntity>, load: PhotoSource, modifier: Modifier = Modifier) {
     val latest = media.maxByOrNull { it.capturedAt }
     var open by remember { mutableStateOf(false) }
     val image by produceState<ImageBitmap?>(null, latest?.id, latest?.state) { value = latest?.let { load(it, 1024) } }
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = modifier.fillMaxWidth().height(220.dp).clip(MaterialTheme.shapes.medium).clickable(enabled = image != null) { open = true },
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            val img = image
-            when {
-                img != null -> Image(img, contentDescription = "Latest photo of the tree", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                latest == null -> PhotoPlaceholder(Icons.Default.CloudOff, "No photo yet")
-                latest.state != MediaState.VERIFIED -> PhotoPlaceholder(Icons.Default.CloudUpload, "Uploading")
-                else -> PhotoPlaceholder(Icons.Default.CloudOff, "Connect to view")
+    val img = image
+    if (img != null) {
+        FittedImage(img, "Latest photo of the tree", modifier) { open = true }
+    } else {
+        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = modifier.fillMaxWidth().height(140.dp)) {
+            Box(contentAlignment = Alignment.Center) {
+                when {
+                    latest == null -> PhotoPlaceholder(Icons.Default.CloudOff, "No photo yet")
+                    latest.state != MediaState.VERIFIED -> PhotoPlaceholder(Icons.Default.CloudUpload, "Uploading")
+                    else -> PhotoPlaceholder(Icons.Default.CloudOff, "Connect to view")
+                }
             }
         }
     }
     if (open && latest != null) PhotoViewer(latest, load, null) { open = false }
+}
+
+/**
+ * A photo shown whole, as it was taken: as wide as the screen allows but never taller than [maxHeight], so a
+ * portrait photo is narrower rather than cropped. Tap to open it full screen.
+ */
+@Composable
+fun FittedImage(image: ImageBitmap, description: String, modifier: Modifier = Modifier, maxHeight: androidx.compose.ui.unit.Dp = 360.dp, onClick: () -> Unit) {
+    val ratio = image.width.toFloat() / image.height.coerceAtLeast(1)
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Image(
+            image, contentDescription = description, contentScale = ContentScale.Fit,
+            modifier = Modifier.heightIn(max = maxHeight).aspectRatio(ratio).clip(MaterialTheme.shapes.medium).clickable(onClick = onClick),
+        )
+    }
+}
+
+/** Full-screen view of any image, pinch to zoom; closes with the button or Back. */
+@Composable
+fun ImageViewerDialog(image: ImageBitmap?, description: String, onClose: () -> Unit, loading: Boolean = true, overlay: @Composable BoxScope.() -> Unit = {}) {
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(Modifier.fillMaxSize(), color = Color.Black) {
+            Box(Modifier.fillMaxSize()) {
+                if (image == null) {
+                    if (loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
+                } else {
+                    Image(
+                        image, contentDescription = description, contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectTransformGestures { _, pan, zoom, _ ->
+                                    scale = (scale * zoom).coerceIn(1f, 5f)
+                                    offset = if (scale == 1f) androidx.compose.ui.geometry.Offset.Zero else offset + pan
+                                }
+                            }
+                            .graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y),
+                    )
+                }
+                overlay()
+                IconButton(onClick = onClose, modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                }
+            }
+        }
+    }
 }
 
 /** A small square of a tree's latest photo for lists; blank when there is none or it can't be loaded offline. */
@@ -109,6 +158,10 @@ private fun PhotoPlaceholder(icon: androidx.compose.ui.graphics.vector.ImageVect
 @Composable
 fun PhotoViewer(m: MediaEntity, load: PhotoSource, measurement: HeightMeasurement?, onClose: () -> Unit) {
     val image by produceState<ImageBitmap?>(null, m.id) { value = load(m, 1600) }
+    if (measurement == null) {
+        ImageViewerDialog(image, "Tree photo", onClose)
+        return
+    }
     var box by remember { mutableStateOf(IntSize.Zero) }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(Modifier.fillMaxSize(), color = Color.Black) {

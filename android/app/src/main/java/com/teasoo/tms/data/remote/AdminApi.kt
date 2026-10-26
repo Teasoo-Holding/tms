@@ -86,6 +86,15 @@ interface AdminApi {
     // ---------------------------------------------------------------- deletes
     // Each returns {deleted: true}, or 409 {code: IN_USE | HAS_TREES, message} suggesting deactivation instead.
     @DELETE("api/v1/tree-species/{id}") suspend fun deleteSpecies(@Path("id") id: String): JsonElement
+
+    // ---------------------------------------------------------------- species reference photos
+    @GET("api/v1/species/{id}/images") suspend fun speciesImages(@Path("id") speciesId: String): SpeciesImagesResponse
+    @retrofit2.http.Multipart
+    @POST("api/v1/admin/species/{id}/images")
+    suspend fun uploadSpeciesImages(@Path("id") speciesId: String, @retrofit2.http.Part files: List<okhttp3.MultipartBody.Part>): SpeciesImagesResponse
+    @DELETE("api/v1/admin/species-images/{id}") suspend fun deleteSpeciesImage(@Path("id") id: String): retrofit2.Response<Unit>
+    @retrofit2.http.Streaming
+    @GET("api/v1/species-images/{id}/content") suspend fun speciesImageContent(@Path("id") id: String, @Query("size") size: String): okhttp3.ResponseBody
     @DELETE("api/v1/tree-statuses/{id}") suspend fun deleteStatus(@Path("id") id: String): JsonElement
     @DELETE("api/v1/vendors/{id}") suspend fun deleteVendor(@Path("id") id: String): JsonElement
     /** Only a project without trees; its configuration goes with it. */

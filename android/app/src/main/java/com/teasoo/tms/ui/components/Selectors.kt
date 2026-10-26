@@ -9,7 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.teasoo.tms.data.local.StatusEntity
 
-/** Height entry and growth charts are withdrawn until there is a reliable way to measure trees from photos. */
+/** Measuring height on the photo is withdrawn until it is reliable; heights are typed in instead (shown everywhere). */
 const val SHOW_HEIGHT = false
 
 /** Large, one-tap status choice (e.g. Alive / Dead); the selected one is ticked. */
