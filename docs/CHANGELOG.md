@@ -7,6 +7,13 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-10-27: Add species with photos, edit buttons, dot density map, account switching
+- **Species:** reference photos can be added while creating a species (web and phone), or later.
+- **Admin lists:** a pencil edit button at the right end of each item: species, statuses, vendors, users, years, areas, custom fields; also projects on the web.
+- **Density map:** one dot per registered tree, scattered inside its sector/sub-sector (green alive, red dead, grey not visited). Positions are illustrative (trees have no GPS); very large plantings show 1 dot per N trees. Web, client link and phone.
+- **Accounts:** signing in as a different person (e.g. officer → administrator) ends the previous person's field session.
+- **Screen edges:** full-screen views (camera, photo viewer, species gallery) keep at least a fixed margin above the navigation buttons on every device.
+
 ## 2026-10-26: Species reference photos, tree height, whole photos, keyboard (migration 008)
 - **Species photos:**
   - Admins add several reference photos per species, on the web (edit a species) or the phone (Reference data → long-press → Reference photos).

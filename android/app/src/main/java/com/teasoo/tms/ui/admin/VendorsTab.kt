@@ -55,7 +55,7 @@ internal fun VendorsTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: Pr
             val vendor = vendorOf(link)
             val edit = vendor?.let { v -> { vm.clearFormError(); editing = v } }
             ActionItem(
-                onClick = edit,
+                onClick = edit, onEdit = edit, editLabel = "Edit ${link.vendorName ?: "vendor"}",
                 onActions = {
                     actions.open(
                         link.vendorName ?: "Vendor", onEdit = edit, active = true,

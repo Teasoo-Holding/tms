@@ -41,6 +41,7 @@ class AppViewModel @Inject constructor(
     private val api: TmsApi,
     private val db: TmsDatabase,
     private val photos: PhotoStore,
+    private val fieldSessions: com.teasoo.tms.data.repo.FieldSessionRepository,
 ) : AndroidViewModel(app) {
     val sessionState = session.state.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
@@ -92,6 +93,9 @@ class AppViewModel @Inject constructor(
                 runCatching { api.logout(RefreshRequest(tokens.refreshToken)) }
                 return@launch
             }
+            // A field session belongs to the person who started it: another account (e.g. switching from an
+            // officer to an administrator) starts with none.
+            if (previous != tokens.user.id) fieldSessions.end()
             session.save(tokens)
             db.kv().put(KeyValueEntity(Keys.LAST_USER, tokens.user.id))
             SyncScheduler.syncNow(app)

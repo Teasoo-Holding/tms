@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Refresh
@@ -155,6 +156,7 @@ private fun UserCard(u: AdminUserDto, onEdit: () -> Unit, onPassword: () -> Unit
                     color = if (stale) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, "Edit ${u.fullName}", tint = MaterialTheme.colorScheme.primary) }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Actions for ${u.fullName}") }
                 DropdownMenu(menu, { menu = false }) {

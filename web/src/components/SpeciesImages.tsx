@@ -20,6 +20,14 @@ export interface SpeciesImage {
 const ACCEPT = 'image/jpeg,image/png,image/webp';
 const MAX_MB = 15;
 
+/** Splits picked/dropped files into acceptable images and a warning about the rest (null when none were skipped). */
+function checkImages(files: FileList | null) {
+  const all = Array.from(files ?? []);
+  const ok = all.filter((f) => ACCEPT.split(',').includes(f.type) && f.size <= MAX_MB * 1024 * 1024);
+  const skipped = all.length - ok.length;
+  return { ok, rejected: skipped ? `${skipped} file${skipped === 1 ? ' was' : 's were'} skipped: use JPEG, PNG or WebP images up to ${MAX_MB} MB.` : null };
+}
+
 /** An image's bytes never change, so object URLs are kept for the session (keyed by id and size). */
 const urls = new Map<string, Promise<string>>();
 
@@ -95,9 +103,8 @@ export function SpeciesImagesEditor({ speciesId, name }: { speciesId: string; na
   });
 
   const add = (files: FileList | null) => {
-    const all = Array.from(files ?? []);
-    const ok = all.filter((f) => ACCEPT.split(',').includes(f.type) && f.size <= MAX_MB * 1024 * 1024);
-    setRejected(ok.length < all.length ? `${all.length - ok.length} file${all.length - ok.length === 1 ? ' was' : 's were'} skipped: use JPEG, PNG or WebP images up to ${MAX_MB} MB.` : null);
+    const { ok, rejected } = checkImages(files);
+    setRejected(rejected);
     if (ok.length) upload.mutate(ok);
     if (input.current) input.current.value = '';
   };
@@ -205,6 +212,102 @@ export function SpeciesImageViewer({ images, index: initial, name, onClose }: { 
         {images.length > 1 && <button onClick={() => go(1)} aria-label="Next photo">Next ›</button>}
         <button onClick={onClose}>Close</button>
       </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ photos picked before the species exists
+
+/** A photo chosen in the form but not uploaded yet; `error` is set when its upload failed. */
+export interface PendingPhoto {
+  key: string;
+  file: File;
+  /** Local object URL for the preview; revoked when the photo is removed or the form closes. */
+  url: string;
+  error?: string;
+}
+
+let pendingSeq = 0;
+
+/**
+ * Uploads the photos one request each (a request is all-or-nothing on the server), in order, so a failure
+ * names the photo it belongs to. Returns the photos that failed, with their error.
+ */
+export async function uploadPendingPhotos(speciesId: string, photos: PendingPhoto[]): Promise<PendingPhoto[]> {
+  const failed: PendingPhoto[] = [];
+  for (const p of photos) {
+    const form = new FormData();
+    form.append('file', p.file);
+    try {
+      await api.upload(`/admin/species/${speciesId}/images`, form);
+      URL.revokeObjectURL(p.url);
+    } catch (e) {
+      failed.push({ ...p, error: (e as Error).message || 'Upload failed.' });
+    }
+  }
+  return failed;
+}
+
+/**
+ * Pick/drop photos with local previews; nothing is uploaded here (the form uploads them after saving).
+ * `picking` false hides the drop zone, e.g. when only failed uploads are left to retry or remove.
+ */
+export function PendingPhotos({ photos, onChange, picking = true, busy }: { photos: PendingPhoto[]; onChange: (photos: PendingPhoto[]) => void; picking?: boolean; busy?: boolean }) {
+  const [dragging, setDragging] = useState(false);
+  const [rejected, setRejected] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  // Previews still shown when the form closes are released then (the latest list, not the first).
+  const latest = useRef(photos);
+  latest.current = photos;
+  useEffect(() => () => latest.current.forEach((p) => URL.revokeObjectURL(p.url)), []);
+
+  const add = (files: FileList | null) => {
+    const { ok, rejected } = checkImages(files);
+    setRejected(rejected);
+    if (ok.length) onChange([...photos, ...ok.map((file) => ({ key: `p${++pendingSeq}`, file, url: URL.createObjectURL(file) }))]);
+    if (input.current) input.current.value = '';
+  };
+  const remove = (p: PendingPhoto) => {
+    URL.revokeObjectURL(p.url);
+    onChange(photos.filter((x) => x.key !== p.key));
+  };
+
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      {picking && (
+        <>
+          <div className="muted">Optional. Photos field officers see when choosing this species; the first one is its cover. They upload when you save.</div>
+          {rejected && <div className="notice warning" role="alert">{rejected}</div>}
+          <div
+            className={`dropzone${dragging ? ' active' : ''}`}
+            onDragOver={(e) => (e.preventDefault(), setDragging(true))}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => (e.preventDefault(), setDragging(false), add(e.dataTransfer.files))}
+          >
+            <input ref={input} type="file" accept={ACCEPT} multiple hidden onChange={(e) => add(e.target.files)} />
+            <button type="button" onClick={() => input.current?.click()} disabled={busy}>Add photos</button>
+            <span className="muted">or drop images here (JPEG, PNG or WebP, up to {MAX_MB} MB each)</span>
+          </div>
+        </>
+      )}
+      {photos.length > 0 && (
+        <div className="species-photos">
+          {photos.map((p, i) => (
+            <figure key={p.key} className="species-photo">
+              <span className="thumb" style={{ cursor: 'default' }}>
+                <img src={p.url} alt={`Photo ${i + 1} to upload: ${p.file.name}`} />
+                {!p.error && <span className="tag">Not uploaded yet</span>}
+              </span>
+              <span className="muted" style={{ fontSize: 13, overflowWrap: 'anywhere' }}>{p.file.name}</span>
+              {p.error && <span className="pill critical" style={{ whiteSpace: 'normal' }}>Failed: {p.error}</span>}
+              <div className="species-photo-actions">
+                <span className="spacer" />
+                <button type="button" className="danger" disabled={busy} onClick={() => remove(p)} aria-label={`Remove ${p.file.name}`}>Remove</button>
+              </div>
+            </figure>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

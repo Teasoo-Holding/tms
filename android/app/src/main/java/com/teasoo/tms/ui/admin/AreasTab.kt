@@ -157,7 +157,7 @@ private fun SectorGroup(
 ) {
     val outline = boundaryCorners(s.boundary)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 4.dp)) {
-        ActionItem(onClick = onEdit, onActions = onActions, tonal = true) {
+        ActionItem(onClick = onEdit, onActions = onActions, tonal = true, onEdit = onEdit, editLabel = "Edit ${s.name}") {
             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (outline.size >= MIN_CORNERS) {
                     AreaSketch(outline, Modifier.size(56.dp), inner = s.subSectors.map { boundaryCorners(it.boundary) }, description = "Outline of ${s.name}")
@@ -171,7 +171,7 @@ private fun SectorGroup(
         }
         Column(Modifier.padding(start = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             s.subSectors.forEach { ss ->
-                ActionItem(onClick = { onEditSub(ss) }, onActions = { onSubActions(ss) }) {
+                ActionItem(onClick = { onEditSub(ss) }, onActions = { onSubActions(ss) }, onEdit = { onEditSub(ss) }, editLabel = "Edit ${ss.name}") {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                         ItemTitle(ss.name, ss.active)
                         ItemSubtitle("${ss.shortCode} · ${shapeText(boundaryCorners(ss.boundary))}")

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useIsAdmin } from '../auth';
-import { clean, EmptyState, ErrorNotice, Field, fmtNum, Modal, PageHeader, RowMenu, useDelete, useForm } from '../components/ui';
+import { clean, EditButton, EmptyState, ErrorNotice, Field, fmtNum, Modal, PageHeader, RowMenu, useDelete, useForm } from '../components/ui';
 
 export function ProjectsPage() {
   const isAdmin = useIsAdmin();
@@ -41,6 +41,7 @@ export function ProjectsPage() {
                   <td className="num">{fmtNum(p.tree_count)}</td>
                   {isAdmin && (
                     <td className="actions">
+                      <EditButton name={p.name} onClick={() => setEditing(p)} />
                       <RowMenu
                         items={[
                           { label: 'Edit', onClick: () => setEditing(p) },

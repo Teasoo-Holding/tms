@@ -3,7 +3,7 @@ import { Fragment, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth';
-import { ActivePill, Chevron, clean, Details, EmptyState, ErrorNotice, Field, fmtDateTime, fmtNum, isStale, Modal, PageHeader, PasswordInput, relativeTime, RowMenu, Tabs, useForm } from '../components/ui';
+import { ActivePill, Chevron, clean, Details, EditButton, EmptyState, ErrorNotice, Field, fmtDateTime, fmtNum, isStale, Modal, PageHeader, PasswordInput, relativeTime, RowMenu, Tabs, useForm } from '../components/ui';
 
 const ROLE_LABEL: Record<string, string> = { ADMIN: 'Administrator', FIELD_OFFICER: 'Field officer', EXECUTIVE: 'Executive' };
 
@@ -52,6 +52,7 @@ export function UsersPage() {
                   </td>
                   <td className="hide-sm"><ActivePill active={u.active} /></td>
                   <td className="actions">
+                    <EditButton name={u.full_name} onClick={() => setEditing(u)} />
                     <RowMenu
                       items={[
                         { label: 'Edit', onClick: () => setEditing(u) },

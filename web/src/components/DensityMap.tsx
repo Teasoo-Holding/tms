@@ -3,6 +3,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { StatTile } from '../charts/charts';
 import { BLANK_STYLE, STYLE_URL } from './AreaMap';
+import { DotArea, DotCounts, dotFeatures, DotState, treesPerDot } from './densityDots';
 import { fmtNum } from './ui';
 
 /** Counts and rates of one area, as returned by GET /reports/density (and /share/:token/density). */
@@ -36,41 +37,61 @@ export interface DensityReport {
   sectors: DensityArea[];
 }
 
-type Level = 'sub_sector' | 'sector';
+// Dot colours by the tree's latest observation. MapLibre paints need literal colours.
+const DOT_COLORS: Record<DotState, string> = { alive: '#1a9641', dead: '#d03b3b', unknown: '#8f8f87' };
+const DOT_LABELS: Record<DotState, string> = { alive: 'Alive', dead: 'Dead', unknown: 'Not yet observed' };
+const OUTLINE = '#1f3d2b';
 
-// Sequential greens (light = few trees per hectare, dark = many). MapLibre paints need literal colours.
-const RAMP = ['#d9f0d3', '#a6dba0', '#5aae61', '#1b7837', '#00441b'];
-const NO_TREES = '#c9c8bf';
-
-/** Five equal classes up to a rounded maximum, so the legend reads in whole numbers. */
-function classBreaks(max: number): number[] {
-  if (max <= 0) return [];
-  const raw = max / RAMP.length;
-  const magnitude = 10 ** Math.floor(Math.log10(raw));
-  const step = [1, 2, 2.5, 5, 10].map((m) => m * magnitude).find((s) => s >= raw) ?? raw;
-  return RAMP.map((_, i) => step * (i + 1));
-}
-const colorFor = (density: number | null, breaks: number[]) => {
-  if (!density) return NO_TREES;
-  const i = breaks.findIndex((b) => density <= b);
-  return RAMP[i === -1 ? RAMP.length - 1 : i];
-};
 const fmtRate = (v: number | null) => (v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 1 }));
 const fmtHa = (v: number | null) => (v == null ? 'No outline' : v.toLocaleString(undefined, { maximumFractionDigits: 2 }));
 const fmtShare = (v: number | null) => (v == null ? '—' : `${Math.round(v * 100)}%`);
-const fmtBreak = (v: number) => v.toLocaleString(undefined, { maximumFractionDigits: 1 });
 const areaLabel = (a: DensityArea) => `${a.short_code} · ${a.name}`;
+const countsOf = (a: DensityStats): DotCounts => ({ alive: a.alive_trees, dead: a.dead_trees, unknown: a.unknown_trees });
+
+/** What the map draws: area outlines, tree dots, how many trees a dot stands for and how many trees could not be drawn. */
+interface DotMap {
+  areas: GeoJSON.FeatureCollection;
+  dots: GeoJSON.FeatureCollection;
+  perDot: number;
+  outlined: number;
+  undrawn: number;
+}
 
 /**
- * Tree density by area: sector or sub-sector outlines shaded by registered trees per hectare, with totals, a
- * legend and the figures in a table. Trees have no GPS positions, so density is per surveyed area.
+ * Trees of an outlined sub-sector go inside it. The rest of a sector's trees (all of them when its sub-sectors
+ * have no outlines) go inside the sector outline, clear of the outlined sub-sectors. Trees with no outline
+ * around them at all are only counted.
+ */
+function buildDotMap(sectors: DensityArea[]): DotMap {
+  const areas: GeoJSON.Feature[] = [];
+  const fill: DotArea[] = [];
+  let outlined = 0;
+  let undrawn = 0;
+  for (const s of sectors) {
+    const subs = (s.sub_sectors ?? []).filter((ss) => ss.boundary);
+    if (s.boundary) areas.push({ type: 'Feature', geometry: s.boundary, properties: { kind: 'sector', ...popupProps(s) } });
+    for (const ss of subs) {
+      areas.push({ type: 'Feature', geometry: ss.boundary!, properties: { kind: 'sub_sector', ...popupProps(ss, s) } });
+      fill.push({ id: ss.id, polygon: ss.boundary!, counts: countsOf(ss) });
+    }
+    outlined += (s.boundary ? 1 : 0) + subs.length;
+    const rest = countsOf(s);
+    for (const ss of subs) for (const k of ['alive', 'dead', 'unknown'] as const) rest[k] = Math.max(0, rest[k] - countsOf(ss)[k]);
+    if (s.boundary) fill.push({ id: s.id, polygon: s.boundary, exclude: subs.map((ss) => ss.boundary!), counts: rest });
+    else undrawn += rest.alive + rest.dead + rest.unknown;
+  }
+  const perDot = treesPerDot(fill.map((a) => a.counts));
+  return { areas: { type: 'FeatureCollection', features: areas }, dots: { type: 'FeatureCollection', features: dotFeatures(fill, perDot) }, perDot, outlined, undrawn };
+}
+
+/**
+ * Trees by area as a dot map: sector and sub-sector outlines with one dot per registered tree (or per N trees on
+ * large projects), coloured by its latest observation, plus totals, a legend and the figures in a table.
+ * Trees have no GPS positions, so the dots are scattered inside their area and their positions are illustrative.
  */
 export function DensityView({ report }: { report: DensityReport }) {
-  const [level, setLevel] = useState<Level>('sub_sector');
   const [mapFailed, setMapFailed] = useState(false);
-  const shown = useMemo(() => (level === 'sector' ? report.sectors : report.sectors.flatMap((s) => (s.sub_sectors ?? []).map((ss) => ({ ...ss, parent: s })))), [report, level]);
-  const breaks = useMemo(() => classBreaks(Math.max(0, ...shown.map((a) => a.trees_per_hectare ?? 0))), [shown]);
-  const outlined = shown.filter((a) => a.boundary).length;
+  const dotMap = useMemo(() => buildDotMap(report.sectors), [report]);
   const t = report.totals;
 
   return (
@@ -84,22 +105,17 @@ export function DensityView({ report }: { report: DensityReport }) {
 
       <section className="card">
         <div className="chart-head">
-          <h2>Trees per hectare</h2>
-          <span className="spacer" />
-          <div className="row" style={{ gap: 6 }} role="group" aria-label="Areas to shade">
-            <button type="button" className="chip" aria-pressed={level === 'sub_sector'} onClick={() => setLevel('sub_sector')}>Sub-sectors</button>
-            <button type="button" className="chip" aria-pressed={level === 'sector'} onClick={() => setLevel('sector')}>Sectors</button>
-          </div>
+          <h2>Trees by area</h2>
         </div>
-        {shown.length === 0 ? (
-          <div className="empty">No {level === 'sector' ? 'sectors' : 'sub-sectors'} for this selection.</div>
+        {report.sectors.length === 0 ? (
+          <div className="empty">No sectors for this selection.</div>
         ) : (
           <>
-            {!mapFailed && outlined > 0 && <DensityMapCanvas areas={shown} outlines={level === 'sub_sector' ? report.sectors : []} breaks={breaks} onUnavailable={() => setMapFailed(true)} />}
-            {outlined === 0 && <div className="notice">None of these areas has an outline yet, so there is nothing to draw. Add corner points under Projects → Areas.</div>}
-            <DensityLegend breaks={breaks} />
-            {outlined > 0 && outlined < shown.length && (
-              <p className="muted" style={{ margin: 0 }}>{fmtNum(shown.length - outlined)} of {fmtNum(shown.length)} areas have no outline and are listed in the table only.</p>
+            {!mapFailed && dotMap.outlined > 0 && <DensityMapCanvas dotMap={dotMap} onUnavailable={() => setMapFailed(true)} />}
+            {dotMap.outlined === 0 && <div className="notice">None of these areas has an outline yet, so there is nothing to draw. Add corner points under Projects → Areas.</div>}
+            <DensityLegend perDot={dotMap.perDot} />
+            {dotMap.outlined > 0 && dotMap.undrawn > 0 && (
+              <p className="muted" style={{ margin: 0 }}>{fmtNum(dotMap.undrawn)} trees are in areas without an outline: they are not drawn and are counted in the table only.</p>
             )}
           </>
         )}
@@ -107,38 +123,35 @@ export function DensityView({ report }: { report: DensityReport }) {
 
       <section className="card flush">
         <div className="table-wrap">
-          <DensityTable sectors={report.sectors} breaks={level === 'sector' ? breaks : undefined} subBreaks={level === 'sub_sector' ? breaks : undefined} />
+          <DensityTable sectors={report.sectors} />
         </div>
       </section>
       <p className="muted" style={{ margin: 0 }}>
-        Trees are counted by area (they have no individual GPS positions): registered trees in the area divided by the area of its surveyed outline. “Alive” is the share of
-        trees whose latest visit found them alive, out of those found alive or dead.
+        Trees per hectare: registered trees in the area divided by the area of its surveyed outline. “Alive” is the share of trees whose latest visit found them alive, out of
+        those found alive or dead.
       </p>
     </div>
   );
 }
 
-function Swatch({ color }: { color: string }) {
-  return <i style={{ background: color }} />;
-}
-
-export function DensityLegend({ breaks }: { breaks: number[] }) {
+export function DensityLegend({ perDot }: { perDot: number }) {
   return (
-    <div className="legend" aria-label="Map legend: trees per hectare">
-      <span><Swatch color={NO_TREES} />No trees</span>
-      {breaks.map((b, i) => (
-        <span key={b}><Swatch color={RAMP[i]} />{i === 0 ? `up to ${fmtBreak(b)}` : `${fmtBreak(breaks[i - 1])}–${fmtBreak(b)}`}</span>
-      ))}
-      <span>trees / ha</span>
+    <div className="stack" style={{ gap: 0 }}>
+      <div className="legend" aria-label="Map legend">
+        {(Object.keys(DOT_COLORS) as DotState[]).map((k) => (
+          <span key={k}><i style={{ background: DOT_COLORS[k], borderRadius: '50%' }} />{DOT_LABELS[k]}</span>
+        ))}
+        <span>1 dot = {perDot === 1 ? '1 tree' : `${fmtNum(perDot)} trees`}</span>
+      </div>
+      <p className="muted" style={{ margin: 0, fontSize: 12 }}>Dots show how many trees are in each area; their positions inside the area are illustrative (trees have no GPS).</p>
     </div>
   );
 }
 
-function DensityTable({ sectors, breaks, subBreaks }: { sectors: DensityArea[]; breaks?: number[]; subBreaks?: number[] }) {
-  const row = (a: DensityArea, sub: boolean, scale?: number[]) => (
+function DensityTable({ sectors }: { sectors: DensityArea[] }) {
+  const row = (a: DensityArea, sub: boolean) => (
     <tr key={a.id} style={a.active ? undefined : { opacity: 0.65 }}>
       <td style={sub ? { paddingLeft: 28 } : { fontWeight: 600 }}>
-        {scale && <span className="legend-dot" style={{ background: colorFor(a.trees_per_hectare, scale) }} aria-hidden />}
         {areaLabel(a)}
         {!a.active && <span className="pill" style={{ marginLeft: 6 }}>Inactive</span>}
         {!sub && a.year_label === null && <span className="muted"> (older setup)</span>}
@@ -164,8 +177,8 @@ function DensityTable({ sectors, breaks, subBreaks }: { sectors: DensityArea[]; 
       <tbody>
         {sectors.map((s) => (
           <Fragment key={s.id}>
-            {row(s, false, breaks)}
-            {(s.sub_sectors ?? []).map((ss) => row(ss, true, subBreaks))}
+            {row(s, false)}
+            {(s.sub_sectors ?? []).map((ss) => row(ss, true))}
           </Fragment>
         ))}
       </tbody>
@@ -173,29 +186,16 @@ function DensityTable({ sectors, breaks, subBreaks }: { sectors: DensityArea[]; 
   );
 }
 
-function toGeoJson(areas: DensityArea[], outlines: DensityArea[], breaks: number[]): GeoJSON.FeatureCollection {
-  const features: GeoJSON.Feature[] = [];
-  for (const s of outlines) {
-    if (s.boundary) features.push({ type: 'Feature', geometry: s.boundary, properties: { outline: true, code: s.short_code } });
-  }
-  for (const a of areas) {
-    if (!a.boundary) continue;
-    const parent = (a as DensityArea & { parent?: DensityArea }).parent;
-    features.push({
-      type: 'Feature',
-      geometry: a.boundary,
-      properties: {
-        title: parent ? `${parent.short_code}/${a.short_code} · ${a.name}` : areaLabel(a),
-        color: colorFor(a.trees_per_hectare, breaks),
-        hectares: fmtHa(a.area_hectares),
-        trees: fmtNum(a.registered_trees),
-        density: fmtRate(a.trees_per_hectare),
-        alive: fmtShare(a.alive_share),
-        counts: `${fmtNum(a.alive_trees)} alive · ${fmtNum(a.dead_trees)} dead · ${fmtNum(a.unknown_trees)} not observed`,
-      },
-    });
-  }
-  return { type: 'FeatureCollection', features };
+/** Popup text of an area, kept as feature properties. */
+function popupProps(a: DensityArea, parent?: DensityArea) {
+  return {
+    title: parent ? `${parent.short_code}/${a.short_code} · ${a.name}` : areaLabel(a),
+    hectares: fmtHa(a.area_hectares),
+    trees: fmtNum(a.registered_trees),
+    density: fmtRate(a.trees_per_hectare),
+    alive: fmtShare(a.alive_share),
+    counts: `${fmtNum(a.alive_trees)} alive · ${fmtNum(a.dead_trees)} dead · ${fmtNum(a.unknown_trees)} not observed`,
+  };
 }
 
 function popupNode(p: any) {
@@ -215,11 +215,11 @@ function popupNode(p: any) {
 }
 
 /** The map itself; calls `onUnavailable` if MapLibre cannot start (e.g. no WebGL) so the table carries on alone. */
-function DensityMapCanvas({ areas, outlines, breaks, onUnavailable }: { areas: DensityArea[]; outlines: DensityArea[]; breaks: number[]; onUnavailable: () => void }) {
+function DensityMapCanvas({ dotMap, onUnavailable }: { dotMap: DotMap; onUnavailable: () => void }) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
-  const latest = useRef({ areas, outlines, breaks });
-  latest.current = { areas, outlines, breaks };
+  const latest = useRef(dotMap);
+  latest.current = dotMap;
 
   useEffect(() => {
     if (!el.current) return;
@@ -240,31 +240,46 @@ function DensityMapCanvas({ areas, outlines, breaks, onUnavailable }: { areas: D
     }
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     m.on('load', () => {
-      m.addSource('density', { type: 'geojson', data: toGeoJson([], [], []) });
-      const filled: any = ['!', ['has', 'outline']];
-      m.addLayer({ id: 'density-fill', type: 'fill', source: 'density', filter: filled, paint: { 'fill-color': ['get', 'color'], 'fill-opacity': 0.75 } });
-      m.addLayer({ id: 'density-line', type: 'line', source: 'density', filter: filled, paint: { 'line-color': '#ffffff', 'line-width': 1 } });
-      m.addLayer({ id: 'sector-outline', type: 'line', source: 'density', filter: ['has', 'outline'], paint: { 'line-color': '#1f3d2b', 'line-width': 1.5, 'line-dasharray': [3, 2] } });
+      const empty: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+      m.addSource('density-areas', { type: 'geojson', data: empty });
+      m.addSource('density-dots', { type: 'geojson', data: empty });
+      const isSector: any = ['==', ['get', 'kind'], 'sector'];
+      m.addLayer({ id: 'area-fill', type: 'fill', source: 'density-areas', paint: { 'fill-color': OUTLINE, 'fill-opacity': 0.05 } });
+      m.addLayer({ id: 'sub-sector-line', type: 'line', source: 'density-areas', filter: ['!', isSector], paint: { 'line-color': OUTLINE, 'line-width': 0.8, 'line-opacity': 0.7 } });
+      m.addLayer({ id: 'sector-line', type: 'line', source: 'density-areas', filter: isSector, paint: { 'line-color': OUTLINE, 'line-width': 2.5 } });
+      m.addLayer({
+        id: 'tree-dots',
+        type: 'circle',
+        source: 'density-dots',
+        paint: {
+          'circle-color': ['match', ['get', 'state'], 'alive', DOT_COLORS.alive, 'dead', DOT_COLORS.dead, DOT_COLORS.unknown],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 1.2, 15, 2.2, 18, 4, 20, 6],
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 14, 0, 17, 0.5],
+        },
+      });
       const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false });
       const pinned = new maplibregl.Popup({ closeButton: true, closeOnClick: true });
-      m.on('mousemove', 'density-fill', (e) => {
-        const p = e.features?.[0]?.properties;
-        if (!p) return;
-        m.getCanvas().style.cursor = 'pointer';
-        if (!pinned.isOpen()) hover.setLngLat(e.lngLat).setDOMContent(popupNode(p)).addTo(m);
+      // The innermost area under the pointer: a sub-sector if there is one, else its sector.
+      const areaAt = (point: maplibregl.Point) => {
+        const hits = m.queryRenderedFeatures(point, { layers: ['area-fill'] });
+        return (hits.find((f) => f.properties?.kind === 'sub_sector') ?? hits[0])?.properties;
+      };
+      m.on('mousemove', (e) => {
+        const p = areaAt(e.point);
+        m.getCanvas().style.cursor = p ? 'pointer' : '';
+        if (!p) hover.remove();
+        else if (!pinned.isOpen()) hover.setLngLat(e.lngLat).setDOMContent(popupNode(p)).addTo(m);
       });
-      m.on('mouseleave', 'density-fill', () => {
-        m.getCanvas().style.cursor = '';
-        hover.remove();
-      });
-      m.on('click', 'density-fill', (e) => {
-        const p = e.features?.[0]?.properties;
+      m.on('mouseout', () => hover.remove());
+      m.on('click', (e) => {
+        const p = areaAt(e.point);
         if (!p) return;
         hover.remove();
         pinned.setLngLat(e.lngLat).setDOMContent(popupNode(p)).addTo(m);
       });
       map.current = m;
-      update(m, latest.current.areas, latest.current.outlines, latest.current.breaks);
+      update(m, latest.current);
     });
     return () => {
       m.remove();
@@ -274,18 +289,19 @@ function DensityMapCanvas({ areas, outlines, breaks, onUnavailable }: { areas: D
   }, []);
 
   useEffect(() => {
-    if (map.current) update(map.current, areas, outlines, breaks);
-  }, [areas, outlines, breaks]);
+    if (map.current) update(map.current, dotMap);
+  }, [dotMap]);
 
-  return <div ref={el} className="map" aria-label="Map of areas shaded by trees per hectare" role="img" />;
+  return <div ref={el} className="map" aria-label="Map of areas with one dot per tree, coloured alive, dead or not yet observed; positions are illustrative" role="img" />;
 }
 
-function update(m: maplibregl.Map, areas: DensityArea[], outlines: DensityArea[], breaks: number[]) {
-  (m.getSource('density') as GeoJSONSource | undefined)?.setData(toGeoJson(areas, outlines, breaks));
+function update(m: maplibregl.Map, dotMap: DotMap) {
+  (m.getSource('density-areas') as GeoJSONSource | undefined)?.setData(dotMap.areas);
+  (m.getSource('density-dots') as GeoJSONSource | undefined)?.setData(dotMap.dots);
   const bounds = new maplibregl.LngLatBounds();
   let any = false;
-  for (const a of [...areas, ...outlines]) {
-    a.boundary?.coordinates[0].forEach((c) => {
+  for (const f of dotMap.areas.features) {
+    (f.geometry as GeoJSON.Polygon).coordinates[0].forEach((c) => {
       bounds.extend(c as [number, number]);
       any = true;
     });

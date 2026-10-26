@@ -277,7 +277,7 @@ private fun PlantingYearsTab(p: ProjectDetailDto, vm: ProjectSetupViewModel, onA
             val vendors = p.linkedVendors(y.id).size
             val edit = { vm.clearFormError(); editing = y }
             ActionItem(
-                onClick = edit,
+                onClick = edit, onEdit = edit, editLabel = "Edit ${y.yearLabel}",
                 onActions = {
                     actions.open(
                         y.yearLabel, onEdit = edit, editLabel = "Edit dates", active = y.active,

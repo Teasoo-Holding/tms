@@ -6,7 +6,7 @@ import { useIsAdmin } from '../auth';
 import { AreaMap, MapArea } from '../components/AreaMap';
 import { areaHectares, AreaSketch, boundaryCorners, LonLat, orderCorners } from '../components/AreaSketch';
 import { ShareLinksModal } from '../components/ShareLinks';
-import { ActivePill, CardHeader, clean, EmptyState, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RowMenu, Tabs, useDelete, useForm } from '../components/ui';
+import { ActivePill, CardHeader, clean, EditButton, EmptyState, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RowMenu, Tabs, useDelete, useForm } from '../components/ui';
 import {
   appliedTo,
   COMPONENTS,
@@ -239,6 +239,7 @@ function CustomFieldsTab({ projectId }: { projectId: string }) {
                       <td><ActivePill active={f.active} /></td>
                       {isAdmin && (
                         <td className="actions">
+                          <EditButton name={f.label} onClick={() => setForm({ field: f, appliesTo })} />
                           <RowMenu
                             items={[
                               { label: 'Edit', onClick: () => setForm({ field: f, appliesTo }) },
@@ -406,19 +407,23 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
   const areaMenu = (kind: 'sector' | 'sub_sector', area: any, sector?: any) => {
     const path = `/${kind === 'sector' ? 'sectors' : 'sub-sectors'}/${area.id}`;
     const what = kind === 'sector' ? 'sector' : 'sub-sector';
+    const edit = () => setForm(kind === 'sector' ? { kind, area } : { kind, area, sector });
     return (
-      <RowMenu
-        label={`${what} actions`}
-        items={[
-          { label: 'Edit', onClick: () => setForm(kind === 'sector' ? { kind, area } : { kind, area, sector }) },
-          { label: area.active ? 'Deactivate' : 'Activate', onClick: () => toggle.mutate({ path, active: !area.active }) },
-          {
-            label: 'Delete',
-            danger: true,
-            onClick: () => del.ask({ what, name: `${area.short_code} · ${area.name}`, path, note: kind === 'sector' ? 'Its sub-sectors are deleted too.' : undefined }),
-          },
-        ]}
-      />
+      <>
+        <EditButton name={`${what} ${area.short_code} · ${area.name}`} onClick={edit} />
+        <RowMenu
+          label={`${what} actions`}
+          items={[
+            { label: 'Edit', onClick: edit },
+            { label: area.active ? 'Deactivate' : 'Activate', onClick: () => toggle.mutate({ path, active: !area.active }) },
+            {
+              label: 'Delete',
+              danger: true,
+              onClick: () => del.ask({ what, name: `${area.short_code} · ${area.name}`, path, note: kind === 'sector' ? 'Its sub-sectors are deleted too.' : undefined }),
+            },
+          ]}
+        />
+      </>
     );
   };
   const hectares = (boundary: any) => (boundaryCorners(boundary).length ? `${areaHectares(orderCorners(boundaryCorners(boundary))).toFixed(1)} ha` : null);
@@ -762,6 +767,7 @@ function VendorsTab({ project, year, onAddYear }: { project: any; year?: Plantin
                       </td>
                       {isAdmin && (
                         <td className="actions">
+                          {vendor && <EditButton label="Edit vendor" name={l.vendor_name} onClick={() => setEditingVendor(vendor)} />}
                           <RowMenu
                             items={[
                               vendor && { label: 'Edit vendor', onClick: () => setEditingVendor(vendor) },
@@ -1095,6 +1101,7 @@ function YearsTab({ project, selected, onSelect, onAdd }: { project: any; select
                   <td>{y.active ? <span className="pill good">Open</span> : <span className="pill">Closed</span>}</td>
                   {isAdmin && (
                     <td className="actions">
+                      <EditButton label="Edit dates of" name={y.year_label} onClick={() => setEditing(y)} />
                       <RowMenu
                         items={[
                           { label: 'Edit dates', onClick: () => setEditing(y) },

@@ -32,6 +32,7 @@ import com.teasoo.tms.data.local.SpeciesImageEntity
 import com.teasoo.tms.data.local.TmsDatabase
 import com.teasoo.tms.data.repo.SpeciesImageStore
 import com.teasoo.tms.ui.components.ImageViewerDialog
+import com.teasoo.tms.ui.components.bottomSafe
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
@@ -158,7 +159,7 @@ private fun SpeciesGallery(
             }
         }
         Column(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0x99000000)).navigationBarsPadding().padding(16.dp),
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0x99000000)).bottomSafe().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(s.title(), color = Color.White, style = MaterialTheme.typography.titleLarge)

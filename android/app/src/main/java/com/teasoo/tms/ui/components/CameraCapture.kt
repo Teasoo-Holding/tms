@@ -79,11 +79,11 @@ fun CameraCaptureDialog(photoStore: PhotoStore, onCaptured: (CapturedPhoto) -> U
                     },
                 )
             }
-            IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)) {
+            IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopStart).topSafe().padding(8.dp)) {
                 Icon(Icons.Default.Close, contentDescription = "Close camera", tint = Color.White)
             }
             Column(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha = 0.45f)).navigationBarsPadding().padding(vertical = 16.dp),
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.Black.copy(alpha = 0.45f)).bottomSafe().padding(vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
