@@ -70,16 +70,18 @@ components:
             type: object
             properties:
               type:
-                enum: [PROJECT_CODE, PLANTING_YEAR, SECTOR_CODE, SUB_SECTOR_CODE, TEXT, SERIAL]
-                description: VENDOR_CODE appears only in formats (and tree snapshots) from before migration 007; new formats are refused with it (400 SCHEME_INVALID, details [VENDOR_CODE_RETIRED]).
+                enum: [PROJECT_CODE, PLANTING_YEAR, VENDOR_CODE, SECTOR_CODE, SUB_SECTOR_CODE, TEXT, SERIAL]
+                description: VENDOR_CODE is the short code of the tree's vendor (registration then requires vendor_id).
               required: { type: boolean }
               value: { type: string, description: The text, for TEXT parts (1–16 letters or digits). }
         separator: { enum: ['-', '_', '/', '.', ''] }
         serial_width: { type: integer, minimum: 1, maximum: 12 }
         serial_uniqueness_scope:
           type: array
-          description: Empty array means serials are unique globally. Usual choice is [PROJECT, PLANTING_YEAR] (one sequence per project and year, shared by all vendors). VENDOR is legacy only (400 SCHEME_INVALID, details [VENDOR_SCOPE_RETIRED]).
-          items: { enum: [PROJECT, PLANTING_YEAR, SECTOR, SUB_SECTOR] }
+          description: >-
+            Empty array means serials are unique globally. Usual choice is [PROJECT, PLANTING_YEAR, VENDOR] with VENDOR_CODE in the ID
+            (each vendor numbers its trees from 1 per project and year). With VENDOR in the scope, registration requires vendor_id.
+          items: { enum: [PROJECT, PLANTING_YEAR, VENDOR, SECTOR, SUB_SECTOR] }
     CreateTree:
       type: object
       required: [id, project_id, planting_year_id, sector_id, sub_sector_id, species_id, id_scheme_id, serial_input, initial_observation]
@@ -91,7 +93,13 @@ components:
         sector_id: { type: string, format: uuid }
         sub_sector_id: { type: string, format: uuid }
         species_id: { type: string, format: uuid }
-        vendor_id: { type: [string, 'null'], format: uuid, description: Who planted (attribution only); never required by the ID format. }
+        vendor_id:
+          type: [string, 'null']
+          format: uuid
+          description: >-
+            Who planted and tagged the tree. Required when the format has a VENDOR_CODE part or VENDOR serial scope (rejected VENDOR_REQUIRED);
+            the vendor must be active (VENDOR_INVALID), have a short code (VENDOR_CODE_MISSING) and, when the planting year has active vendor
+            links, be one of them (VENDOR_NOT_IN_YEAR). Rejections are REJECTED results in sync batches and 422 on POST /trees.
         id_scheme_id: { type: string, format: uuid, description: The scheme version the device used (may since be superseded). }
         serial_input: { type: string, description: Digits from the label; zero-padded by the server. }
         physical_tree_id: { type: string, description: Full ID the officer confirmed; must equal the assembled ID. }
@@ -109,6 +117,7 @@ components:
             observed_at: { type: string, format: date-time, description: Stamped by the device. }
             remarks: { type: [string, 'null'] }
             visit_type: { enum: [VISIT, FIRST_INSTANCE, PLANTING, MAINTENANCE, null], default: VISIT, description: Optional; omitted or null means VISIT. }
+            field_session_id: { type: [string, 'null'], format: uuid, description: Optional; one per field session on the phone, for the field-activity report. }
     DensityStats:
       type: object
       required: [registered_trees, alive_trees, dead_trees, unknown_trees, area_hectares, trees_per_hectare, alive_share]
@@ -160,6 +169,7 @@ components:
         amends_observation_id: { type: [string, 'null'], format: uuid, description: Set for audited corrections; the original is kept and marked superseded. }
         amendment_reason: { type: [string, 'null'] }
         visit_type: { enum: [VISIT, FIRST_INSTANCE, PLANTING, MAINTENANCE, null], default: VISIT, description: Optional; omitted or null means VISIT. }
+        field_session_id: { type: [string, 'null'], format: uuid, description: Optional; one per field session on the phone, for the field-activity report. }
     OperationResult:
       type: object
       required: [status]
@@ -315,8 +325,8 @@ paths:
     post:
       summary: Publish a new version of the project's ID format (admin); it becomes current for new registrations.
       description: >-
-        One format per project, shared by all vendors and planting years (a new project starts with PROJECT_CODE-PLANTING_YEAR-SERIAL,
-        6 digits, numbered per project + planting year). vendor_id or planting_year_id in the body is refused with 400 VENDOR_FORMAT_RETIRED /
+        One format per project, shared by all vendors and planting years (a new project starts with PROJECT_CODE-PLANTING_YEAR-VENDOR_CODE-SERIAL,
+        6 digits, numbered per project + planting year + vendor, e.g. T4L-2026-KNM-000001). vendor_id or planting_year_id in the body is refused with 400 VENDOR_FORMAT_RETIRED /
         YEAR_FORMAT_RETIRED. Earlier versions stay as history; registered IDs never change.
       requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/IdScheme' } } } }
       responses: { '201': { description: Scheme version }, '400': { $ref: '#/components/responses/Error' } }
@@ -412,7 +422,7 @@ paths:
     patch: { summary: Update or deactivate status (admin; the code is fixed), responses: { '200': { description: Status } } }
   /vendors:
     get: { summary: Vendors, responses: { '200': { description: Vendors } } }
-    post: { summary: Create vendor (admin), responses: { '201': { description: Vendor } } }
+    post: { summary: 'Create vendor (admin); short_code is required (1–16 letters or digits, stored upper-case; part of tree IDs)', responses: { '201': { description: Vendor }, '400': { $ref: '#/components/responses/Error' } } }
   /vendors/{id}:
     patch: { summary: Update or deactivate vendor (admin), responses: { '200': { description: Vendor } } }
 
@@ -598,6 +608,58 @@ paths:
       responses:
         '200': { description: Density map, content: { application/json: { schema: { $ref: '#/components/schemas/DensityMap' } } } }
         '404': { description: LINK_INVALID }
+  /reports/field-activity:
+    get:
+      summary: Field activity per officer, day and field session (admin and executive)
+      description: >-
+        A day is the date of observed_at in tz. trees_registered = first visits (registrations), visits = later visits, corrections =
+        amendments (not counted as visits), photos = tree_media rows of those observations. Records of REJECTED trees are left out.
+        Observations without field_session_id form one session per officer and day (field_session_id null). A session is split per
+        project and planting year. days are sorted by date desc then user_name; officers by trees_registered desc. Executives see only
+        their projects (or all with all-projects access); project_id outside them gives 403.
+      parameters:
+        - { name: project_id, in: query, schema: { type: string, format: uuid }, description: Omitted means every project the caller can see. }
+        - { name: from, in: query, schema: { type: string, format: date }, description: 'Inclusive; default 6 days before to.' }
+        - { name: to, in: query, schema: { type: string, format: date }, description: 'Inclusive; default today in tz (or from + 6 days).' }
+        - { name: user_id, in: query, schema: { type: string, format: uuid } }
+        - { name: tz, in: query, schema: { type: string, default: UTC }, description: IANA time zone; unknown gives 400 TIME_ZONE_UNKNOWN. }
+      responses:
+        '200':
+          description: >-
+            { from, to, tz, officers: [{ user_id, user_name, role, trees_registered, visits, corrections, photos, days_active, sessions }],
+            days: [{ date, user_id, user_name, trees_registered, visits, corrections, photos, first_at, last_at, sessions: [{ field_session_id,
+            first_at, last_at, project_id, project_name, planting_year, sectors, sub_sectors (SECTOR/SUB), vendors (short codes), trees_registered,
+            visits, corrections, photos }] }] }
+        '400': { description: 'Invalid query: TIME_ZONE_UNKNOWN, DATE_INVALID, RANGE_INVALID (from after to), RANGE_TOO_LONG (over 366 days)' }
+        '403': { description: Not an administrator or executive, or not assigned to the project }
+  /reports/field-activity.csv:
+    get: { summary: The field-activity report as CSV, one row per session (same parameters; audited), responses: { '200': { description: CSV } } }
+  /share-links:
+    get:
+      summary: Every client share link across projects, newest first (admin)
+      description: >-
+        Rows { id, project_id, project_name, project_code, label, expires_at, revoked_at, last_used_at, created_at, created_by_name,
+        status (ACTIVE | EXPIRED | REVOKED), path }. path is /share/<token> for an active link (the token is stored encrypted), null for
+        revoked or expired links and for links created before migration 009. GET /projects/{id}/share-links returns the same rows for one project.
+      responses: { '200': { description: Links }, '403': { description: Not an administrator } }
+  /projects/{id}/share-links:
+    get: { summary: The project's client share links (admin; same rows as /share-links), responses: { '200': { description: Links } } }
+    post:
+      summary: Create a client share link (admin); body { label?, expires_in_days? }
+      responses: { '201': { description: '{ id, project_id, label, expires_at, created_at, token, path }' } }
+  /share-links/{id}/revoke:
+    post: { summary: Revoke a client share link (admin), responses: { '200': { description: '{ revoked: true }' } } }
+  /share/{token}:
+    get:
+      summary: A client share link's project view (no sign-in); filters planting_year_id, vendor_id, sector_id, from, to
+      description: >-
+        { project, planting_years, vendors, areas, summary }. The summary is the dashboard summary without officer names; it includes
+        by_vendor [{ id, name, short_code, count }] and planted_by_week [{ week (Monday, YYYY-MM-DD), trees, cumulative }] (planting date,
+        else registration date; missing weeks filled with 0, at most 520 weeks).
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses: { '200': { description: Project view }, '404': { description: LINK_INVALID } }
   /reports/trees.csv:
     get: { summary: CSV export (formula-injection safe; audited), responses: { '200': { description: CSV } } }
   /reports/trees.xlsx:

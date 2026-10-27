@@ -26,7 +26,8 @@ const StatusBody = z.object({
 });
 const VendorBody = z.object({
   name: z.string().trim().min(1).max(200),
-  short_code: shortCode.nullish(),
+  /** Required: tree IDs carry the vendor's code (e.g. T4L-2026-KNM-000001). Older vendors may still lack one. */
+  short_code: shortCode,
   contact_name: z.string().max(200).nullish(),
   contact_phone: z.string().max(50).nullish(),
   contact_email: z.string().email().nullish(),

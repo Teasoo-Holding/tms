@@ -6,7 +6,7 @@ import { ActivePill, Chevron, clean, Details, EditButton, EmptyState, ErrorNotic
 
 export type Kind = 'tree-species' | 'tree-statuses' | 'vendors';
 /** `main` columns show in the table; the rest open in the row's details. */
-interface Col { key: string; label: string; type?: 'text' | 'number' | 'bool' | 'email'; required?: boolean; immutable?: boolean; hint?: string; main?: boolean }
+interface Col { key: string; label: string; type?: 'text' | 'number' | 'bool' | 'email'; required?: boolean; immutable?: boolean; hint?: string; main?: boolean; pattern?: string; title?: string; upper?: boolean }
 
 const CONFIG: Record<Kind, { title: string; singular: string; columns: Col[]; note?: string; name: (r: any) => string }> = {
   'tree-species': {
@@ -35,11 +35,11 @@ const CONFIG: Record<Kind, { title: string; singular: string; columns: Col[]; no
   vendors: {
     title: 'Vendors',
     singular: 'vendor',
-    note: 'Vendors record who planted a tree; they are not part of tree IDs.',
+    note: 'Vendors record who planted and tagged a tree. Their short code is part of tree IDs (e.g. T4L-2026-KNM-000001); changing it affects new trees only.',
     name: (r) => r.name,
     columns: [
       { key: 'name', label: 'Name', required: true, main: true },
-      { key: 'short_code', label: 'Short code', hint: 'e.g. KNM', main: true },
+      { key: 'short_code', label: 'Short code', hint: 'e.g. KNM; part of tree IDs', main: true, required: true, pattern: '[A-Za-z0-9]{1,16}', title: '1–16 letters or digits', upper: true },
       { key: 'contact_name', label: 'Contact' },
       { key: 'contact_phone', label: 'Phone' },
       { key: 'contact_email', label: 'Email', type: 'email' },
@@ -60,11 +60,18 @@ export function ReferencePage() {
   const rest = cfg.columns.filter((c) => !c.main);
   const show = (c: Col, r: any) => (c.type === 'bool' ? (r[c.key] ? 'Yes' : 'No') : r[c.key] ?? '—');
   const photos = kind === 'tree-species';
+  const missingCodes = kind === 'vendors' ? (rows.data ?? []).filter((r) => r.active && !r.short_code).length : 0;
   return (
     <div>
       <PageHeader title="Lists" actions={<button className="primary" onClick={() => setEditing({})}>+ {cfg.singular[0].toUpperCase() + cfg.singular.slice(1)}</button>} />
       <Tabs tabs={(Object.keys(CONFIG) as Kind[]).map((k) => [k, CONFIG[k].title])} value={kind} onChange={(k) => (setKind(k), setOpen(null))} />
       <ErrorNotice error={rows.error ?? toggle.error} />
+      {kind === 'vendors' && !!missingCodes && (
+        <div className="notice warning" style={{ marginBottom: 12 }}>
+          {missingCodes === 1 ? '1 vendor has' : `${missingCodes} vendors have`} no short code. Tree IDs carry the vendor code, so officers cannot register trees for
+          {missingCodes === 1 ? ' it' : ' them'} until one is added.
+        </div>
+      )}
       <div className="card table-wrap">
         {!!rows.data?.length && (
           <table>
@@ -83,7 +90,13 @@ export function ReferencePage() {
                   <tr className="clickable" onClick={() => setOpen(open === r.id ? null : r.id)} aria-expanded={open === r.id}>
                     <td className="expander"><Chevron open={open === r.id} /></td>
                     {photos && <td><SpeciesCover speciesId={r.id} name={cfg.name(r)} /></td>}
-                    {main.map((c) => <td key={c.key} className={c.key === 'short_code' ? 'mono' : ''}>{show(c, r)}</td>)}
+                    {main.map((c) => (
+                      <td key={c.key} className={c.key === 'short_code' ? 'mono' : ''}>
+                        {kind === 'vendors' && c.key === 'short_code' && !r.short_code ? (
+                          <span className="pill warning" title="Edit the vendor to add one">No short code — needed for tree IDs</span>
+                        ) : show(c, r)}
+                      </td>
+                    ))}
                     <td><ActivePill active={r.active} /></td>
                     <td className="actions">
                       <EditButton name={cfg.name(r)} onClick={() => setEditing(r)} />
@@ -132,6 +145,7 @@ export function ReferenceForm({ kind, row: initial, onClose }: { kind: Kind; row
       const body: Record<string, any> = clean({ ...f.values });
       cfg.columns.forEach((c) => {
         if (c.type === 'number') body[c.key] = Number(body[c.key] ?? 0);
+        if (c.upper && typeof body[c.key] === 'string') body[c.key] = body[c.key].trim().toUpperCase();
         if (!isNew && c.immutable) delete body[c.key];
       });
       const saved = isNew ? await api.post(`/${kind}`, body) : await api.patch(`/${kind}/${row.id}`, body);
@@ -157,7 +171,7 @@ export function ReferenceForm({ kind, row: initial, onClose }: { kind: Kind; row
         <div className="form-grid">
           {cfg.columns.filter((c) => c.type !== 'bool').map((c) => (
             <Field key={c.key} label={c.label} hint={c.hint}>
-              <input type={c.type ?? 'text'} required={c.required} disabled={!isNew && c.immutable} {...f.bind(c.key)} />
+              <input type={c.type ?? 'text'} required={c.required} pattern={c.pattern} title={c.title} disabled={!isNew && c.immutable} {...f.bind(c.key)} />
             </Field>
           ))}
         </div>

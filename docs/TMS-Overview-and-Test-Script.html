@@ -61,8 +61,8 @@
     <h3>Field work (Android)</h3>
     <ul>
       <li><b>Simple home:</b> one large "Start field session" button. During a session, one large "Register trees" button and a red "End session" button. Large text and buttons.</li>
-      <li><b>Field session:</b> choose project, planting year, vendor (if the year has vendors), sector and sub-sector once. Change sub-sector from a drop-down as you move.</li>
-      <li><b>Register trees:</b> type only the tree number. The full ID is built from the project's format; numbers run on per project and year, shared by all vendors, and the next one is suggested. Species are chosen from picture cards (the administrator's reference photos; open a card to swipe through all of them and choose). Species and status are remembered. Optional tree height in cm, m, inches or feet. A photo is required, shown whole on the form with Retake and Remove; tap it for full screen. After saving, a confirmation shows the tree's ID before the next form. Date, time and planting date are recorded automatically.</li>
+      <li><b>Field session:</b> choose project, planting year, vendor (who planted), sector and sub-sector once. Change sub-sector from a drop-down as you move.</li>
+      <li><b>Register trees:</b> type only the tree number. The full ID is built from the project's format and includes the vendor's code; each vendor numbers its trees from 1 per year, and the next number is suggested. Species are chosen from picture cards (the administrator's reference photos; open a card to swipe through all of them and choose). Species and status are remembered. Optional tree height in cm, m, inches or feet. A photo is required, shown whole on the form with Retake and Remove; tap it for full screen. After saving, a confirmation shows the tree's ID before the next form. Date, time and planting date are recorded automatically.</li>
       <li><b>Known IDs:</b> if a tree number is already registered, the app shows the tree's photo, last species and status, and offers "Record a visit".</li>
       <li><b>Find a tree:</b> search by tree number (with photos), open the tree and record a visit: Alive or Dead, a photo, a note and custom fields. The date and time are stamped automatically.</li>
       <li><b>Warnings:</b> the app warns if a tree is visited in a different sector than the one it was registered in.</li>
@@ -88,12 +88,13 @@
     <ul>
       <li><b>Projects:</b> each has planting years. Every year has its own surveyed sectors and sub-sectors, entered from corner points (walk to a corner and tap "Use my location").</li>
       <li><b>Vendors per planting year.</b></li>
-      <li><b>Tree ID format:</b> one per project, shared by all vendors: fixed parts (project, year, fixed text) and changing parts (sector, sub-sector, tree number). Tree numbers run on per project and planting year. Changes affect new trees only.</li>
+      <li><b>Tree ID format:</b> one per project: fixed parts (project, year, vendor code, fixed text) and changing parts (sector, sub-sector, tree number). Numbers run per project, year and vendor. Changes affect new trees only.</li>
       <li><b>Custom fields:</b> extra fields such as a nursery batch number, collected at registration or at every visit. They can be remembered for the rest of the day.</li>
       <li><b>Species photos:</b> several reference photos per species, uploaded on the web or the phone; phones keep them for offline use.</li>
       <li><b>Reference lists:</b> species, statuses and vendors. Anything can be edited, deactivated or deleted (long-press or swipe on the phone, ⋯ on the web). Items still in use are protected.</li>
       <li><b>Users:</b> sign in with a username, phone number or email. Admins can reset passwords and assign people to projects or areas. Each user's activity and last sync are shown.</li>
       <li><b>Conflicts and corrections:</b> resolve duplicate IDs and correct serial numbers. Every change is audited.</li>
+      <li><b>Field activity:</b> trees, visits and photos per officer, per day and per field session (web and phone, CSV export).</li>
       <li><b>Activity log:</b> the latest 10 entries, or the full log filtered by date, person or activity.</li>
       <li><b>Clear data:</b> field data only, or everything. Needs the typed confirmation and your password.</li>
     </ul>
@@ -128,7 +129,7 @@
   <tr><td class="n">A3</td><td>Add planting year <code>2026</code>.</td><td>The year appears in the year selector.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">A4</td><td>Areas → add sector <code>S01</code> with 4 corner points, then sub-sector <code>SS01</code> inside it.</td><td>Outlines are drawn and the sub-sector sits inside the sector. A sub-sector far outside the sector is refused.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">A5</td><td>Vendors → New vendor (e.g. <code>Konam</code>, code <code>KNM</code>) and link it to 2026.</td><td>The vendor is listed for 2026.</td><td class="ok"><span class="box"></span></td></tr>
-  <tr><td class="n">A6</td><td>ID format → Change: Project, Year, Tree number; width 5.</td><td>The preview shows e.g. <code>TST-2026-00001</code>. There is no vendor option.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">A6</td><td>ID format → Change: Project, Year, Vendor code, Tree number; width 5; numbering per project + year + vendor.</td><td>The preview shows e.g. <code>TST-2026-KNM-00001</code> (vendor code included, numbered per vendor).</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">A6b</td><td>Reference data → Add species, and pick 2–3 reference photos in the same form. Use the pencil button on another species to edit it.</td><td>The thumbnails appear; clicking one shows it full size.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">A7</td><td>Custom fields → add "Nursery batch" (text, remember during session).</td><td>The field is listed.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">A8</td><td>Officers → assign the field officer to the project. Set the project status to Active.</td><td>The assignment is listed and the project is Active.</td><td class="ok"><span class="box"></span></td></tr>
@@ -138,8 +139,8 @@
 <table>
   <tr><th>#</th><th>Do this</th><th>Expected result</th><th>✓</th></tr>
   <tr><td class="n">B1</td><td>Sign in on the phone with internet on, then wait for the first sync.</td><td>The home screen shows a large "Start field session" button; there is no Map button.</td><td class="ok"><span class="box"></span></td></tr>
-  <tr><td class="n">B2</td><td>Turn on <b>airplane mode</b>. Start field session: project, 2026, vendor KNM, S01, SS01.</td><td>No "type of visit" or "planted on" is asked. Home shows the session, a large "Register trees" button and a red "End session" button.</td><td class="ok"><span class="box"></span></td></tr>
-  <tr><td class="n">B3</td><td>Register trees: tap the suggested number, choose the species from its picture card (open its photos once), take a photo, check the whole photo shows (try Retake once), choose Alive, enter a height of 85 cm, add a note (the note box stays above the keyboard), enter a nursery batch, then Save tree.</td><td>A "Tree registered" pop-up shows <code>TST-2026-00001</code>. "Register next tree" opens an empty form with the batch remembered.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B2</td><td>Turn on <b>airplane mode</b>. Start field session: project, 2026, vendor KNM (required), S01, SS01.</td><td>No "type of visit" or "planted on" is asked. Home shows the session, a large "Register trees" button and a red "End session" button.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">B3</td><td>Register trees: tap the suggested number, choose the species from its picture card (open its photos once), take a photo, check the whole photo shows (try Retake once), choose Alive, enter a height of 85 cm, add a note (the note box stays above the keyboard), enter a nursery batch, then Save tree.</td><td>A "Tree registered" pop-up shows <code>TST-2026-KNM-00001</code>. "Register next tree" opens an empty form with the batch remembered.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">B4</td><td>Register 4 more trees. Try saving one without a photo.</td><td>Saving is blocked until a photo is taken.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">B5</td><td>Type an already registered tree number.</td><td>"Already registered" appears with the tree's photo, species and status, plus "Record a visit to this tree".</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">B6</td><td>Home → Find a tree → type a number → open the tree → Record a visit → choose Dead, add a photo, Save visit.</td><td>The visit is saved. The date and time are stamped automatically (not editable).</td><td class="ok"><span class="box"></span></td></tr>
@@ -166,7 +167,8 @@
   <tr><td class="n">D2</td><td>Export all (Excel), then Print report → Save as PDF.</td><td>A workbook with Trees, Visits and setup sheets, and a clean one-page-per-section PDF.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">D3</td><td>Visits → filter by date → open a row → Export CSV.</td><td>The row shows that visit's photos. Only matching visits are exported, newest first.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">D3b</td><td>Web: Density map → choose the project and 2026. Phone: Administration → Density map.</td><td>S01 shows one dot per tree (green alive, red dead, grey not visited) scattered inside its outline, with hectares and trees per hectare in the table.</td><td class="ok"><span class="box"></span></td></tr>
-  <tr><td class="n">D4</td><td>Project → Share → label "Test client", expiry 30 days → Copy. Open the link in a private browser window.</td><td>The read-only client dashboard opens without login. Excel, CSV and Print work, and no staff names are shown.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">D3c</td><td>Field activity → 7 days.</td><td>The officer shows today's trees and visits; opening the day shows the session with its time, area and vendor.</td><td class="ok"><span class="box"></span></td></tr>
+  <tr><td class="n">D4</td><td>Client links (or Project → Share) → label "Test client", expiry 30 days → Copy. Open the link in a private browser window.</td><td>The read-only client dashboard opens without login. Excel, CSV and Print work, and no staff names are shown.</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">D5</td><td>Revoke the link and reload it.</td><td>"This link is not valid any more."</td><td class="ok"><span class="box"></span></td></tr>
   <tr><td class="n">D6</td><td>Audit log, then See full log → filter by the field officer and today's date.</td><td>The latest 10 entries, then that officer's registrations and visits, with device and time.</td><td class="ok"><span class="box"></span></td></tr>
 </table>

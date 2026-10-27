@@ -517,7 +517,7 @@ describe('areas per planting year, vendors and their ID formats', () => {
     expect(res.body.results[0].code).toBe('AREA_OTHER_YEAR');
   });
 
-  it('links vendors to a planting year as attribution; ID formats are per project, not per vendor or year', async () => {
+  it('links vendors to a planting year; one project format, which may number trees per vendor', async () => {
     vendor = (await admin.post('/vendors', { name: 'Konam Ltd', short_code: 'KNM' }).expect(201)).body.id;
     const other = (await admin.post('/vendors', { name: 'Green Hands', short_code: 'GRH' }).expect(201)).body.id;
     await admin.post(`/planting-years/${year2026}/vendors`, { vendor_id: vendor }).expect(201);
@@ -530,39 +530,71 @@ describe('areas per planting year, vendors and their ID formats', () => {
     const scheme = (body: Record<string, unknown>) => admin.post(`/projects/${f.projectId}/tree-id-schemes`, { ...format, serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR'], ...body });
     expect((await scheme({ vendor_id: vendor }).expect(400)).body.code).toBe('VENDOR_FORMAT_RETIRED');
     expect((await scheme({ planting_year_id: year2026 }).expect(400)).body.code).toBe('YEAR_FORMAT_RETIRED');
-    const withCode = await scheme({ components: [{ type: 'PROJECT_CODE' }, { type: 'VENDOR_CODE' }, { type: 'SERIAL' }] }).expect(400);
-    expect(withCode.body.code).toBe('SCHEME_INVALID');
-    expect(withCode.body.details).toEqual(['VENDOR_CODE_RETIRED']);
-    expect((await scheme({ serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR', 'VENDOR'] }).expect(400)).body.details).toEqual(['VENDOR_SCOPE_RETIRED']);
     await scheme({ components: [{ type: 'TEXT', value: 'bad text!' }, { type: 'SERIAL' }], serial_uniqueness_scope: [] }).expect(400);
 
-    // One project format; it replaces the previous version.
-    const fmt = await scheme({}).expect(201);
+    // The vendor code in the ID, numbered per project + planting year + vendor: each vendor starts from 1.
+    const vendorFmt = await scheme({
+      components: [{ type: 'PROJECT_CODE' }, { type: 'PLANTING_YEAR' }, { type: 'VENDOR_CODE' }, { type: 'SERIAL' }],
+      serial_width: 6, serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR', 'VENDOR'],
+    }).expect(201);
     const project = (await admin.get(`/projects/${f.projectId}`).expect(200)).body;
-    expect(project.tree_id_schemes.filter((s: any) => s.active).map((s: any) => s.id)).toEqual([fmt.body.id]);
-    const del = await admin.del(`/tree-id-schemes/${fmt.body.id}`).expect(409);
+    expect(project.tree_id_schemes.filter((s: any) => s.active).map((s: any) => s.id)).toEqual([vendorFmt.body.id]);
+    const del = await admin.del(`/tree-id-schemes/${vendorFmt.body.id}`).expect(409);
     expect(del.body.code).toBe('FORMAT_CURRENT');
 
-    // Vendors are recorded on the tree but share one sequence per project + planting year.
-    const register = (serial: string, vendorId: string | null) =>
+    const register = (serial: string, vendorId: string | null, schemeId: string, values: Record<string, string> = {}) =>
       sync(admin, [
         createOp(
           treePayload(f, serial, {
-            planting_year_id: year2026, sector_id: sector26, sub_sector_id: sub26, vendor_id: vendorId, id_scheme_id: fmt.body.id,
-            id_component_values: { PROJECT_CODE: 'T4L', PLANTING_YEAR: '2030', SECTOR_CODE: 'S01' },
+            planting_year_id: year2026, sector_id: sector26, sub_sector_id: sub26, vendor_id: vendorId, id_scheme_id: schemeId,
+            id_component_values: { PROJECT_CODE: 'T4L', PLANTING_YEAR: '2030', ...values },
           }),
         ),
-      ]);
-    const first = (await register('15', vendor)).body.results[0];
+      ]).then((r) => r.body.results[0]);
+    const knm = await register('1', vendor, vendorFmt.body.id);
+    expect(knm.status).toBe('ACCEPTED');
+    expect(knm.entity.physical_tree_id).toBe('T4L-2030-KNM-000001');
+    expect(knm.entity.serial_scope_key).toBe(`PLANTING_YEAR=${year2026}|PROJECT=${f.projectId}|VENDOR=${vendor}`);
+    const grh = await register('1', other, vendorFmt.body.id);
+    expect(grh.status).toBe('ACCEPTED');
+    expect(grh.entity.physical_tree_id).toBe('T4L-2030-GRH-000001');
+    expect((await register('1', vendor, vendorFmt.body.id)).status).toBe('CONFLICT');
+    // The vendor is part of the ID: it is required, needs a short code and must be one of the year's vendors.
+    expect((await register('2', null, vendorFmt.body.id)).code).toBe('VENDOR_REQUIRED');
+    const [noCode] = await sql(`INSERT INTO vendors (name) VALUES ('Old Vendor') RETURNING id`);
+    await admin.post(`/planting-years/${year2026}/vendors`, { vendor_id: noCode.id }).expect(201);
+    const missing = await register('2', noCode.id, vendorFmt.body.id);
+    expect(missing).toMatchObject({ status: 'REJECTED', code: 'VENDOR_CODE_MISSING', message: 'Vendor Old Vendor has no short code. Add one under Vendors.' });
+    const outsider = (await admin.post('/vendors', { name: 'Elsewhere', short_code: 'ELS' }).expect(201)).body.id;
+    expect((await register('2', outsider, vendorFmt.body.id)).code).toBe('VENDOR_NOT_IN_YEAR');
+    // The web form gets the same refusal (REST maps rejections to 422).
+    const rest422 = await admin.post('/trees', treePayload(f, '3', { planting_year_id: year2026, sector_id: sector26, sub_sector_id: sub26, id_scheme_id: vendorFmt.body.id, id_component_values: undefined })).expect(422);
+    expect(rest422.body.code).toBe('VENDOR_REQUIRED');
+    // The vendor cannot be swapped afterwards: the tree number belongs to the vendor's sequence.
+    const swap = await admin.patch(`/trees/${knm.entity.id}`, { base_revision: knm.entity.revision, changes: { vendor_id: other } }).expect(422);
+    expect(swap.body.code).toBe('VENDOR_IN_ID');
+
+    // Vendors need a short code from now on.
+    expect((await admin.post('/vendors', { name: 'No Code Ltd' }).expect(400)).body.code).toBe('VALIDATION_FAILED');
+
+    // A format without the vendor: vendors share one sequence and the vendor is optional attribution.
+    const fmt = await scheme({}).expect(201);
+    const first = await register('15', vendor, fmt.body.id, { SECTOR_CODE: 'S01' });
     expect(first.status).toBe('ACCEPTED');
     expect(first.entity.physical_tree_id).toBe('T4L-2030-S01-00015');
     expect(first.entity.vendor_id).toBe(vendor);
     expect(first.entity.serial_scope_key).toBe(`PLANTING_YEAR=${year2026}|PROJECT=${f.projectId}`);
-    const clash = (await register('15', other)).body.results[0];
-    expect(clash.status).toBe('CONFLICT');
-    expect((await register('16', other)).body.results[0].status).toBe('ACCEPTED');
-    // No vendor at all is fine too.
-    expect((await register('17', null)).body.results[0].status).toBe('ACCEPTED');
+    expect((await register('15', other, fmt.body.id, { SECTOR_CODE: 'S01' })).status).toBe('CONFLICT');
+    expect((await register('16', other, fmt.body.id, { SECTOR_CODE: 'S01' })).status).toBe('ACCEPTED');
+    expect((await register('17', null, fmt.body.id, { SECTOR_CODE: 'S01' })).status).toBe('ACCEPTED');
+  });
+
+  it('gives a new project the PROJECT-YEAR-VENDOR-000001 format, numbered per vendor', async () => {
+    const created = (await admin.post('/projects', { name: 'Vendor Default', short_code: 'VDF', physical_id_uniqueness: 'PROJECT' }).expect(201)).body;
+    const project = (await admin.get(`/projects/${created.id}`).expect(200)).body;
+    const [current] = project.tree_id_schemes.filter((s: any) => s.active);
+    expect(current.component_definition.map((c: any) => c.type)).toEqual(['PROJECT_CODE', 'PLANTING_YEAR', 'VENDOR_CODE', 'SERIAL']);
+    expect(current).toMatchObject({ separator: '-', serial_width: 6, serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR', 'VENDOR'] });
   });
 
   it('lets Teasoo management executives see every project, while clients see only theirs', async () => {
@@ -801,6 +833,113 @@ describe('species reference images', () => {
   });
 });
 
+describe('field sessions and the field-activity report', () => {
+  const sq = (lat: number, lon: number, d: number) => [
+    { latitude: lat, longitude: lon }, { latitude: lat, longitude: lon + d }, { latitude: lat + d, longitude: lon + d }, { latitude: lat + d, longitude: lon },
+  ];
+  const S1 = randomUUID();
+  const S2 = randomUUID();
+  let project: string;
+  let base: Record<string, unknown>;
+  const report = (s: Session, query: string) => s.get(`/reports/field-activity?project_id=${project}&${query}`);
+
+  beforeAll(async () => {
+    project = (await admin.post('/projects', { name: 'Field Activity', short_code: 'FAC', physical_id_uniqueness: 'PROJECT', status: 'ACTIVE' }).expect(201)).body.id;
+    const year = (await admin.post(`/projects/${project}/planting-years`, { year_label: '2026' }).expect(201)).body.id;
+    const sector = (await admin.post(`/projects/${project}/sectors`, { planting_year_id: year, name: 'FA', short_code: 'FA1', corners: sq(8.0, 4.0, 0.01) }).expect(201)).body.id;
+    const sub = (await admin.post(`/sectors/${sector}/sub-sectors`, { name: 'FA a', short_code: 'FAA', corners: sq(8.001, 4.001, 0.004) }).expect(201)).body.id;
+    const vendor = (await admin.post('/vendors', { name: 'Field Vendor', short_code: 'FAV' }).expect(201)).body.id;
+    await admin.post(`/planting-years/${year}/vendors`, { vendor_id: vendor }).expect(201);
+    await admin.post('/assignments', { user_id: f.officerId, project_id: project }).expect(201);
+    const [scheme] = await sql('SELECT id FROM tree_id_schemes WHERE project_id = $1 AND active', [project]);
+    base = { project_id: project, planting_year_id: year, sector_id: sector, sub_sector_id: sub, vendor_id: vendor, id_scheme_id: scheme.id, id_component_values: undefined };
+  });
+
+  const register = async (s: Session, serial: string, observedAt: string, session?: string) => {
+    const p = treePayload(f, serial, { ...base, initial_observation: { id: randomUUID(), status_id: f.status.ALIVE, observed_at: observedAt, field_session_id: session } });
+    const r = (await sync(s, [createOp(p)])).body.results[0];
+    expect(r.status).toBe('ACCEPTED');
+    return { tree: r.entity, observationId: p.initial_observation.id };
+  };
+
+  it('stores the field session sent with registrations and visits, and accepts apps that send none', async () => {
+    // 23:30 UTC on the 20th is 00:30 on the 21st in Lagos (UTC+1).
+    const t1 = await register(officer, '1', '2026-10-20T23:30:00Z', S1);
+    expect(t1.tree.physical_tree_id).toBe('FAC-2026-FAV-000001');
+    await register(officer, '2', '2026-10-21T08:00:00Z', S1);
+    const visit = observationOp(t1.tree.id, f.status.ALIVE, { observed_at: '2026-10-21T09:00:00Z', field_session_id: S1 });
+    expect((await sync(officer, [visit])).body.results[0].entity.field_session_id).toBe(S1);
+    const fix = observationOp(t1.tree.id, f.status.ALIVE, { observed_at: '2026-10-21T09:30:00Z', field_session_id: S1, amends_observation_id: visit.entity_id, amendment_reason: 'Wrong status' });
+    expect((await sync(officer, [fix])).body.results[0].status).toBe('ACCEPTED');
+    // No session (older app): grouped per officer and day.
+    const t3 = await register(officer, '3', '2026-10-21T10:00:00Z');
+    expect((await sync(officer, [observationOp(t3.tree.id, f.status.ALIVE, { observed_at: '2026-10-21T11:00:00Z', field_session_id: null })])).body.results[0].status).toBe('ACCEPTED');
+    const bad = await sync(officer, [observationOp(t3.tree.id, f.status.ALIVE, { field_session_id: 'not-a-uuid' })]);
+    expect(bad.body.results[0]).toMatchObject({ status: 'REJECTED', code: 'VALIDATION_FAILED' });
+    // Photos of the first registration; a rejected tree is left out.
+    for (const id of [randomUUID(), randomUUID()]) {
+      await sql(
+        `INSERT INTO tree_media (id, tree_id, observation_id, checksum_sha256, byte_size, mime_type, captured_at) VALUES ($1, $2, $3, $4, 1000, 'image/jpeg', now())`,
+        [id, t1.tree.id, t1.observationId, 'a'.repeat(64)],
+      );
+    }
+    const t5 = await register(officer, '5', '2026-10-21T12:00:00Z', S1);
+    await sql(`UPDATE trees SET record_state = 'REJECTED' WHERE id = $1`, [t5.tree.id]);
+    await register(admin, '4', '2026-10-22T09:00:00Z', S2);
+    const [stored] = await sql('SELECT field_session_id FROM tree_observations WHERE id = $1', [t1.observationId]);
+    expect(stored.field_session_id).toBe(S1);
+  });
+
+  it('counts per officer, day and session in the caller’s time zone', async () => {
+    const r = (await report(admin, 'from=2026-10-21&to=2026-10-22&tz=Africa/Lagos').expect(200)).body;
+    expect(r).toMatchObject({ from: '2026-10-21', to: '2026-10-22', tz: 'Africa/Lagos' });
+    expect(r.days.map((d: any) => [d.date, d.user_id])).toEqual([['2026-10-22', expect.any(String)], ['2026-10-21', f.officerId]]);
+    expect(r.days[1].user_name).toBe('Femi Field Officer');
+    const day = r.days.find((d: any) => d.date === '2026-10-21');
+    expect(day).toMatchObject({ user_id: f.officerId, trees_registered: 3, visits: 2, corrections: 1, photos: 2, first_at: '2026-10-20T23:30:00.000Z', last_at: '2026-10-21T11:00:00.000Z' });
+    expect(day.sessions).toHaveLength(2);
+    expect(day.sessions[0]).toMatchObject({
+      field_session_id: S1, project_id: project, project_name: 'Field Activity', planting_year: '2026', sectors: ['FA1'], sub_sectors: ['FA1/FAA'], vendors: ['FAV'],
+      trees_registered: 2, visits: 1, corrections: 1, photos: 2, first_at: '2026-10-20T23:30:00.000Z', last_at: '2026-10-21T09:30:00.000Z',
+    });
+    expect(day.sessions[1]).toMatchObject({ field_session_id: null, trees_registered: 1, visits: 1, corrections: 0, photos: 0 });
+    expect(r.officers.map((o: any) => o.user_id)[0]).toBe(f.officerId);
+    expect(r.officers[0]).toMatchObject({ role: 'FIELD_OFFICER', trees_registered: 3, visits: 2, corrections: 1, photos: 2, days_active: 1, sessions: 2 });
+    expect(r.officers[1]).toMatchObject({ role: 'ADMIN', trees_registered: 1, sessions: 1 });
+
+    // In UTC the first registration falls on the 20th.
+    const utc = (await report(admin, 'from=2026-10-21&to=2026-10-21').expect(200)).body;
+    expect(utc.tz).toBe('UTC');
+    expect(utc.days).toHaveLength(1);
+    expect(utc.days[0].trees_registered).toBe(2);
+    const only = (await report(admin, `from=2026-10-20&to=2026-10-22&tz=Africa/Lagos&user_id=${f.officerId}`).expect(200)).body;
+    expect(only.officers.map((o: any) => o.user_id)).toEqual([f.officerId]);
+  });
+
+  it('validates the query and defaults to the last 7 days', async () => {
+    expect((await report(admin, 'tz=Mars/Olympus').expect(400)).body.code).toBe('TIME_ZONE_UNKNOWN');
+    await report(admin, 'from=2026-10-22&to=2026-10-21').expect(400);
+    await report(admin, 'from=2026-02-30').expect(400);
+    const d = (await report(admin, 'tz=Africa/Lagos').expect(200)).body;
+    expect((Date.parse(d.to) - Date.parse(d.from)) / 86_400_000).toBe(6);
+  });
+
+  it('is for administrators and executives, within their projects', async () => {
+    await officer.get('/reports/field-activity').expect(403);
+    await report(exec, 'from=2026-10-21&to=2026-10-22').expect(403); // eli is assigned to Trees for Life only
+    const mine = (await exec.get('/reports/field-activity?from=2026-10-21&to=2026-10-22').expect(200)).body;
+    expect(mine.days.flatMap((d: any) => d.sessions).some((x: any) => x.project_id === project)).toBe(false);
+  });
+
+  it('exports one CSV row per session', async () => {
+    const file = await admin.get(`/reports/field-activity.csv?project_id=${project}&from=2026-10-21&to=2026-10-22&tz=Africa/Lagos`).expect(200).expect('Content-Type', /text\/csv/);
+    const lines = file.text.trim().split('\n');
+    expect(lines[0]).toContain('date,user_name,first_at,last_at,project_name,planting_year,sectors,sub_sectors,vendors,trees_registered,visits,corrections,photos,field_session_id');
+    expect(lines).toHaveLength(4);
+    expect(lines.find((l) => l.includes(S1))).toContain('FA1/FAA');
+  });
+});
+
 describe('migration 007: tree IDs per project and planting year', () => {
   const file = path.resolve(__dirname, '../../migrations/007_project_year_tree_ids.sql');
   const definition = (types: string[]) => JSON.stringify(types.map((type) => ({ type, required: true })));
@@ -852,5 +991,47 @@ describe('migration 007: tree IDs per project and planting year', () => {
     await sql(fs.readFileSync(file, 'utf8'));
     expect((await sql('SELECT count(*)::int AS n FROM tree_id_schemes'))[0].n).toBe(before);
     await expect(insert(a.id, 9, ['SERIAL'], [], vendor.id)).rejects.toThrow(/tree_id_schemes_project_wide/);
+  });
+});
+
+describe('migration 009: vendor code in tree IDs', () => {
+  const file = path.resolve(__dirname, '../../migrations/009_vendor_tree_ids_and_field_sessions.sql');
+
+  it('adds the vendor code before the tree number and numbers per vendor, once', async () => {
+    const project = async (code: string, components: unknown[], scope: string[]) => {
+      const [p] = await sql(`INSERT INTO projects (name, short_code, physical_id_uniqueness) VALUES ($1, $1, 'PROJECT') RETURNING id`, [code]);
+      await sql(
+        `INSERT INTO tree_id_schemes (project_id, version, component_definition, separator, serial_width, serial_uniqueness_scope) VALUES ($1, 3, $2, '-', 5, $3)`,
+        [p.id, JSON.stringify(components), JSON.stringify(scope)],
+      );
+      return p.id as string;
+    };
+    const r = (type: string, extra = {}) => ({ type, required: true, ...extra });
+    const a = await project('M9A', [r('PROJECT_CODE'), r('PLANTING_YEAR'), r('SERIAL')], ['PROJECT', 'PLANTING_YEAR']);
+    const b = await project('M9B', [r('PROJECT_CODE'), r('TEXT', { value: 'TR' }), r('SECTOR_CODE'), r('SERIAL')], []);
+    const c = await project('M9C', [r('PROJECT_CODE'), r('VENDOR_CODE'), r('SERIAL')], ['PROJECT', 'VENDOR']);
+    const ids = await sql('SELECT id, physical_tree_id, id_components_snapshot FROM trees ORDER BY id');
+
+    await sql(fs.readFileSync(file, 'utf8'));
+    const active = async (id: string) => (await sql('SELECT * FROM tree_id_schemes WHERE project_id = $1 AND active', [id]))[0];
+    const fa = await active(a);
+    expect(fa).toMatchObject({ version: 4, separator: '-', serial_width: 5, serial_uniqueness_scope: ['PROJECT', 'PLANTING_YEAR', 'VENDOR'], vendor_id: null });
+    expect(fa.component_definition).toEqual([r('PROJECT_CODE'), r('PLANTING_YEAR'), r('VENDOR_CODE'), r('SERIAL')]);
+    const fb = await active(b);
+    expect(fb.serial_uniqueness_scope).toEqual([]); // global numbering stays global
+    expect(fb.component_definition).toEqual([r('PROJECT_CODE'), r('TEXT', { value: 'TR' }), r('SECTOR_CODE'), r('VENDOR_CODE'), r('SERIAL')]);
+    expect((await active(c)).version).toBe(3);
+    const counts = await sql(`SELECT p.id, (SELECT count(*)::int FROM tree_id_schemes s WHERE s.project_id = p.id AND s.active) AS n FROM projects p`);
+    expect(counts.every((x: any) => x.n === 1)).toBe(true);
+    const formats = await sql(`SELECT component_definition FROM tree_id_schemes WHERE active`);
+    expect(formats.every((x: any) => x.component_definition.some((p: any) => p.type === 'VENDOR_CODE'))).toBe(true);
+    // Registered trees keep their IDs and snapshots.
+    expect(await sql('SELECT id, physical_tree_id, id_components_snapshot FROM trees ORDER BY id')).toEqual(ids);
+
+    const [{ n: before }] = await sql('SELECT count(*)::int AS n FROM tree_id_schemes');
+    await sql(fs.readFileSync(file, 'utf8'));
+    expect((await sql('SELECT count(*)::int AS n FROM tree_id_schemes'))[0].n).toBe(before);
+    const cols = await sql(`SELECT column_name FROM information_schema.columns WHERE table_name = 'tree_observations' AND column_name = 'field_session_id'`);
+    expect(cols).toHaveLength(1);
   });
 });

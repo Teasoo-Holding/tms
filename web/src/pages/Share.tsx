@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, apiUrl, publicGet, qs } from '../api/client';
-import { ChartCard, Donut, HBarChart, SERIES, StatTile } from '../charts/charts';
+import { ChartCard, Donut, HBarChart, Legend, LineChart, SERIES, StackedBars, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
 import { DensityReport, DensityView } from '../components/DensityMap';
 import { ShareArea } from '../components/ShareMap';
@@ -94,6 +94,19 @@ export function SharePage() {
   const vendors: any[] = (d.vendors ?? []).filter((v: any) => !yearId || v.planting_year_id === yearId);
   const vendorOptions = [...new Map(vendors.map((v) => [v.id, v.short_code ? `${v.name} (${v.short_code})` : v.name])).entries()];
   const download = (file: string) => apiUrl(`${base}/${file}${filter}`);
+  const weeks: { week: string; trees: number; cumulative: number }[] = s.planted_by_week ?? [];
+  const fmtWeek = (x: number | string) => new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: '2-digit' });
+  const byVendor: any[] = (s.by_vendor ?? []).map((r: any) => ({ label: r.short_code && r.id ? `${r.name} (${r.short_code})` : r.name, value: r.count }));
+  // Alive / dead / not yet visited per sector, as each sector's share.
+  const lifeSeries = [
+    { key: 'alive_trees', label: 'Alive', color: 'var(--status-good)' },
+    { key: 'dead_trees', label: 'Dead or missing', color: 'var(--status-critical)' },
+    { key: 'unknown_trees', label: 'Not yet visited', color: 'var(--border-strong)' },
+  ];
+  const lifeSectors = sectorShare.filter((r: any) => r.registered_trees > 0);
+  const sectorLabel = (r: any) => `${r.short_code} · ${r.name}`;
+  const lifeValue = (c: string, k: string) => lifeSectors.find((r: any) => sectorLabel(r) === c)?.[k] ?? 0;
+  const aliveShare = (r: any) => (r.alive_trees + r.dead_trees ? `${Math.round((r.alive_trees / (r.alive_trees + r.dead_trees)) * 100)}%` : '—');
   const dates = [p.start_date && fmtDate(p.start_date), p.end_date && fmtDate(p.end_date)].filter(Boolean).join(' – ');
 
   return (
@@ -110,7 +123,7 @@ export function SharePage() {
           {(p.location || dates) && <p className="page-sub">{[p.location, dates].filter(Boolean).join(' · ')}</p>}
         </div>
         <span className="spacer" />
-        <div className="page-actions no-print">
+        <div className="page-actions no-print" role="group" aria-label="Download the report">
           <a className="btn primary" href={download('report.xlsx')}>Download Excel</a>
           <a className="btn" href={download('trees.csv')}>Trees CSV</a>
           <a className="btn" href={download('visits.csv')}>Visits CSV</a>
@@ -169,6 +182,40 @@ export function SharePage() {
           </ChartCard>
           <ChartCard title="Trees by species" empty={(s.by_species ?? []).length === 0 && 'No trees yet.'} table={<SimpleTable head={['Species', 'Trees']} rows={s.by_species.map((r: any) => [r.common_name ?? r.name, fmtNum(r.count)])} />}>
             <HBarChart data={s.by_species.map((r: any) => ({ label: r.common_name ?? r.name, value: r.count }))} />
+          </ChartCard>
+        </div>
+
+        <ChartCard
+          title="Trees planted over time"
+          subtitle="Running total by week of planting"
+          empty={weeks.length === 0 && 'No trees yet.'}
+          table={<SimpleTable head={['Week of', 'Planted', 'Total']} rows={weeks.map((w) => [fmtWeek(w.week), fmtNum(w.trees), fmtNum(w.cumulative)])} />}
+        >
+          <LineChart
+            series={[{ key: 'total', label: 'Trees planted', color: SERIES[0], points: weeks.map((w) => ({ x: Date.parse(w.week), y: w.cumulative })) }]}
+            unit="trees"
+            xFormat={fmtWeek}
+            ariaLabel="Trees planted, running total by week"
+          />
+        </ChartCard>
+
+        <div className="grid charts">
+          <ChartCard title="Trees by vendor" empty={byVendor.length === 0 && 'No trees yet.'} table={<SimpleTable head={['Vendor', 'Trees']} rows={byVendor.map((r) => [r.label, fmtNum(r.value)])} />}>
+            <HBarChart data={byVendor} />
+          </ChartCard>
+          <ChartCard
+            title="Alive share by sector"
+            subtitle="Latest visit of each tree"
+            empty={lifeSectors.length === 0 && 'No trees yet.'}
+            legend={<Legend items={lifeSeries} />}
+            table={
+              <SimpleTable
+                head={['Sector', 'Alive', 'Dead or missing', 'Not yet visited', 'Alive share']}
+                rows={lifeSectors.map((r: any) => [sectorLabel(r), fmtNum(r.alive_trees), fmtNum(r.dead_trees), fmtNum(r.unknown_trees), aliveShare(r)])}
+              />
+            }
+          >
+            <StackedBars categories={lifeSectors.map(sectorLabel)} series={lifeSeries} values={lifeValue} normalize />
           </ChartCard>
         </div>
 

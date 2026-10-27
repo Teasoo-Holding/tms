@@ -7,6 +7,21 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-10-27: Vendor in sessions and tree IDs, field activity report, client links (migration 009)
+- **Vendors:**
+  - The vendor is chosen once when a field session starts, whenever the project has vendors.
+  - The vendor's short code is part of the tree ID (e.g. `T4L-2026-KNM-000001`), and each vendor numbers its own trees from 1 per planting year.
+  - Migration 009 adds the vendor code to every project's format (new version); existing IDs don't change.
+  - Vendors need a short code.
+- **Field activity:**
+  - Phones send a field-session id with every record.
+  - `GET /reports/field-activity` (+ `.csv`) gives trees, visits and photos per officer, per day and per session.
+  - Web "Field activity" page and phone Administration → Field activity.
+- **Client links:**
+  - Web "Client links" page and phone Administration → Client links: create, copy, open, revoke.
+  - Links can be copied again later: the link is stored encrypted, so links made before this change can't be re-copied.
+  - The client page gains "Trees planted over time", "Trees by vendor" and "Alive share by sector" charts.
+
 ## 2026-10-27: Add species with photos, edit buttons, dot density map, account switching
 - **Species:** reference photos can be added while creating a species (web and phone), or later.
 - **Admin lists:** a pencil edit button at the right end of each item: species, statuses, vendors, users, years, areas, custom fields; also projects on the web.

@@ -2,18 +2,50 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, Res
 import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import ExcelJS from 'exceljs';
-import { createHash, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { z } from 'zod';
 import { AuthUser, CurrentUser, Public, Roles } from '../common/auth.decorators';
 import { AuditService } from '../common/audit.service';
 import { AppError, notFound } from '../common/errors';
 import { parse } from '../common/validation';
+import { config } from '../config';
 import { Db } from '../database/db.service';
 import { DensityFilter, Filter, VisitFilter } from './reports.controller';
 import { ReportsService } from './reports.service';
 import { addSheet, toCsv } from './workbook';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
+
+/**
+ * Tokens are looked up by hash; an encrypted copy (AES-256-GCM, key derived from the server secret) lets administrators
+ * copy a link again later. A link whose copy cannot be read (older links, or a changed secret) can still be revoked.
+ */
+const tokenKey = () => createHash('sha256').update(`share-link-token:${config.jwtAccessSecret}`).digest();
+function encryptToken(token: string) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', tokenKey(), iv);
+  const body = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
+  return `v1:${Buffer.concat([iv, cipher.getAuthTag(), body]).toString('base64url')}`;
+}
+function decryptToken(stored: string | null): string | null {
+  if (!stored?.startsWith('v1:')) return null;
+  try {
+    const raw = Buffer.from(stored.slice(3), 'base64url');
+    const decipher = createDecipheriv('aes-256-gcm', tokenKey(), raw.subarray(0, 12));
+    decipher.setAuthTag(raw.subarray(12, 28));
+    return Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+const LINK_COLUMNS = `l.id, l.project_id, p.name AS project_name, p.short_code AS project_code, l.label, l.expires_at, l.revoked_at, l.last_used_at,
+  l.created_at, u.full_name AS created_by_name, l.token_encrypted,
+  CASE WHEN l.revoked_at IS NOT NULL THEN 'REVOKED' WHEN l.expires_at IS NOT NULL AND l.expires_at <= now() THEN 'EXPIRED' ELSE 'ACTIVE' END AS status`;
+/** The link's path (/share/<token>) while it works and its token can be read, else null. */
+const withPath = ({ token_encrypted, ...l }: any) => {
+  const token = l.status === 'ACTIVE' ? decryptToken(token_encrypted) : null;
+  return { ...l, path: token ? `/share/${token}` : null };
+};
 const CreateLink = z.object({ label: z.string().trim().max(120).nullish(), expires_in_days: z.number().int().min(1).max(3650).nullish() });
 /** Reports run as an unrestricted reader, always pinned to the link's project. */
 const SHARE_READER: AuthUser = { id: '00000000-0000-0000-0000-000000000000', role: 'ADMIN' };
@@ -31,14 +63,25 @@ export class ShareController {
   @Get('projects/:id/share-links')
   async list(@Param('id', ParseUUIDPipe) projectId: string) {
     const { rows } = await this.db.query(
-      `SELECT l.id, l.label, l.expires_at, l.revoked_at, l.last_used_at, l.created_at, u.full_name AS created_by_name
-         FROM project_share_links l LEFT JOIN users u ON u.id = l.created_by WHERE l.project_id = $1 ORDER BY l.created_at DESC`,
+      `SELECT ${LINK_COLUMNS} FROM project_share_links l JOIN projects p ON p.id = l.project_id LEFT JOIN users u ON u.id = l.created_by
+        WHERE l.project_id = $1 ORDER BY l.created_at DESC`,
       [projectId],
     );
-    return rows;
+    return rows.map(withPath);
   }
 
-  /** The token is returned once; only its hash is stored. */
+  /** Every client link across projects, newest first (the "Client links" page). */
+  @Roles('ADMIN')
+  @Get('share-links')
+  async listAll() {
+    const { rows } = await this.db.query(
+      `SELECT ${LINK_COLUMNS} FROM project_share_links l JOIN projects p ON p.id = l.project_id LEFT JOIN users u ON u.id = l.created_by
+        ORDER BY l.created_at DESC`,
+    );
+    return rows.map(withPath);
+  }
+
+  /** The token is returned here and, while the link works, in the lists (stored as a hash plus an encrypted copy). */
   @Roles('ADMIN')
   @Post('projects/:id/share-links')
   async create(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) projectId: string, @Body() body: unknown) {
@@ -47,10 +90,10 @@ export class ShareController {
     const token = randomBytes(24).toString('base64url');
     const row = await this.db.one(
       this.db,
-      `INSERT INTO project_share_links (project_id, token_hash, label, created_by, expires_at)
-       VALUES ($1, $2, $3, $4, CASE WHEN $5::int IS NULL THEN NULL ELSE now() + make_interval(days => $5::int) END)
-       RETURNING id, label, expires_at, created_at`,
-      [projectId, sha256(token), b.label ?? null, user.id, b.expires_in_days ?? null],
+      `INSERT INTO project_share_links (project_id, token_hash, token_encrypted, label, created_by, expires_at)
+       VALUES ($1, $2, $6, $3, $4, CASE WHEN $5::int IS NULL THEN NULL ELSE now() + make_interval(days => $5::int) END)
+       RETURNING id, project_id, label, expires_at, created_at`,
+      [projectId, sha256(token), b.label ?? null, user.id, b.expires_in_days ?? null, encryptToken(token)],
     );
     await this.audit.record({ actorId: user.id, action: 'share_link.create', entityType: 'share_link', entityId: row!.id, projectId, after: row });
     return { ...row, token, path: `/share/${token}` };

@@ -7,9 +7,11 @@ import { useAuth } from './auth';
 import { TooltipProvider } from './charts/Tooltip';
 import { Layout } from './components/Layout';
 import { AuditPage } from './pages/Audit';
+import { ClientLinksPage } from './pages/ClientLinks';
 import { ConflictsPage } from './pages/Conflicts';
 import { DashboardPage } from './pages/Dashboard';
 import { DensityPage } from './pages/Density';
+import { FieldActivityPage } from './pages/FieldActivity';
 import { LoginPage } from './pages/Login';
 import { ProjectDetailPage } from './pages/ProjectDetail';
 import { ProjectsPage } from './pages/Projects';
@@ -61,8 +63,10 @@ function App() {
         <Route path="trees" element={<TreesPage />} />
         <Route path="trees/:id" element={<TreeDetailPage />} />
         <Route path="visits" element={<VisitsPage />} />
+        <Route path="field-activity" element={<FieldActivityPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:id" element={<ProjectDetailPage />} />
+        {admin && <Route path="client-links" element={<ClientLinksPage />} />}
         {admin && <Route path="conflicts" element={<ConflictsPage />} />}
         {admin && <Route path="reference" element={<ReferencePage />} />}
         {admin && <Route path="users" element={<UsersPage />} />}
