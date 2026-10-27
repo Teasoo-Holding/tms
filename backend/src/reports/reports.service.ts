@@ -4,6 +4,36 @@ import { AuthUser } from '../common/auth.decorators';
 import { notFound } from '../common/errors';
 import { Db } from '../database/db.service';
 
+export interface FieldActivityFilter {
+  project_id?: string;
+  user_id?: string;
+  /** Inclusive dates (YYYY-MM-DD) in [tz]. */
+  from: string;
+  to: string;
+  /** IANA time zone the days are counted in. */
+  tz: string;
+}
+
+/** Weekly counts with the missing weeks filled in as zero, plus the running total. */
+function fillWeeks(rows: { week: string; trees: number }[]) {
+  if (!rows.length) return [];
+  const byWeek = new Map(rows.map((r) => [r.week, r.trees]));
+  const out: { week: string; trees: number; cumulative: number }[] = [];
+  let total = 0;
+  const week = 7 * 86_400_000;
+  const last = new Date(`${rows[rows.length - 1].week}T00:00:00Z`).getTime();
+  // At most ten years of weeks (a mistyped planting date should not produce thousands of empty weeks).
+  const first = Math.max(new Date(`${rows[0].week}T00:00:00Z`).getTime(), last - 520 * week);
+  total = rows.filter((r) => new Date(`${r.week}T00:00:00Z`).getTime() < first).reduce((n, r) => n + r.trees, 0);
+  for (let t = first; t <= last; t += week) {
+    const label = new Date(t).toISOString().slice(0, 10);
+    const trees = byWeek.get(label) ?? 0;
+    total += trees;
+    out.push({ week: label, trees, cumulative: total });
+  }
+  return out;
+}
+
 export interface ReportFilter {
   project_id?: string;
   planting_year_id?: string;
@@ -87,8 +117,14 @@ export class ReportsService {
         'JOIN planting_years py ON py.id = t.planting_year_id', 'py.id, py.year_label', 'py.year_label'),
       group(`s.id, s.name, s.short_code`, 'JOIN sectors s ON s.id = t.sector_id', 's.id, s.name, s.short_code', 's.short_code'),
       group(`sp.id, sp.scientific_name AS name, sp.common_name`, 'JOIN tree_species sp ON sp.id = t.species_id', 'sp.id, sp.scientific_name, sp.common_name'),
-      group(`v.id, COALESCE(v.name, 'No vendor') AS name`, 'LEFT JOIN vendors v ON v.id = t.vendor_id', 'v.id, v.name'),
+      group(`v.id, COALESCE(v.name, 'No vendor') AS name, v.short_code`, 'LEFT JOIN vendors v ON v.id = t.vendor_id', 'v.id, v.name, v.short_code'),
     ]);
+
+    // Trees planted per week (planting date, else registration date), with the running total, for "planted over time".
+    const plantedWeeks = await q(
+      `SELECT to_char(date_trunc('week', COALESCE(t.planted_on::timestamp, t.created_at)), 'YYYY-MM-DD') AS week, count(*)::int AS trees
+         FROM trees t WHERE ${where} GROUP BY 1 ORDER BY 1`,
+    );
 
     // Effective (non-superseded) observations per month and status for the last 12 months.
     const trend = await q(
@@ -200,6 +236,7 @@ export class ReportsService {
       by_sector: bySector,
       by_species: bySpecies,
       by_vendor: byVendor,
+      planted_by_week: fillWeeks(plantedWeeks),
       observation_trend: trend,
       growth,
       activity_by_week: activity,
@@ -217,6 +254,87 @@ export class ReportsService {
         'Area coverage uses administrator-defined sub-sector boundaries; trees have no individual GPS positions.',
       ],
     };
+  }
+
+  /**
+   * Field activity per officer and day, split into the phone's field sessions: trees registered (first visits), later
+   * visits, corrections (amendments, counted apart from visits) and photos. A day is the date of observed_at in the
+   * caller's time zone. Records of rejected trees are left out. Observations without a field session (older apps)
+   * form one session per officer and day.
+   */
+  async fieldActivity(user: AuthUser, f: FieldActivityFilter) {
+    if (f.project_id) await this.access.assertProject(user, f.project_id);
+    const grants = await this.access.grants(user);
+    const params: unknown[] = [f.from, f.to, f.tz, f.project_id ?? null, f.user_id ?? null];
+    const g = this.access.treeFilter(grants, 't', params.length + 1);
+    params.push(...g.params);
+    const { rows } = await this.db.query(
+      `WITH o AS (
+         SELECT o.id, o.recorded_by, o.observed_at, o.field_session_id, o.is_initial, o.is_amendment,
+                (o.observed_at AT TIME ZONE $3)::date AS day, t.project_id, t.planting_year_id, t.sector_id, t.sub_sector_id, t.vendor_id,
+                (SELECT count(*) FROM tree_media m WHERE m.observation_id = o.id)::int AS photos
+           FROM tree_observations o JOIN trees t ON t.id = o.tree_id
+          WHERE o.observed_at >= ($1::date)::timestamp AT TIME ZONE $3 AND o.observed_at < ($2::date + 1)::timestamp AT TIME ZONE $3
+            AND t.record_state <> 'REJECTED' AND ($4::uuid IS NULL OR t.project_id = $4) AND ($5::uuid IS NULL OR o.recorded_by = $5)
+            AND ${g.sql})
+       SELECT to_char(o.day, 'YYYY-MM-DD') AS date, o.recorded_by AS user_id, u.full_name AS user_name, u.role,
+              o.field_session_id, o.project_id, p.name AS project_name, py.year_label AS planting_year,
+              min(o.observed_at) AS first_at, max(o.observed_at) AS last_at,
+              array_agg(DISTINCT s.short_code ORDER BY s.short_code) AS sectors,
+              array_agg(DISTINCT s.short_code || '/' || ss.short_code ORDER BY s.short_code || '/' || ss.short_code) AS sub_sectors,
+              array_remove(array_agg(DISTINCT COALESCE(v.short_code, v.name) ORDER BY COALESCE(v.short_code, v.name)), NULL) AS vendors,
+              count(*) FILTER (WHERE o.is_initial)::int AS trees_registered,
+              count(*) FILTER (WHERE NOT o.is_initial AND NOT o.is_amendment)::int AS visits,
+              count(*) FILTER (WHERE o.is_amendment)::int AS corrections,
+              sum(o.photos)::int AS photos
+         FROM o JOIN users u ON u.id = o.recorded_by JOIN projects p ON p.id = o.project_id
+         JOIN planting_years py ON py.id = o.planting_year_id JOIN sectors s ON s.id = o.sector_id
+         JOIN sub_sectors ss ON ss.id = o.sub_sector_id LEFT JOIN vendors v ON v.id = o.vendor_id
+        GROUP BY o.day, o.recorded_by, u.full_name, u.role, o.field_session_id, o.project_id, p.name, py.year_label
+        ORDER BY o.day DESC, u.full_name, min(o.observed_at)`,
+      params,
+    );
+    const iso = (d: Date | string) => new Date(d).toISOString();
+    const counts = (xs: any[]) => ({
+      trees_registered: xs.reduce((n, x) => n + x.trees_registered, 0),
+      visits: xs.reduce((n, x) => n + x.visits, 0),
+      corrections: xs.reduce((n, x) => n + x.corrections, 0),
+      photos: xs.reduce((n, x) => n + x.photos, 0),
+    });
+    // One entry per officer and day, holding that day's sessions (rows arrive ordered by day, name, start).
+    const days = new Map<string, any>();
+    for (const r of rows) {
+      const key = `${r.date}|${r.user_id}`;
+      if (!days.has(key)) days.set(key, { date: r.date, user_id: r.user_id, user_name: r.user_name, role: r.role, sessions: [] as any[] });
+      days.get(key).sessions.push({
+        field_session_id: r.field_session_id, first_at: iso(r.first_at), last_at: iso(r.last_at),
+        project_id: r.project_id, project_name: r.project_name, planting_year: r.planting_year,
+        sectors: r.sectors, sub_sectors: r.sub_sectors, vendors: r.vendors,
+        trees_registered: r.trees_registered, visits: r.visits, corrections: r.corrections, photos: r.photos,
+      });
+    }
+    const dayRows = [...days.values()].map(({ role: _role, sessions, ...d }) => ({
+      ...d,
+      ...counts(sessions),
+      first_at: sessions.map((x: any) => x.first_at).sort()[0],
+      last_at: sessions.map((x: any) => x.last_at).sort().pop(),
+      sessions,
+    }));
+    const officers = new Map<string, any>();
+    for (const d of days.values()) {
+      const o = officers.get(d.user_id) ?? { user_id: d.user_id, user_name: d.user_name, role: d.role, days: [] as any[] };
+      officers.set(d.user_id, o);
+      o.days.push(d);
+    }
+    const officerRows = [...officers.values()]
+      .map(({ days: ds, ...o }) => {
+        const sessions = ds.flatMap((d: any) => d.sessions);
+        // A field session that ran past midnight shows on both days but is one session.
+        const ids = new Set(ds.flatMap((d: any) => d.sessions.map((x: any) => x.field_session_id ?? `day:${d.date}`)));
+        return { ...o, ...counts(sessions), days_active: ds.length, sessions: ids.size };
+      })
+      .sort((a, b) => b.trees_registered - a.trees_registered || a.user_name.localeCompare(b.user_name));
+    return { from: f.from, to: f.to, tz: f.tz, officers: officerRows, days: dayRows };
   }
 
   /**

@@ -66,6 +66,7 @@ class RegisterViewModel @Inject constructor(
     private val trees: TreeRepository,
     private val session: SessionStore,
     val photoStore: PhotoStore,
+    private val fieldSessions: FieldSessionRepository,
     saved: SavedStateHandle,
 ) : ViewModel() {
     val replacesTreeId: String? = saved["replaces"]
@@ -131,8 +132,8 @@ class RegisterViewModel @Inject constructor(
         val pid = projectId.value ?: return
         val all = ref.activeSchemes(pid)
         val f = form.value
-        // Who planted is recorded when the year has vendors; it does not affect the tree ID.
-        vendorNeeded.value = f.yearId != null && ref.vendorsForYear(f.yearId).first().isNotEmpty()
+        // The vendor's short code is part of the tree ID whenever the project has vendors.
+        vendorNeeded.value = f.yearId != null && (ref.vendorsForYear(f.yearId).first().isNotEmpty() || ref.vendors().first().any { it.active })
         val a = area()
         if (a == null) {
             prefix.value = null; serialCheck.value = null; return
@@ -167,7 +168,7 @@ class RegisterViewModel @Inject constructor(
                     area = a, speciesId = f.speciesId ?: throw RegistrationException("Choose a species."),
                     serialInput = f.serial, confirmedPhysicalId = if (custom) f.customId.trim() else ok!!.assembled.physicalId,
                     statusId = f.statusId ?: throw RegistrationException("Choose a status."),
-                    observedAt = Instant.now(),
+                    observedAt = Instant.now(), fieldSessionId = fieldSessions.current()?.id,
                     notes = f.notes.ifBlank { null }, remarks = f.remarks.ifBlank { null }, photos = f.photos,
                     replacesTreeId = replacesTreeId,
                     customPhysicalId = f.customId.trim().takeIf { custom && it.isNotEmpty() },

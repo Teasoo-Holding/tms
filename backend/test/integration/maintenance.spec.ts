@@ -67,12 +67,25 @@ describe('client share links', () => {
     expect(view.project.id).toBe(f.projectId);
     expect(view.summary.totals).toBeDefined();
     expect(view.summary.officer_activity).toBeUndefined();
+    // Trees planted per week with the running total, for the client's "planted over time" chart.
+    const weeks = view.summary.planted_by_week;
+    expect(weeks.length).toBeGreaterThan(0);
+    expect(weeks[weeks.length - 1].cumulative).toBe(Number(view.summary.totals.planting_events));
+    expect(weeks.every((w: any, i: number) => i === 0 || Date.parse(w.week) - Date.parse(weeks[i - 1].week) === 7 * 86_400_000)).toBe(true);
+    expect(view.summary.by_vendor[0]).toHaveProperty('short_code');
     const csv = await request(app.getHttpServer()).get(`/api/v1/share/${token}/trees.csv`).expect(200);
     expect(csv.text).not.toContain('registered_by');
     await request(app.getHttpServer()).get(`/api/v1/share/${token}/report.xlsx`).expect(200).expect('Content-Type', /spreadsheetml/);
     const list = (await admin.get(`/projects/${f.projectId}/share-links`).expect(200)).body;
     expect(list[0].last_used_at).toBeTruthy();
-    expect(JSON.stringify(list)).not.toContain(token);
+    // Administrators can copy a working link again; the stored copy is encrypted, never the token itself.
+    expect(list[0]).toMatchObject({ status: 'ACTIVE', path: `/share/${token}` });
+    expect(list[0].token_encrypted).toBeUndefined();
+    const [stored] = await sql('SELECT token_encrypted FROM project_share_links WHERE id = $1', [linkId]);
+    expect(stored.token_encrypted).not.toContain(token);
+    const all = (await admin.get('/share-links').expect(200)).body;
+    expect(all.find((l: any) => l.id === linkId)).toMatchObject({ project_id: f.projectId, project_name: 'Trees for Life', path: `/share/${token}` });
+    await officer.get('/share-links').expect(403);
   });
 
   it('stops working once revoked', async () => {
@@ -80,6 +93,8 @@ describe('client share links', () => {
     const res = await request(app.getHttpServer()).get(`/api/v1/share/${token}`).expect(404);
     expect(res.body.code).toBe('LINK_INVALID');
     await request(app.getHttpServer()).get('/api/v1/share/not-a-token').expect(404);
+    const all = (await admin.get('/share-links').expect(200)).body;
+    expect(all.find((l: any) => l.id === linkId)).toMatchObject({ status: 'REVOKED', path: null });
   });
 });
 

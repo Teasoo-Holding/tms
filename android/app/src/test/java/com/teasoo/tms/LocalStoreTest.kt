@@ -234,7 +234,7 @@ class LocalStoreTest {
         db.reference().upsertSectors(listOf(SectorEntity("s2", "p1", "South", "S02", 7.3, 3.9, null, true)))
         val id = trees.register(newTree("801"), user)
         val tree = db.trees().get(id)!!
-        val here = FieldSession("p1", "y2024", "s1", "ss1")
+        val here = FieldSession(projectId = "p1", plantingYearId = "y2024", sectorId = "s1", subSectorId = "ss1")
         assertNull(com.teasoo.tms.ui.screens.areaMismatch(db, tree, here))
         val elsewhere = here.copy(sectorId = "s2", subSectorId = "ss9")
         assertTrue(com.teasoo.tms.ui.screens.areaMismatch(db, tree, elsewhere)!!.contains("S01"))
@@ -308,6 +308,24 @@ class LocalStoreTest {
         assertEquals("REPL-0001", payload["custom_physical_id"]!!.jsonPrimitive.content)
         // Not for ordinary registrations, and not twice.
         assertTrue(runCatching { trees.register(newTree("1202").copy(customPhysicalId = "X-1", confirmedPhysicalId = "X-1"), user) }.exceptionOrNull() is RegistrationException)
+    }
+
+    @Test
+    fun eachVendorNumbersItsOwnTreesWithItsCodeInTheId() = runBlocking {
+        val withVendor = """[{"type":"PROJECT_CODE","required":true},{"type":"PLANTING_YEAR","required":true},{"type":"VENDOR_CODE","required":true},{"type":"SERIAL","required":true}]"""
+        db.reference().upsertVendors(listOf(VendorEntity("v1", "Konam", "KNM", true), VendorEntity("v2", "Greenline", "GRN", true)))
+        val old = db.reference().activeSchemes("p1").single()
+        db.reference().upsertSchemes(listOf(old.copy(active = false), IdSchemeEntity("sch2", "p1", 2, withVendor, "-", 6, """["PROJECT","PLANTING_YEAR","VENDOR"]""", true)))
+        val knm = area.copy(vendorId = "v1")
+        val grn = area.copy(vendorId = "v2")
+        assertEquals("T4L-2024-KNM-", trees.prefix(knm).prefix)
+        assertEquals("T4L-2024-GRN-", trees.prefix(grn).prefix)
+        // Both vendors start from 1; the IDs differ by the vendor code.
+        trees.register(newTree("1", a = knm).copy(confirmedPhysicalId = "T4L-2024-KNM-000001", fieldSessionId = "fs-1"), user)
+        trees.register(newTree("1", a = grn).copy(confirmedPhysicalId = "T4L-2024-GRN-000001"), user)
+        val ops = db.outbox().due(Long.MAX_VALUE, 10).map { TmsJson.parseToJsonElement(it.payloadJson).jsonObject }
+        assertEquals(listOf("T4L-2024-KNM-000001", "T4L-2024-GRN-000001"), ops.map { it["physical_tree_id"]!!.jsonPrimitive.content })
+        assertEquals("fs-1", ops.first()["initial_observation"]!!.jsonObject["field_session_id"]!!.jsonPrimitive.content)
     }
 
     @Test

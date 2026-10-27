@@ -9,6 +9,7 @@ import { ReportsService } from './reports.service';
 import { addSheet, configurationSheets, csvCell } from './workbook';
 import { Db } from '../database/db.service';
 import { Roles } from '../common/auth.decorators';
+import { badRequest } from '../common/errors';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const Filter = z.object({
@@ -36,6 +37,38 @@ export const DensityFilter = z.object({
   planting_year_id: z.string().uuid().optional(),
 });
 
+/** Field activity: dates in the caller's time zone (IANA name, default UTC); the last 7 days unless given. */
+export const FieldActivityQuery = z.object({
+  project_id: z.string().uuid().optional(),
+  user_id: z.string().uuid().optional(),
+  from: day.optional(),
+  to: day.optional(),
+  tz: z.string().trim().max(64).default('UTC'),
+});
+
+const MAX_ACTIVITY_DAYS = 366;
+
+function fieldActivityFilter(query: unknown) {
+  const q = parse(FieldActivityQuery, query);
+  let tz: string;
+  try {
+    tz = new Intl.DateTimeFormat('en-US', { timeZone: q.tz }).resolvedOptions().timeZone;
+  } catch {
+    throw badRequest('TIME_ZONE_UNKNOWN', `Unknown time zone "${q.tz}". Use an IANA name such as Africa/Lagos.`);
+  }
+  const dayMs = 86_400_000;
+  const shift = (d: string, days: number) => new Date(Date.parse(`${d}T00:00:00Z`) + days * dayMs).toISOString().slice(0, 10);
+  // Today in the caller's zone (en-CA formats as YYYY-MM-DD).
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const real = (d?: string) => !d || (!Number.isNaN(Date.parse(`${d}T00:00:00Z`)) && shift(d, 0) === d);
+  if (!real(q.from) || !real(q.to)) throw badRequest('DATE_INVALID', 'Use real dates (YYYY-MM-DD).');
+  const to = q.to ?? (q.from ? shift(q.from, 6) : today);
+  const from = q.from ?? shift(to, -6);
+  if (from > to) throw badRequest('RANGE_INVALID', 'The start date is after the end date.');
+  if ((Date.parse(to) - Date.parse(from)) / dayMs >= MAX_ACTIVITY_DAYS) throw badRequest('RANGE_TOO_LONG', `Choose at most ${MAX_ACTIVITY_DAYS} days.`);
+  return { project_id: q.project_id, user_id: q.user_id, from, to, tz };
+}
+
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reports: ReportsService, private readonly audit: AuditService, private readonly db: Db) {}
@@ -51,6 +84,30 @@ export class ReportsController {
   density(@CurrentUser() user: AuthUser, @Query() query: unknown) {
     const f = parse(DensityFilter, query);
     return this.reports.density(user, f.project_id, f.planting_year_id);
+  }
+
+  /** Per officer and day, with the phone's field sessions: what was done, where and when. */
+  @Roles('ADMIN', 'EXECUTIVE')
+  @Get('field-activity')
+  fieldActivity(@CurrentUser() user: AuthUser, @Query() query: unknown) {
+    return this.reports.fieldActivity(user, fieldActivityFilter(query));
+  }
+
+  /** One row per field session. */
+  @Roles('ADMIN', 'EXECUTIVE')
+  @Get('field-activity.csv')
+  async fieldActivityCsv(@CurrentUser() user: AuthUser, @Query() query: unknown, @Res() res: Response) {
+    const f = fieldActivityFilter(query);
+    const report = await this.reports.fieldActivity(user, f);
+    const rows = report.days.flatMap((d) => d.sessions.map((s: any) => ({ date: d.date, user_name: d.user_name, user_id: d.user_id, ...s })));
+    await this.audit.record({ actorId: user.id, action: 'export.csv', entityType: 'report', projectId: f.project_id, metadata: { rows: rows.length, kind: 'field-activity' } });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="field-activity-${f.from}-to-${f.to}.csv"`);
+    const header = ['date', 'user_name', 'first_at', 'last_at', 'project_name', 'planting_year', 'sectors', 'sub_sectors', 'vendors',
+      'trees_registered', 'visits', 'corrections', 'photos', 'field_session_id', 'user_id', 'project_id'];
+    res.write('\uFEFF' + [...header, 'time_zone'].join(',') + '\n');
+    for (const r of rows) res.write([...header.map((h) => csvCell(Array.isArray(r[h]) ? r[h].join(' ') : r[h])), csvCell(f.tz)].join(',') + '\n');
+    res.end();
   }
 
   @Get('visits')

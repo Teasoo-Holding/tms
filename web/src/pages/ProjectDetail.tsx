@@ -15,6 +15,7 @@ import {
   isFixedPart,
   previewId,
   RECOMMENDED_SCOPE,
+  SAMPLE_VENDOR_CODE,
   Scheme,
   SchemeComponent,
   SCOPES,
@@ -355,13 +356,21 @@ function CustomFieldForm({ projectId, field, appliesTo, nextOrder, onClose }: { 
 
 // ------------------------------------------------------------------ shared helpers
 /** Real codes for live example IDs: the year's first sector and sub-sector (placeholders when none exist yet). */
-function useExampleCodes(projectId: string, year?: PlantingYear) {
-  const areas = useQuery({ queryKey: ['areas', projectId], queryFn: () => api.get<any[]>(`/projects/${projectId}/areas`) });
+function useExampleCodes(project: any, year?: PlantingYear) {
+  const areas = useQuery({ queryKey: ['areas', project.id], queryFn: () => api.get<any[]>(`/projects/${project.id}/areas`) });
   const all = areas.data ?? [];
   const sector = all.find((s) => year && s.planting_year_id === year.id && s.active) ?? all.find((s) => s.planting_year_id == null && s.active) ?? all[0];
   const sub = sector?.sub_sectors?.find((ss: any) => ss.active) ?? sector?.sub_sectors?.[0];
-  return { sector: (sector?.short_code as string | undefined) ?? 'S01', subSector: (sub?.short_code as string | undefined) ?? 'A1' };
+  // A vendor of the year (else of the project) with a short code, for previews.
+  const links: VendorLink[] = project.planting_year_vendors ?? [];
+  const vendor = [...yearLinks(project, year?.id), ...links].find((l) => l.active && l.vendor_short_code)?.vendor_short_code;
+  return {
+    sector: (sector?.short_code as string | undefined) ?? 'S01',
+    subSector: (sub?.short_code as string | undefined) ?? 'A1',
+    vendor: vendor ?? SAMPLE_VENDOR_CODE,
+  };
 }
+type ExampleCodes = ReturnType<typeof useExampleCodes>;
 
 function exampleId(scheme: { component_definition: SchemeComponent[]; separator: string; serial_width: number }, values: Record<string, string | null | undefined>) {
   const id = previewId(scheme.component_definition, scheme.separator, scheme.serial_width, values);
@@ -749,7 +758,7 @@ function VendorsTab({ project, year, onAddYear }: { project: any; year?: Plantin
       <section className="card flush">
         <CardHeader
           title={`Vendors in ${year.year_label}`}
-          description="Who plants this year. Tree IDs do not depend on the vendor: all vendors share one sequence of tree numbers per planting year."
+          description="Who plants and tags trees this year. When the ID format includes the vendor code, officers pick one of these vendors and each numbers its trees from 1."
         />
         <div className="table-wrap" style={{ marginTop: 12 }}>
           {ordered.length > 0 && (
@@ -762,7 +771,7 @@ function VendorsTab({ project, year, onAddYear }: { project: any; year?: Plantin
                     <tr key={l.id} style={l.active ? undefined : { opacity: 0.65 }}>
                       <td>
                         {l.vendor_name}
-                        {l.vendor_short_code && <span className="muted mono"> · {l.vendor_short_code}</span>}
+                        {l.vendor_short_code ? <span className="muted mono"> · {l.vendor_short_code}</span> : <> <span className="pill warning" title="Needed for tree IDs">No short code</span></>}
                         {!l.active && <span className="pill" style={{ marginLeft: 8 }}>Unlinked</span>}
                       </td>
                       {isAdmin && (
@@ -850,7 +859,7 @@ function NewVendorForm({ onClose, onCreated }: { onClose: () => void; onCreated:
 /** One format per project: every vendor and planting year uses it, so tree numbers run per project and year. */
 function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
   const isAdmin = useIsAdmin();
-  const codes = useExampleCodes(project.id, year);
+  const codes = useExampleCodes(project, year);
   const [building, setBuilding] = useState(false);
   const del = useDelete();
   const deleteVersion = (sc: Scheme) => del.ask({ what: 'ID format version', name: `Version ${sc.version}`, path: `/tree-id-schemes/${sc.id}`, note: 'Only a version no tree uses can be deleted.' });
@@ -860,7 +869,7 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
   const values = (yearLabel?: string | null, vendorCode?: string | null) => ({
     PROJECT_CODE: project.short_code,
     PLANTING_YEAR: yearLabel ?? year?.year_label,
-    VENDOR_CODE: vendorCode,
+    VENDOR_CODE: vendorCode ?? codes.vendor,
     SECTOR_CODE: codes.sector,
     SUB_SECTOR_CODE: codes.subSector,
   });
@@ -871,7 +880,7 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
       <section className="card">
         <CardHeader
           title="Tree ID format"
-          description="One format for the whole project, used for every vendor and planting year."
+          description="One format for the whole project, used for every vendor and planting year; the vendor code makes each vendor's trees distinct."
           actions={isAdmin && <button className="primary" onClick={() => setBuilding(true)}>{current ? 'Change' : 'Create'}</button>}
         />
         {current ? (
@@ -889,9 +898,9 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
       <details className="more">
         <summary>How tree numbers work</summary>
         <p className="muted">
-          All vendors on the project share one progressive sequence of tree numbers per planting year; the vendor is recorded on each tree but is not part of its ID. Fixed
-          parts (project, year, text) are filled in by the phone; the officer types only the tree number. Changes apply to new registrations only: trees already registered keep
-          their IDs.
+          Several vendors tag trees on a project, each numbering its own trees from 1, so the vendor&rsquo;s short code is part of the ID (e.g. T4L-2026-KNM-000001) and tree
+          numbers run per project, planting year and vendor. Fixed parts (project, year, vendor, text) are filled in by the phone from what the officer picked; the officer types
+          only the tree number. Every vendor needs a short code (under Lists → Vendors). Changes apply to new registrations only: trees already registered keep their IDs.
         </p>
       </details>
       {history.length > 0 && (
@@ -924,20 +933,18 @@ type Part = SchemeComponent & { key: number };
 const DEFAULT_PARTS: SchemeComponent[] = [
   { type: 'PROJECT_CODE', required: true },
   { type: 'PLANTING_YEAR', required: true },
+  { type: 'VENDOR_CODE', required: true },
 ];
-/** Parts and numbering scopes that new formats can no longer use (formats from before IDs were per project and year). */
-const RETIRED_PART = 'VENDOR_CODE';
-const RETIRED_SCOPE = 'VENDOR';
 
-function SchemeBuilder({ project, year, current, codes, onClose }: { project: any; year?: PlantingYear; current?: Scheme; codes: { sector: string; subSector: string }; onClose: () => void }) {
+function SchemeBuilder({ project, year, current, codes, onClose }: { project: any; year?: PlantingYear; current?: Scheme; codes: ExampleCodes; onClose: () => void }) {
   const nextKey = useRef(0);
-  const withKeys = (cs: SchemeComponent[]): Part[] => cs.filter((c) => c.type !== 'SERIAL' && c.type !== RETIRED_PART).map((c) => ({ ...c, key: nextKey.current++ }));
+  const withKeys = (cs: SchemeComponent[]): Part[] => cs.filter((c) => c.type !== 'SERIAL').map((c) => ({ ...c, key: nextKey.current++ }));
   /** Starts from the current format, so a change is an edit, not a blank slate. */
   const [form, setForm] = useState(() => ({
     parts: withKeys(current?.component_definition ?? DEFAULT_PARTS),
     separator: current?.separator ?? '-',
     width: current?.serial_width ?? 6,
-    serialScope: (current?.serial_uniqueness_scope ?? RECOMMENDED_SCOPE).filter((d) => d !== RETIRED_SCOPE),
+    serialScope: current?.serial_uniqueness_scope ?? RECOMMENDED_SCOPE,
   }));
   const { parts, separator, width, serialScope } = form;
   const set = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
@@ -977,11 +984,14 @@ function SchemeBuilder({ project, year, current, codes, onClose }: { project: an
   const sample = previewId(components, separator, width, {
     PROJECT_CODE: project.short_code,
     PLANTING_YEAR: sampleYear,
+    VENDOR_CODE: codes.vendor,
     SECTOR_CODE: codes.sector,
     SUB_SECTOR_CODE: codes.subSector,
   });
   const isRecommended = RECOMMENDED_SCOPE.every((d) => serialScope.includes(d)) && serialScope.length === RECOMMENDED_SCOPE.length;
-  const hadVendor = !!current && (current.component_definition.some((c) => c.type === RETIRED_PART) || current.serial_uniqueness_scope.includes(RETIRED_SCOPE));
+  const hasVendorPart = parts.some((p) => p.type === 'VENDOR_CODE');
+  // Numbering per vendor without the vendor code in the ID gives two trees the same ID.
+  const vendorScopeWithoutCode = serialScope.includes('VENDOR') && !hasVendorPart;
 
   return (
     <Modal title={current ? `Change the ID format (now version ${current.version})` : 'New ID format'} onClose={onClose} wide>
@@ -990,7 +1000,6 @@ function SchemeBuilder({ project, year, current, codes, onClose }: { project: an
         <p className="muted" style={{ margin: 0 }}>
           The format applies to the whole project: every vendor and planting year. Trees already registered keep their IDs.
         </p>
-        {hadVendor && <div className="notice">The vendor is no longer part of tree IDs, so the vendor code and per-vendor numbering have been left out.</div>}
         <div>
           <h3>Parts of the ID, in order</h3>
           <ol className="parts">
@@ -1031,8 +1040,8 @@ function SchemeBuilder({ project, year, current, codes, onClose }: { project: an
             <button type="button" onClick={() => set({ parts: [...parts, { type: 'TEXT', required: true, value: '', key: nextKey.current++ }] })}>+ Fixed text</button>
           </div>
           <p className="muted" style={{ marginBottom: 0 }}>
-            <strong>Fixed</strong> parts are the same for every tree in a year (project, year, fixed text). <strong>Changing</strong> parts depend on the tree (sector, sub-sector,
-            tree number).
+            <strong>Fixed</strong> parts are filled in by the phone (project, year, the vendor the officer picks, fixed text). <strong>Changing</strong> parts depend on the tree
+            (sector, sub-sector, tree number). With the vendor code in the ID, officers must pick a vendor, and every vendor needs a short code.
           </p>
         </div>
         <div className="form-grid">
@@ -1055,9 +1064,12 @@ function SchemeBuilder({ project, year, current, codes, onClose }: { project: an
             ))}
           </div>
           <p className="muted">{serialScope.length ? `Unique per ${scopeLabel(serialScope)}.` : 'No boxes ticked: tree numbers are unique globally.'} The full ID is always unique.</p>
+          {vendorScopeWithoutCode && (
+            <div className="notice warning">Tree numbers are counted per vendor but the vendor code is not in the ID, so two vendors&rsquo; trees could get the same ID. Add the vendor code part.</div>
+          )}
           {!isRecommended && (
             <div className="notice">
-              Recommended: unique per <strong>project + planting year</strong>, so tree numbers run in one sequence each year, shared by all vendors.{' '}
+              Recommended: unique per <strong>project + planting year + vendor</strong>, so each vendor numbers its trees from 1 every year (with the vendor code in the ID).{' '}
               <button type="button" className="link" onClick={() => set({ serialScope: RECOMMENDED_SCOPE })}>Use recommended</button>
             </div>
           )}
@@ -1066,7 +1078,7 @@ function SchemeBuilder({ project, year, current, codes, onClose }: { project: an
           <h3>Preview</h3>
           <div className="id-preview">{sample.prefix}<span className="serial">{sample.serial}</span></div>
           <p className="muted">
-            Example for year {sampleYear}, sector {codes.sector}, sub-sector {codes.subSector}, tree 15. Officers see the prefix filled in and type only the highlighted tree number.
+            Example for year {sampleYear}, vendor {codes.vendor}, sector {codes.sector}, sub-sector {codes.subSector}, tree 15. Officers see the prefix filled in and type only the highlighted tree number.
           </p>
         </div>
         <div className="form-actions">

@@ -9,6 +9,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.History
@@ -36,6 +38,8 @@ object AdminRoutes {
     const val REFERENCE = "admin/reference"
     const val USERS = "admin/users"
     const val CLEAR_DATA = "admin/clear-data"
+    const val ACTIVITY = "admin/activity"
+    const val CLIENT_LINKS = "admin/client-links"
     const val AUDIT = "admin/audit?actor={actor}&project={project}"
 
     fun project(id: String) = "admin/projects/$id"
@@ -63,6 +67,8 @@ fun NavGraphBuilder.adminGraph(nav: NavController, onOpenTree: (String) -> Unit)
         ProjectSetupScreen(onBack = back, onShare = { nav.navigate(AdminRoutes.share(id)) })
     }
     composable(AdminRoutes.SHARE, arguments = idArg) { ShareLinksScreen(onBack = back) }
+    composable(AdminRoutes.ACTIVITY) { FieldActivityScreen(onBack = back) }
+    composable(AdminRoutes.CLIENT_LINKS) { ClientLinksScreen(onBack = back, onProject = { nav.navigate(AdminRoutes.share(it)) }) }
     composable(AdminRoutes.REFERENCE) { ReferenceDataScreen(onBack = back) }
     composable(AdminRoutes.USERS) { UsersScreen(onBack = back, onViewActivity = { nav.navigate(AdminRoutes.audit(actorId = it)) }) }
     composable(AdminRoutes.CLEAR_DATA) { ClearDataScreen(onBack = back) }
@@ -82,7 +88,9 @@ data class AdminEntry(val title: String, val subtitle: String, val icon: ImageVe
 val ADMIN_ENTRIES = listOf(
     AdminEntry("Projects", "Years, areas, ID formats, officers", Icons.Default.Forest, AdminRoutes.PROJECTS),
     AdminEntry("Dashboard", "Progress and field activity", Icons.Default.Insights, AdminRoutes.ANALYTICS),
-    AdminEntry("Density map", "Trees per hectare by area", Icons.Default.Map, com.teasoo.tms.ui.Routes.MAP),
+    AdminEntry("Field activity", "Trees and visits by officer, day and session", Icons.Default.Timeline, AdminRoutes.ACTIVITY),
+    AdminEntry("Density map", "A dot for every tree, by area", Icons.Default.Map, com.teasoo.tms.ui.Routes.MAP),
+    AdminEntry("Client links", "Share a project's live report with a client", Icons.Default.Share, AdminRoutes.CLIENT_LINKS),
     AdminEntry("Users", "Accounts and roles", Icons.Default.Group, AdminRoutes.USERS),
     AdminEntry("Reference data", "Species, statuses, vendors", Icons.Default.Category, AdminRoutes.REFERENCE),
     AdminEntry("Activity log", "Who changed what", Icons.Default.History, AdminRoutes.audit()),
@@ -129,6 +137,25 @@ private fun HubOption(e: AdminEntry, onClick: () -> Unit) {
             Text(e.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f),
                 color = if (e.danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Client links start from a project: pick one, then create, copy or revoke its read-only links. */
+@Composable
+fun ClientLinksScreen(onBack: () -> Unit, onProject: (String) -> Unit, vm: ProjectsViewModel = androidx.hilt.navigation.compose.hiltViewModel()) {
+    val projects = collect(vm.projects)
+    AdminScaffold(title = "Client links", onBack = onBack) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "A client link opens a read-only report of one project – charts, the tree dot map and Excel/CSV/PDF downloads – " +
+                    "without an account. Choose the project to share.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            projects.orEmpty().forEach { p ->
+                HubOption(AdminEntry(p.name, p.shortCode, Icons.Default.Share, "")) { onProject(p.id) }
+            }
+            if (projects?.isEmpty() == true) Text("No projects yet.", style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

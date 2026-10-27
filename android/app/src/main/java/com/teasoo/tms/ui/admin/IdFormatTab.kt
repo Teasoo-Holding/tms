@@ -26,9 +26,13 @@ import com.teasoo.tms.data.remote.ProjectDetailDto
 import com.teasoo.tms.data.remote.SchemeComponent
 import com.teasoo.tms.data.remote.SchemeRequest
 
-/** Tree IDs are project/year scoped: every vendor shares one progressive sequence, so formats have no vendor part. */
-val COMPONENT_TYPES = listOf("PROJECT_CODE", "PLANTING_YEAR", "TEXT", "SECTOR_CODE", "SUB_SECTOR_CODE", "SERIAL")
-val SCOPE_DIMENSIONS = listOf("PROJECT", "PLANTING_YEAR", "SECTOR", "SUB_SECTOR")
+/**
+ * One format per project. Vendors tag trees with the same model and each starts from 1, so the vendor's short code is
+ * normally part of the ID and numbers run per project + year + vendor.
+ */
+val COMPONENT_TYPES = listOf("PROJECT_CODE", "PLANTING_YEAR", "VENDOR_CODE", "TEXT", "SECTOR_CODE", "SUB_SECTOR_CODE", "SERIAL")
+val SCOPE_DIMENSIONS = listOf("PROJECT", "PLANTING_YEAR", "VENDOR", "SECTOR", "SUB_SECTOR")
+val RECOMMENDED_SCOPE = listOf("PROJECT", "PLANTING_YEAR", "VENDOR")
 /** Parts that are the same on every tree in the format's scope; the others change with where the tree is. */
 val FIXED_TYPES = setOf("PROJECT_CODE", "PLANTING_YEAR", "VENDOR_CODE", "TEXT")
 private const val MAX_PARTS = 8
@@ -76,7 +80,7 @@ private fun schemeProblems(components: List<SchemeComponent>, scope: List<String
     if (components.any { it.type == "TEXT" && !TEXT_PATTERN.matches(it.value.orEmpty()) }) add("Fixed text needs 1 to 16 letters or digits.")
     if ("SERIAL" !in types) add("The ID needs a tree number.") else if (types.last() != "SERIAL") add("The tree number must be the last part.")
     if (scope.toSet().size != scope.size) add("Each uniqueness dimension can be chosen once.")
-    val needs = mapOf("PLANTING_YEAR" to "PLANTING_YEAR", "SECTOR" to "SECTOR_CODE", "SUB_SECTOR" to "SUB_SECTOR_CODE")
+    val needs = mapOf("PLANTING_YEAR" to "PLANTING_YEAR", "VENDOR" to "VENDOR_CODE", "SECTOR" to "SECTOR_CODE", "SUB_SECTOR" to "SUB_SECTOR_CODE")
     scope.forEach { d ->
         val c = needs[d]
         if (c != null && c !in types) add("Tree numbers restart for each ${scopeLabel(d).lowercase()}, but the ID does not show it, so two trees could carry the same visible ID.")
@@ -94,13 +98,13 @@ private class FormatDraft(base: AdminSchemeDto?) {
     val components = mutableStateListOf<SchemeComponent>().apply {
         addAll(
             base?.components?.takeIf { it.isNotEmpty() }
-                ?: listOf(SchemeComponent("PROJECT_CODE"), SchemeComponent("PLANTING_YEAR"), SchemeComponent("SERIAL")),
+                ?: listOf(SchemeComponent("PROJECT_CODE"), SchemeComponent("PLANTING_YEAR"), SchemeComponent("VENDOR_CODE"), SchemeComponent("SERIAL")),
         )
     }
     var separator by mutableStateOf(base?.separator ?: "-")
     var width by mutableIntStateOf(base?.serialWidth ?: 5)
     val scope = mutableStateListOf<String>().apply {
-        addAll(base?.serialUniquenessScope?.filter { it != "VENDOR" } ?: listOf("PROJECT", "PLANTING_YEAR"))
+        addAll(base?.serialUniquenessScope ?: RECOMMENDED_SCOPE)
     }
 }
 
@@ -114,7 +118,7 @@ internal fun IdFormatTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: P
     val saving = collect(vm.saving)
     val formError = collect(vm.formError)
     val current = p.schemes.activeIn(null, null)
-    val samples = idSamples(p, year, null, areas)
+    val samples = idSamples(p, year, p.linkedVendors(year?.id).firstOrNull()?.vendorShortCode ?: "KNM", areas)
 
     var draft by remember { mutableStateOf<FormatDraft?>(null) }
     var confirming by remember { mutableStateOf(false) }
@@ -131,7 +135,7 @@ internal fun IdFormatTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: P
 
         FormatLevelCard(
             title = "Tree ID format",
-            subtitle = "Used by every vendor. Tree numbers run on for each planting year.",
+            subtitle = "One format for the project. With the vendor code in it, each vendor numbers its own trees from 1.",
             scheme = current,
             samples = samples,
             emptyText = "Not set. Needed before trees can be registered.",
@@ -312,6 +316,7 @@ private fun partHelp(type: String, samples: Map<String, String>) = when (type) {
     "TEXT" -> ""
     "SECTOR_CODE" -> "e.g. ${samples["SECTOR_CODE"]}"
     "SUB_SECTOR_CODE" -> "e.g. ${samples["SUB_SECTOR_CODE"]}"
+    "VENDOR_CODE" -> "e.g. ${samples["VENDOR_CODE"]} (the session's vendor)"
     "SERIAL" -> "Always last"
     else -> ""
 }

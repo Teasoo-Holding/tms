@@ -31,7 +31,7 @@ const LOADERS: Record<string, string> = {
            FROM trees t JOIN users u ON u.id = t.created_by WHERE t.id = ANY($1)`,
   observation: `SELECT o.id, o.tree_id, o.observed_status_id, o.observed_at, o.recorded_at, o.synced_at, o.recorded_by, o.remarks,
                        o.revision, o.is_initial, o.is_amendment, o.amends_observation_id, o.amendment_reason,
-                       o.custom_fields, o.visit_type, o.height_cm::float8 AS height_cm, o.height_method, o.height_measurement,
+                       o.custom_fields, o.visit_type, o.height_cm::float8 AS height_cm, o.height_method, o.height_measurement, o.field_session_id,
                        u.full_name AS recorded_by_name, t.project_id, t.sector_id, t.sub_sector_id
                   FROM tree_observations o JOIN trees t ON t.id = o.tree_id JOIN users u ON u.id = o.recorded_by WHERE o.id = ANY($1)`,
   planting_year_vendor: `SELECT id, project_id, planting_year_id, vendor_id, active, updated_at FROM planting_year_vendors WHERE id = ANY($1)`,

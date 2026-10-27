@@ -40,7 +40,7 @@ data class SessionContext(
 ) {
     /** True when an administrator has since removed or deactivated part of this context. */
     val stale get() = project == null || year == null || sector == null || subSector == null || sector.active.not() || subSector.active.not()
-    val title get() = listOfNotNull(project?.shortCode, year?.yearLabel, sector?.let { "${it.shortCode} ${it.name}" }).joinToString(" · ")
+    val title get() = listOfNotNull(project?.shortCode, year?.yearLabel, vendor?.shortCode, sector?.let { "${it.shortCode} ${it.name}" }).joinToString(" · ")
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -158,8 +158,11 @@ class SessionSetupViewModel @Inject constructor(
     val vendors = combine(linkedVendors, ref.vendors()) { linked, all -> linked.ifEmpty { all.filter { it.active } } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val subSectors = projectId.filterNotNull().flatMapLatest { ref.subSectors(it) }.map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    /** Who planted is recorded when the year has vendors; it does not affect the tree ID. */
-    val vendorNeeded = linkedVendors.map { it.isNotEmpty() }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    /**
+     * The vendor is chosen once per session whenever the project has vendors: their short code is part of the tree ID
+     * and each vendor numbers its own trees.
+     */
+    val vendorNeeded = vendors.map { it.isNotEmpty() }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     init {
         // Pre-fill from the current session, so "Change" only asks for what is different.
@@ -190,8 +193,11 @@ class SessionSetupViewModel @Inject constructor(
     fun start(onStarted: () -> Unit) = viewModelScope.launch {
         val previous = sessions.current()
         val sameDay = previous?.projectId == projectId.value && previous?.plantingYearId == yearId.value && previous?.sectorId == sectorId.value
+        // Changing only the sub-sector continues the same session; anything else starts a new one.
+        val sameSession = sameDay && previous?.vendorId == vendorId.value
         sessions.start(
             FieldSession(
+                id = if (sameSession) previous!!.id else java.util.UUID.randomUUID().toString(),
                 projectId = projectId.value!!, plantingYearId = yearId.value!!, sectorId = sectorId.value!!, subSectorId = subSectorId.value!!,
                 vendorId = vendorId.value,
                 // Keep the running count and remembered choices when only the sub-sector or vendor changed.
@@ -239,8 +245,11 @@ fun SessionSetupScreen(onStarted: () -> Unit, onBack: () -> Unit, vm: SessionSet
             Picker("Planting year", years, years.find { it.id == yearId }, { it.yearLabel + if (it.active) "" else " (closed – back-entry)" }, { vm.selectYear(it.id) },
                 enabled = projectId != null, supportingText = null)
             if (vendorNeeded) {
-                Picker("Vendor", vendors, vendors.find { it.id == vendorId }, { listOfNotNull(it.shortCode, it.name).joinToString(" · ") }, { vm.vendorId.value = it.id },
+                Picker("Vendor (who planted)", vendors, vendors.find { it.id == vendorId }, { listOfNotNull(it.shortCode, it.name).joinToString(" · ") }, { vm.vendorId.value = it.id },
                     enabled = yearId != null, supportingText = null)
+                if (vendors.find { it.id == vendorId }?.shortCode.isNullOrBlank() && vendorId != null) {
+                    Notice("This vendor has no short code, which tree IDs need. Ask an administrator to add one.", MaterialTheme.colorScheme.errorContainer)
+                }
             }
             Picker("Sector", mySectors, mySectors.find { it.id == sectorId }, { "${it.shortCode} · ${it.name}" }, { vm.selectSector(it.id) }, enabled = yearId != null,
                 supportingText = null)
@@ -249,7 +258,8 @@ fun SessionSetupScreen(onStarted: () -> Unit, onBack: () -> Unit, vm: SessionSet
             if (projects.isEmpty()) Notice("No projects on this device yet. Sync while connected, or ask an administrator to assign you.")
             Button(
                 onClick = { vm.start(onStarted) },
-                enabled = projectId != null && yearId != null && sectorId != null && subSectorId != null && (!vendorNeeded || vendorId != null),
+                enabled = projectId != null && yearId != null && sectorId != null && subSectorId != null &&
+                    (!vendorNeeded || !vendors.find { it.id == vendorId }?.shortCode.isNullOrBlank()),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
             ) { Text("Start session", style = MaterialTheme.typography.titleMedium) }
         }

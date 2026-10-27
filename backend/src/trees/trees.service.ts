@@ -13,6 +13,7 @@ import {
   IdScheme,
   normalizePhysicalId,
   physicalIdScopeKey,
+  schemeNeedsVendor,
   serialScopeKey,
   TreeIdError,
 } from '../domain/tree-id';
@@ -26,6 +27,9 @@ const COMPONENT_VALUE_KEYS = ['PROJECT_CODE', 'PLANTING_YEAR', 'VENDOR_CODE', 'S
  */
 export const VISIT_TYPES = ['VISIT', 'FIRST_INSTANCE', 'PLANTING', 'MAINTENANCE'] as const;
 const visitType = z.enum(VISIT_TYPES).nullish().transform((v) => v ?? 'VISIT');
+
+/** One per field session on the phone (a stretch of work), for the field-activity report. Optional: older apps omit it. */
+const fieldSessionId = z.string().uuid().nullish();
 
 const customFields = z.record(z.string(), z.unknown()).refine((v) => JSON.stringify(v).length <= 20_000, 'Too much custom field data');
 
@@ -68,6 +72,7 @@ export const CreateTreePayload = z.object({
     remarks: z.string().max(4000).nullish(),
     custom_fields: customFields.optional(),
     visit_type: visitType,
+    field_session_id: fieldSessionId,
     ...height,
   }),
 });
@@ -101,6 +106,7 @@ export const ObservationPayload = z.object({
   amendment_reason: z.string().max(1000).nullish(),
   custom_fields: customFields.optional(),
   visit_type: visitType,
+  field_session_id: fieldSessionId,
   ...height,
 });
 export type Observation = z.infer<typeof ObservationPayload>;
@@ -161,12 +167,25 @@ export class TreesService {
     if (!schemeRow) throw new Rejection('SCHEME_INVALID', 'The ID format does not belong to this project.');
     const scheme = toScheme(schemeRow);
 
-    // The vendor is attribution (who planted) and optional. Tree IDs no longer depend on it; a format from before
-    // that change can still name it, and a missing required vendor code is then reported by the assembly below.
+    // The vendor is who planted and tagged the tree. It is optional unless the format puts the vendor code in the ID
+    // or numbers trees per vendor (several vendors each start from 1); then it needs a short code, and it must be one
+    // of the planting year's vendors when the year has any.
+    const custom = p.custom_physical_id;
+    const needsVendor = !custom && schemeNeedsVendor(scheme);
+    if (needsVendor && !p.vendor_id) {
+      throw new Rejection('VENDOR_REQUIRED', 'Choose the vendor who tagged this tree: this project numbers its tree IDs per vendor.');
+    }
     let vendor: any = null;
     if (p.vendor_id) {
       vendor = await this.db.one(tx, 'SELECT * FROM vendors WHERE id = $1', [p.vendor_id]);
       if (!vendor?.active) throw new Rejection('VENDOR_INVALID', 'The vendor is unknown or deactivated.');
+      if (needsVendor) {
+        if (!vendor.short_code) throw new Rejection('VENDOR_CODE_MISSING', `Vendor ${vendor.name} has no short code. Add one under Vendors.`);
+        const { rows: links } = await tx.query('SELECT vendor_id FROM planting_year_vendors WHERE planting_year_id = $1 AND active', [year.id]);
+        if (links.length && !links.some((l) => l.vendor_id === vendor.id)) {
+          throw new Rejection('VENDOR_NOT_IN_YEAR', `Vendor ${vendor.name} is not one of the vendors of planting year ${year.year_label}.`);
+        }
+      }
     }
 
     // Current codes from the server; the device's values (from its cache) take precedence
@@ -180,7 +199,6 @@ export class TreesService {
     };
     const values: ComponentValues = { ...currentValues, ...(p.id_component_values ?? {}) };
     let assembled;
-    const custom = p.custom_physical_id;
     if (custom) {
       if (actor.role !== 'ADMIN') throw new Rejection('CUSTOM_ID_NOT_ALLOWED', 'Only an administrator can set a tree ID by hand.');
       if (!p.replaces_tree_id) throw new Rejection('CUSTOM_ID_NOT_ALLOWED', 'A hand-set tree ID is only for replanted (replacement) trees.');
@@ -274,6 +292,7 @@ export class TreesService {
       remarks: p.initial_observation.remarks,
       custom_fields: p.initial_observation.custom_fields,
       visit_type: p.initial_observation.visit_type,
+      field_session_id: p.initial_observation.field_session_id,
       height_cm: p.initial_observation.height_cm,
       height_method: p.initial_observation.height_method,
       height_measurement: p.initial_observation.height_measurement,
@@ -377,7 +396,8 @@ export class TreesService {
     }
     if (p.changes.vendor_id !== undefined) {
       const snapshot = tree.id_components_snapshot;
-      if (snapshot.components.some((c: any) => c.type === 'VENDOR_CODE')) {
+      // Also when trees are numbered per vendor: the serial belongs to the vendor's sequence.
+      if (snapshot.components.some((c: any) => c.type === 'VENDOR_CODE') || /(^|\|)VENDOR=/.test(tree.serial_scope_key ?? '')) {
         throw new Rejection('VENDOR_IN_ID', 'The vendor is part of this tree’s ID. Use an ID correction instead.');
       }
       if (p.changes.vendor_id) {
@@ -473,14 +493,14 @@ export class TreesService {
       tx,
       `INSERT INTO tree_observations (id, tree_id, observed_status_id, observed_at, recorded_at, recorded_by, device_id, remarks,
                                       is_initial, is_amendment, amends_observation_id, amendment_reason, custom_fields,
-                                      height_cm, height_method, height_measurement, visit_type)
-       VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING *`,
+                                      height_cm, height_method, height_measurement, visit_type, field_session_id)
+       VALUES ($1, $2, $3, $4, COALESCE($5, now()), $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING *`,
       [
         p.id, p.tree_id, p.observed_status_id, p.observed_at, p.recorded_at ?? null, actor.id, ctx.deviceId, p.remarks ?? null,
         initial, !!p.amends_observation_id, p.amends_observation_id ?? null, p.amendment_reason ?? null, JSON.stringify(fields),
         heightCm, heightCm == null ? null : (p.height_method ?? 'MANUAL'),
         heightCm == null || !p.height_measurement ? null : JSON.stringify(p.height_measurement),
-        p.visit_type,
+        p.visit_type, p.field_session_id ?? null,
       ],
     ))!;
   }

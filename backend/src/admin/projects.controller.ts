@@ -6,7 +6,7 @@ import { AuditService } from '../common/audit.service';
 import { badRequest, notFound } from '../common/errors';
 import { isoDate, parse, shortCode } from '../common/validation';
 import { Db, isUniqueViolation } from '../database/db.service';
-import { DEFAULT_SCHEME, IdScheme, retiredSchemeParts, validateScheme, COMPONENT_TYPES, SCOPE_DIMENSIONS } from '../domain/tree-id';
+import { DEFAULT_SCHEME, IdScheme, validateScheme, COMPONENT_TYPES, SCOPE_DIMENSIONS } from '../domain/tree-id';
 import { FIELD_TYPES } from '../domain/custom-fields';
 
 const ProjectBody = z.object({
@@ -38,7 +38,7 @@ const SchemeBody = z.object({
   serial_width: z.number().int(),
   serial_uniqueness_scope: z.array(z.enum(SCOPE_DIMENSIONS)),
   active_from: z.string().datetime({ offset: true }).optional(),
-  /** Retired: a project has one format for all vendors and years. Still parsed so a stale client gets a clear refusal. */
+  /** Retired: a project has one format for all vendors and years (the vendor code is a part of it). Still parsed so a stale client gets a clear refusal. */
   vendor_id: z.string().uuid().nullish(),
   planting_year_id: z.string().uuid().nullish(),
 });
@@ -205,14 +205,15 @@ export class ProjectsController {
 
   /**
    * Creates a new version of the project's ID format; it becomes current for new registrations. Existing IDs are untouched.
-   * One format per project: all vendors share one serial sequence per planting year, so formats are not set per vendor or year.
+   * One format per project, for every vendor and planting year: the vendor code and planting year are parts of the ID
+   * (numbering per vendor is a scope choice), so formats are not set per vendor or year.
    */
   @Roles('ADMIN')
   @Post('projects/:id/tree-id-schemes')
   async createScheme(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) projectId: string, @Body() body: unknown) {
     const b = parse(SchemeBody, body);
     if (b.vendor_id) {
-      throw badRequest('VENDOR_FORMAT_RETIRED', 'Tree ID formats are no longer set per vendor: all vendors on a project share one numbering per planting year. Leave out vendor_id.');
+      throw badRequest('VENDOR_FORMAT_RETIRED', 'Tree ID formats are not set per vendor: one project format serves every vendor (add the vendor code part to it). Leave out vendor_id.');
     }
     if (b.planting_year_id) {
       throw badRequest('YEAR_FORMAT_RETIRED', 'Tree ID formats are set once per project (the planting year is a part of the ID). Leave out planting_year_id.');
@@ -223,14 +224,6 @@ export class ProjectsController {
       components: b.components,
       serialUniquenessScope: b.serial_uniqueness_scope,
     };
-    const retired = retiredSchemeParts(scheme);
-    if (retired.length) {
-      throw badRequest(
-        'SCHEME_INVALID',
-        'A tree ID can no longer include the vendor code or count tree numbers per vendor: all vendors on a project share one sequence per planting year.',
-        retired,
-      );
-    }
     const problems = validateScheme(scheme);
     if (problems.length) throw badRequest('SCHEME_INVALID', 'The ID format is not valid.', problems);
     return this.db.tx(async (tx) => {

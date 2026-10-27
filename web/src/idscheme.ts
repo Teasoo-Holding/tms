@@ -3,29 +3,30 @@
 export const COMPONENTS: [string, string][] = [
   ['PROJECT_CODE', 'Project code'],
   ['PLANTING_YEAR', 'Planting year'],
+  ['VENDOR_CODE', 'Vendor code'],
   ['SECTOR_CODE', 'Sector code'],
   ['SUB_SECTOR_CODE', 'Sub-sector code'],
   ['TEXT', 'Fixed text'],
   ['SERIAL', 'Tree number'],
 ];
-/** Parts that only appear in formats from before IDs became per project and planting year (shown for history). */
-const LEGACY_COMPONENTS: [string, string][] = [['VENDOR_CODE', 'Vendor code']];
-/** Parts that are the same for every tree in a year; the officer never types them. */
+/** Parts the phone fills in (the vendor code from the vendor the officer picks); the officer never types them. */
 export const FIXED_PARTS = ['PROJECT_CODE', 'PLANTING_YEAR', 'VENDOR_CODE', 'TEXT'];
 export const isFixedPart = (type: string) => FIXED_PARTS.includes(type);
-export const componentLabel = (type: string) => [...COMPONENTS, ...LEGACY_COMPONENTS].find(([k]) => k === type)?.[1] ?? type;
+export const componentLabel = (type: string) => COMPONENTS.find(([k]) => k === type)?.[1] ?? type;
 /** Fixed text: 1–16 letters or digits. */
 export const TEXT_VALUE = /^[A-Za-z0-9]{1,16}$/;
 
 export const SCOPES: [string, string][] = [
   ['PROJECT', 'Project'],
   ['PLANTING_YEAR', 'Planting year'],
+  ['VENDOR', 'Vendor'],
   ['SECTOR', 'Sector'],
   ['SUB_SECTOR', 'Sub-sector'],
 ];
-const LEGACY_SCOPES: [string, string][] = [['VENDOR', 'Vendor']];
-/** One progressive sequence per project and planting year, shared by every vendor. */
-export const RECOMMENDED_SCOPE = ['PROJECT', 'PLANTING_YEAR'];
+/** One progressive sequence per project, planting year and vendor: every vendor numbers its trees from 1. */
+export const RECOMMENDED_SCOPE = ['PROJECT', 'PLANTING_YEAR', 'VENDOR'];
+/** Vendor code used in previews when the year has no vendor with a code. */
+export const SAMPLE_VENDOR_CODE = 'KNM';
 
 export interface SchemeComponent {
   type: string;
@@ -44,7 +45,7 @@ export function previewId(components: SchemeComponent[], separator: string, widt
 
 export function scopeLabel(scope: string[]) {
   if (!scope.length) return 'all projects (global)';
-  return scope.map((s) => [...SCOPES, ...LEGACY_SCOPES].find(([k]) => k === s)?.[1] ?? s).join(' + ');
+  return scope.map((s) => SCOPES.find(([k]) => k === s)?.[1] ?? s).join(' + ');
 }
 
 /** A tree_id_schemes row as returned by GET /projects/:id. */

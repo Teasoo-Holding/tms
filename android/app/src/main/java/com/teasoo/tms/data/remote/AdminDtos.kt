@@ -644,3 +644,54 @@ data class AnalyticsSummary(
 
 @kotlinx.serialization.Serializable
 data class SpeciesImagesResponse(val images: List<SpeciesImageDto>)
+
+// ---------------------------------------------------------------- field activity (who collected what, per day and session)
+@Serializable
+data class FieldActivityResponse(
+    val from: String,
+    val to: String,
+    val officers: List<OfficerActivityDto> = emptyList(),
+    val days: List<DayActivityDto> = emptyList(),
+)
+
+@Serializable
+data class OfficerActivityDto(
+    @SerialName("user_id") val userId: String,
+    @SerialName("user_name") val userName: String? = null,
+    @SerialName("trees_registered") val treesRegistered: Int = 0,
+    val visits: Int = 0,
+    val corrections: Int = 0,
+    val photos: Int = 0,
+    @SerialName("days_active") val daysActive: Int = 0,
+    val sessions: Int = 0,
+)
+
+@Serializable
+data class DayActivityDto(
+    val date: String,
+    @SerialName("user_id") val userId: String,
+    @SerialName("user_name") val userName: String? = null,
+    @SerialName("trees_registered") val treesRegistered: Int = 0,
+    val visits: Int = 0,
+    val corrections: Int = 0,
+    val photos: Int = 0,
+    @SerialName("first_at") val firstAt: String? = null,
+    @SerialName("last_at") val lastAt: String? = null,
+    val sessions: List<SessionActivityDto> = emptyList(),
+)
+
+@Serializable
+data class SessionActivityDto(
+    @SerialName("field_session_id") val fieldSessionId: String? = null,
+    @SerialName("first_at") val firstAt: String? = null,
+    @SerialName("last_at") val lastAt: String? = null,
+    @SerialName("project_name") val projectName: String? = null,
+    @SerialName("planting_year") val plantingYear: String? = null,
+    val sectors: List<String> = emptyList(),
+    @SerialName("sub_sectors") val subSectors: List<String> = emptyList(),
+    val vendors: List<String> = emptyList(),
+    @SerialName("trees_registered") val treesRegistered: Int = 0,
+    val visits: Int = 0,
+    val corrections: Int = 0,
+    val photos: Int = 0,
+)

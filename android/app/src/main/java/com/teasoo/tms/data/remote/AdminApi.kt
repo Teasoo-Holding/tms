@@ -87,6 +87,16 @@ interface AdminApi {
     // Each returns {deleted: true}, or 409 {code: IN_USE | HAS_TREES, message} suggesting deactivation instead.
     @DELETE("api/v1/tree-species/{id}") suspend fun deleteSpecies(@Path("id") id: String): JsonElement
 
+    // ---------------------------------------------------------------- field activity
+    @GET("api/v1/reports/field-activity")
+    suspend fun fieldActivity(
+        @Query("project_id") projectId: String?,
+        @Query("from") from: String,
+        @Query("to") to: String,
+        @Query("tz") tz: String,
+        @Query("user_id") userId: String? = null,
+    ): FieldActivityResponse
+
     // ---------------------------------------------------------------- species reference photos
     @GET("api/v1/species/{id}/images") suspend fun speciesImages(@Path("id") speciesId: String): SpeciesImagesResponse
     @retrofit2.http.Multipart

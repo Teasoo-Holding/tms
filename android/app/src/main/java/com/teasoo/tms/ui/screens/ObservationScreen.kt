@@ -116,6 +116,7 @@ class ObservationViewModel @Inject constructor(
                 amendmentReason = reason.value.ifBlank { null },
                 height = height.value,
                 fields = toFieldValues(fieldDefs.value, fieldValues.value),
+                fieldSessionId = fieldSessions.current()?.id,
             )
             rememberSticky(fieldDefs.value, fieldValues.value)
             saved = true

@@ -3,22 +3,42 @@ import { useState } from 'react';
 import { api } from '../api/client';
 import { EmptyState, ErrorNotice, Field, fmtDate, Modal, relativeTime, RowMenu } from './ui';
 
-interface ShareLink {
+export interface ShareLink {
   id: string;
+  project_id: string;
+  project_name: string;
   label: string | null;
   expires_at: string | null;
   revoked_at: string | null;
   last_used_at: string | null;
   created_at: string;
   created_by_name: string | null;
+  status: 'ACTIVE' | 'EXPIRED' | 'REVOKED';
+  /** /share/<token> while the link works; null for revoked or expired links and links made before they could be copied again. */
+  path: string | null;
 }
 
-const EXPIRY: [string, string][] = [['', 'Never'], ['30', '30 days'], ['90', '90 days'], ['365', '1 year']];
+export const EXPIRY: [string, string][] = [['', 'Never'], ['30', '30 days'], ['90', '90 days'], ['365', '1 year']];
 
-function linkState(l: ShareLink): ['good' | 'critical' | '', string] {
+export function linkState(l: ShareLink): ['good' | 'critical' | '', string] {
   if (l.revoked_at) return ['critical', 'Revoked'];
   if (l.expires_at && new Date(l.expires_at).getTime() < Date.now()) return ['', 'Expired'];
   return ['good', 'Active'];
+}
+
+/** Full address of a link path, on this site. */
+export const shareUrl = (path: string) => `${window.location.origin}${path}`;
+
+/** Copies text, falling back to selecting the given input when the clipboard is unavailable. */
+export async function copyText(text: string, fallbackInputId?: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    if (fallbackInputId) (document.getElementById(fallbackInputId) as HTMLInputElement | null)?.select();
+    else window.prompt('Copy the link:', text);
+    return false;
+  }
 }
 
 /** Read-only client links for one project: create (token shown once), list and revoke. */
@@ -37,13 +57,7 @@ export function ShareLinksModal({ projectId, projectName, onClose }: { projectId
   const revoke = useMutation({ mutationFn: (id: string) => api.post(`/share-links/${id}/revoke`) });
   const url = create.data ? `${window.location.origin}/share/${create.data.token}` : null;
   const copy = async () => {
-    if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-    } catch {
-      (document.getElementById('share-url') as HTMLInputElement | null)?.select();
-    }
+    if (url && (await copyText(url, 'share-url'))) setCopied(true);
   };
 
   return (
@@ -59,7 +73,7 @@ export function ShareLinksModal({ projectId, projectName, onClose }: { projectId
               <span className="spacer" style={{ flex: 1 }} />
               <button className="link" onClick={() => create.reset()}>New link</button>
             </div>
-            <div className="notice warning">Copy it now: this link is shown only once.</div>
+            <div className="muted">All client links are listed under Client links in the sidebar.</div>
           </div>
         ) : (
           <form className="stack" style={{ gap: 12 }} onSubmit={(e) => (e.preventDefault(), create.mutate())}>
@@ -100,7 +114,11 @@ export function ShareLinksModal({ projectId, projectName, onClose }: { projectId
                   </div>
                   {state === 'Active' && (
                     <RowMenu
-                      items={[{ label: 'Revoke', danger: true, onClick: () => confirm(`Revoke “${l.label || 'Untitled link'}”? Anyone using it loses access.`) && revoke.mutate(l.id) }]}
+                      items={[
+                        !!l.path && { label: 'Copy link', onClick: () => void copyText(shareUrl(l.path!)) },
+                        !!l.path && { label: 'Open', onClick: () => void window.open(shareUrl(l.path!), '_blank', 'noopener') },
+                        { label: 'Revoke', danger: true, onClick: () => confirm(`Revoke “${l.label || 'Untitled link'}”? Anyone using it loses access.`) && revoke.mutate(l.id) },
+                      ]}
                     />
                   )}
                 </li>
