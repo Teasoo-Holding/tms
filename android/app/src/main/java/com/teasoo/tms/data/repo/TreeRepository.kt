@@ -56,6 +56,8 @@ data class NewTree(
     val visitType: String = "VISIT",
     /** Administrators only, for replanted trees: an ID typed by hand instead of the format's. */
     val customPhysicalId: String? = null,
+    /** The field session this was recorded in, for the administrators' activity report. */
+    val fieldSessionId: String? = null,
 )
 
 /** A tree height recorded with an observation. */
@@ -225,6 +227,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
                 t.remarks?.let { put("remarks", it) }
                 if (t.observationFields.isNotEmpty()) put("custom_fields", t.observationFields.toJson())
                 put("visit_type", t.visitType)
+                t.fieldSessionId?.let { put("field_session_id", it) }
                 putHeight(t.height)
             }
         }
@@ -247,6 +250,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
         treeId: String, statusId: String, observedAt: Instant, remarks: String?, photos: List<CapturedPhoto>, userId: String,
         amendsObservationId: String? = null, amendmentReason: String? = null,
         height: HeightReading? = null, fields: FieldValues = emptyMap(), visitType: String = "VISIT",
+        fieldSessionId: String? = null,
     ): String {
         val status = ref.status(statusId) ?: throw RegistrationException("Choose a status.")
         // Every visit needs a photo; a correction of an earlier visit may reuse that visit's photos.
@@ -265,6 +269,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
             amendmentReason?.let { put("amendment_reason", it) }
             if (fields.isNotEmpty()) put("custom_fields", fields.toJson())
             put("visit_type", visitType)
+            fieldSessionId?.let { put("field_session_id", it) }
             putHeight(height)
         }
         db.withTransaction {

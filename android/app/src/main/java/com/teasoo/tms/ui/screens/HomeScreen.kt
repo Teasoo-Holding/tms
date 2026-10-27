@@ -116,6 +116,7 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
                             Column(Modifier.weight(1f)) {
                                 Text(c.title, style = MaterialTheme.typography.titleMedium, maxLines = 2)
                                 c.subSector?.let { Text("Sub-sector ${it.shortCode} · ${it.name}", style = MaterialTheme.typography.bodyMedium) }
+                                c.vendor?.let { Text("Vendor ${it.name}", style = MaterialTheme.typography.bodyMedium) }
                                 if (trees + observations > 0) Text("$trees registered · $observations visits this session", style = MaterialTheme.typography.bodyMedium)
                             }
                             Icon(Icons.Default.Edit, contentDescription = "Change session", tint = MaterialTheme.colorScheme.onSurfaceVariant)

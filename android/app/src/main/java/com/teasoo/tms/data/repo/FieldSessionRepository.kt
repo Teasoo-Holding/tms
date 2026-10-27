@@ -18,6 +18,8 @@ import javax.inject.Singleton
  */
 @Serializable
 data class FieldSession(
+    /** Sent with every record so administrators can see what was collected in each session. */
+    val id: String = java.util.UUID.randomUUID().toString(),
     val projectId: String,
     val plantingYearId: String,
     val sectorId: String,

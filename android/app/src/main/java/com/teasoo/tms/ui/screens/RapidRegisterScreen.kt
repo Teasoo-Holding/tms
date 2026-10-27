@@ -161,6 +161,7 @@ class RapidRegisterViewModel @Inject constructor(
                     statusId = s.statusId ?: throw RegistrationException("Choose a status."),
                     // Stamped when saved; not editable.
                     observedAt = java.time.Instant.now(),
+                    fieldSessionId = s.id,
                     notes = e.notes.ifBlank { null },
                     remarks = e.remarks.ifBlank { null },
                     photos = e.photos,

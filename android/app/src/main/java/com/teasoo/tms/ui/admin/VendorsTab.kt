@@ -67,7 +67,15 @@ internal fun VendorsTab(p: ProjectDetailDto, year: AdminPlantingYearDto?, vm: Pr
             ) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     ItemTitle(link.vendorName ?: "Vendor")
-                    ItemSubtitle(link.vendorShortCode.orEmpty())
+                    if (link.vendorShortCode.isNullOrBlank()) {
+                        Text("No short code – needed for tree IDs. Tap to add one.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    } else {
+                        val scheme = p.schemes.effectiveFor(null, year.id)
+                        ItemSubtitle(listOfNotNull(
+                            "Code ${link.vendorShortCode}",
+                            scheme?.let { "first tree " + previewId(it.components, it.separator, it.serialWidth, idSamples(p, year, link.vendorShortCode, areas), 1) },
+                        ).joinToString(" · "))
+                    }
                 }
             }
         }
