@@ -329,6 +329,18 @@ class LocalStoreTest {
     }
 
     @Test
+    fun areasWithoutGpsSyncAndCanBeUsed() = runBlocking {
+        val sector = buildJsonObject {
+            put("id", "s9"); put("project_id", "p1"); put("planting_year_id", "y2024"); put("name", "East"); put("short_code", "S09")
+            put("reference_latitude", JsonNull); put("reference_longitude", JsonNull); put("boundary", JsonNull); put("active", true)
+        }
+        ReferenceRepository(db).applyChanges(ChangesResponse(listOf(ChangeDto(1, "sector", sector)), "1", false, "x"))
+        val stored = db.reference().sector("s9")!!
+        assertNull(stored.referenceLatitude)
+        assertNull(stored.boundaryJson)
+    }
+
+    @Test
     fun speciesReferencePhotosFollowServerChanges() = runBlocking {
         val repo = ReferenceRepository(db)
         fun change(seq: Long, id: String, order: Int, deleted: Boolean = false) = ChangeDto(

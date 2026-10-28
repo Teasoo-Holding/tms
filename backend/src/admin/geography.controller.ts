@@ -14,10 +14,13 @@ const AreaFields = {
   name: z.string().trim().min(1).max(200),
   short_code: shortCode,
   description: z.string().max(4000).nullish(),
-  /** Optional when corners or a boundary are given: the centre of the area is used. */
-  reference_latitude: latitude.optional(),
-  reference_longitude: longitude.optional(),
-  /** Corner points; the boundary is built from them. Takes precedence over `boundary`. */
+  /**
+   * Location is optional: an area can be created with just a name and short code, and located later.
+   * Without a reference point, a point inside the boundary is used (when there is one). Null clears it.
+   */
+  reference_latitude: latitude.nullish(),
+  reference_longitude: longitude.nullish(),
+  /** Corner points; the boundary is built from them. Takes precedence over `boundary` (null clears the boundary). */
   corners: z.array(Corner).min(3).max(12).optional(),
   boundary: geoJsonPolygon.nullish(),
   active: z.boolean().default(true),
@@ -84,13 +87,27 @@ export class GeographyController {
     return sectors.rows.map((s) => ({ ...s, sub_sectors: subs.rows.filter((ss) => ss.sector_id === s.id) }));
   }
 
-  /** Corners win over a boundary; the reference point defaults to a point inside the area. */
+  /**
+   * Where the area is; every part is optional (an area may have no location yet).
+   * Corners win over a boundary. Fields left out keep their value; a new outline without a reference point gets a
+   * point inside it, and an area with a boundary always has a reference point.
+   */
   private async shape(tx: Queryable, b: Partial<AreaInput>, before?: any) {
+    const reshaped = b.corners !== undefined || b.boundary !== undefined;
     const boundary = b.corners ? cornersToPolygon(b.corners) : b.boundary !== undefined ? b.boundary : before?.boundary ?? null;
-    let lat = b.reference_latitude ?? (b.corners || b.boundary ? undefined : before?.reference_latitude);
-    let lon = b.reference_longitude ?? (b.corners || b.boundary ? undefined : before?.reference_longitude);
-    if (lat === undefined || lon === undefined) {
-      if (!boundary) throw badRequest('LOCATION_REQUIRED', 'Enter the corner points of the area (or a reference point).');
+    let lat: number | null = null;
+    let lon: number | null = null;
+    if (b.reference_latitude !== undefined || b.reference_longitude !== undefined) {
+      lat = b.reference_latitude !== undefined ? b.reference_latitude : before?.reference_latitude ?? null;
+      lon = b.reference_longitude !== undefined ? b.reference_longitude : before?.reference_longitude ?? null;
+      if ((lat === null) !== (lon === null)) {
+        throw badRequest('REFERENCE_POINT_INCOMPLETE', 'Enter both the latitude and the longitude of the reference point.');
+      }
+    } else if (before && !reshaped) {
+      lat = before.reference_latitude ?? null;
+      lon = before.reference_longitude ?? null;
+    }
+    if (lat === null && boundary) {
       const { rows } = await tx.query(`SELECT ST_Y(p) AS lat, ST_X(p) AS lon FROM (SELECT ST_PointOnSurface(ST_GeomFromGeoJSON($1)) AS p) s`, [
         JSON.stringify(boundary),
       ]).catch(() => {
@@ -99,7 +116,7 @@ export class GeographyController {
       lat = Number(Number(rows[0].lat).toFixed(6));
       lon = Number(Number(rows[0].lon).toFixed(6));
     }
-    return { boundary, reference_latitude: lat!, reference_longitude: lon! };
+    return { boundary, reference_latitude: lat, reference_longitude: lon };
   }
 
   /** GeoJSON export of area reference points and boundaries (never individual trees). */
@@ -117,7 +134,8 @@ export class GeographyController {
   private feature(kind: string, a: any, sectorCode: string | null) {
     return {
       type: 'Feature',
-      geometry: a.boundary ?? { type: 'Point', coordinates: [a.reference_longitude, a.reference_latitude] },
+      // Areas not located yet have no geometry (allowed by GeoJSON).
+      geometry: a.boundary ?? (a.reference_latitude != null ? { type: 'Point', coordinates: [a.reference_longitude, a.reference_latitude] } : null),
       properties: {
         kind,
         id: a.id,
@@ -232,7 +250,7 @@ export class GeographyController {
 
   /**
    * Imports sectors and sub-sectors from GeoJSON. All-or-nothing: any invalid feature aborts the import.
-   * Areas without a reference point use the polygon's interior point.
+   * Areas without a reference point use the polygon's interior point; features with neither are imported without a location.
    */
   @Roles('ADMIN')
   @Post('projects/:id/areas/import')
@@ -247,10 +265,12 @@ export class GeographyController {
       existing.rows.forEach((r) => sectorIds.set(r.short_code, r.id));
       let created = 0;
       const ordered = [...b.features].sort((a, c) => (a.properties.kind === c.properties.kind ? 0 : a.properties.kind === 'sector' ? -1 : 1));
-      for (const [index, f] of ordered.entries()) {
+      for (const f of ordered) {
         const p = f.properties;
-        const ref = await this.referencePoint(tx, f.geometry, p.reference_latitude, p.reference_longitude, index);
-        const area = { name: p.name, short_code: p.short_code, description: p.description, boundary: f.geometry, active: true, ...ref };
+        const area = {
+          name: p.name, short_code: p.short_code, description: p.description, boundary: f.geometry, active: true,
+          reference_latitude: p.reference_latitude, reference_longitude: p.reference_longitude,
+        };
         if (p.kind === 'sector') {
           const row = await this.insertSector(tx, user, projectId, area, b.planting_year_id ?? null);
           sectorIds.set(row!.short_code, row!.id);
@@ -264,16 +284,6 @@ export class GeographyController {
       await this.audit.record({ actorId: user.id, action: 'areas.import', entityType: 'project', entityId: projectId, projectId, metadata: { created } }, tx);
       return { created };
     });
-  }
-
-  private async referencePoint(tx: Queryable, geometry: unknown, lat?: number, lon?: number, index = 0) {
-    if (lat !== undefined && lon !== undefined) return { reference_latitude: lat, reference_longitude: lon };
-    if (!geometry) throw badRequest('IMPORT_REFERENCE_MISSING', `Feature ${index + 1} needs a polygon or a reference point.`);
-    const { rows } = await tx.query(
-      `SELECT ST_Y(p) AS lat, ST_X(p) AS lon FROM (SELECT ST_PointOnSurface(ST_GeomFromGeoJSON($1)) AS p) s`,
-      [JSON.stringify(geometry)],
-    );
-    return { reference_latitude: Number(rows[0].lat.toFixed(6)), reference_longitude: Number(rows[0].lon.toFixed(6)) };
   }
 }
 

@@ -75,7 +75,7 @@ data class IdSchemeDto(
 @Serializable
 data class SectorDto(
     val id: String, @SerialName("project_id") val projectId: String, val name: String, @SerialName("short_code") val shortCode: String,
-    @SerialName("reference_latitude") val referenceLatitude: Double, @SerialName("reference_longitude") val referenceLongitude: Double,
+    @SerialName("reference_latitude") val referenceLatitude: Double? = null, @SerialName("reference_longitude") val referenceLongitude: Double? = null,
     val boundary: JsonElement? = null, val active: Boolean,
     @SerialName("planting_year_id") val plantingYearId: String? = null,
 )
@@ -93,7 +93,7 @@ data class PlantingYearVendorDto(
 data class SubSectorDto(
     val id: String, @SerialName("sector_id") val sectorId: String, @SerialName("project_id") val projectId: String, val name: String,
     @SerialName("short_code") val shortCode: String,
-    @SerialName("reference_latitude") val referenceLatitude: Double, @SerialName("reference_longitude") val referenceLongitude: Double,
+    @SerialName("reference_latitude") val referenceLatitude: Double? = null, @SerialName("reference_longitude") val referenceLongitude: Double? = null,
     val boundary: JsonElement? = null, val active: Boolean,
 )
 

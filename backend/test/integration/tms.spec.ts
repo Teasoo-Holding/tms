@@ -1035,3 +1035,87 @@ describe('migration 009: vendor code in tree IDs', () => {
     expect(cols).toHaveLength(1);
   });
 });
+
+describe('areas without GPS', () => {
+  const sq = (lat: number, lon: number, d: number) => [
+    { latitude: lat, longitude: lon }, { latitude: lat, longitude: lon + d }, { latitude: lat + d, longitude: lon + d }, { latitude: lat + d, longitude: lon },
+  ];
+  const noLocation = { reference_latitude: null, reference_longitude: null, boundary: null };
+  let year: string;
+  let bare: string; // sector with no location
+  let bareSub: string; // its sub-sector, no location either
+  let walked: string; // sector with corners
+
+  it('creates sectors and sub-sectors from a name and short code alone', async () => {
+    year = (await admin.post(`/projects/${f.projectId}/planting-years`, { year_label: '2032' }).expect(201)).body.id;
+    const s = await admin.post(`/projects/${f.projectId}/sectors`, { planting_year_id: year, name: 'Not walked', short_code: 'G1' }).expect(201);
+    bare = s.body.id;
+    expect(s.body).toMatchObject(noLocation);
+    const ss = await admin.post(`/sectors/${bare}/sub-sectors`, { name: 'Not walked a', short_code: 'GA' }).expect(201);
+    bareSub = ss.body.id;
+    expect(ss.body).toMatchObject(noLocation);
+    // A located sub-sector under a sector without GPS: nothing to check it against.
+    const located = await admin.post(`/sectors/${bare}/sub-sectors`, { name: 'Walked b', short_code: 'GB', corners: sq(9.0, 5.0, 0.002) }).expect(201);
+    expect(located.body.boundary.type).toBe('Polygon');
+    expect(located.body.reference_latitude).toBeGreaterThan(9.0);
+    // And a sub-sector without GPS under a sector with an outline.
+    walked = (await admin.post(`/projects/${f.projectId}/sectors`, { planting_year_id: year, name: 'Walked', short_code: 'G2', corners: sq(9.1, 5.1, 0.01) }).expect(201)).body.id;
+    expect((await admin.post(`/sectors/${walked}/sub-sectors`, { name: 'Later', short_code: 'GC' }).expect(201)).body).toMatchObject(noLocation);
+    // A reference point is whole or absent.
+    const half = await admin.post(`/projects/${f.projectId}/sectors`, { planting_year_id: year, name: 'Half', short_code: 'G3', reference_latitude: 9.2 }).expect(400);
+    expect(half.body.code).toBe('REFERENCE_POINT_INCOMPLETE');
+  });
+
+  it('adds corners later, keeps the location on other edits and can clear it', async () => {
+    const renamed = (await admin.patch(`/sectors/${bare}`, { name: 'Still not walked' }).expect(200)).body;
+    expect(renamed).toMatchObject({ name: 'Still not walked', ...noLocation });
+    const located = (await admin.patch(`/sectors/${bare}`, { corners: sq(9.0, 5.0, 0.01) }).expect(200)).body;
+    expect(located.boundary.type).toBe('Polygon');
+    expect(located.reference_latitude).toBeGreaterThan(9.0);
+    expect(located.reference_longitude).toBeGreaterThan(5.0);
+    const kept = (await admin.patch(`/sectors/${bare}`, { description: 'Walked in March' }).expect(200)).body;
+    expect(kept.boundary).toEqual(located.boundary);
+    expect(kept.reference_latitude).toBe(located.reference_latitude);
+    // The sub-sector without GPS is unaffected by its sector getting an outline, and gets corners inside it.
+    const far = await admin.patch(`/sub-sectors/${bareSub}`, { corners: sq(9.5, 5.5, 0.002) }).expect(400);
+    expect(far.body.code).toBe('GEOMETRY_OUTSIDE_PARENT');
+    const sub = (await admin.patch(`/sub-sectors/${bareSub}`, { reference_latitude: 9.005, reference_longitude: 5.005 }).expect(200)).body;
+    expect(sub).toMatchObject({ boundary: null, reference_latitude: 9.005, reference_longitude: 5.005 });
+    expect((await admin.patch(`/sub-sectors/${bareSub}`, { reference_latitude: null, reference_longitude: null }).expect(200)).body).toMatchObject(noLocation);
+    // Clearing the outline (with no reference point given) clears the location; the sector is back to "no GPS".
+    await admin.patch(`/sectors/${bare}`, { boundary: null }).expect(200);
+    expect((await admin.get(`/projects/${f.projectId}/areas?planting_year_id=${year}`).expect(200)).body.find((a: any) => a.id === bare)).toMatchObject(noLocation);
+  });
+
+  it('sends nulls to devices and keeps reports and exports working', async () => {
+    const boot = (await admin.get('/mobile/bootstrap').expect(200)).body;
+    expect(boot.sectors.find((s: any) => s.id === bare)).toMatchObject(noLocation);
+    expect(boot.sub_sectors.find((s: any) => s.id === bareSub)).toMatchObject(noLocation);
+    await admin.patch(`/sub-sectors/${bareSub}`, { name: 'Renamed' }).expect(200);
+    const changes = (await admin.get(`/sync/changes?cursor=${boot.cursor}`).expect(200)).body.changes;
+    expect(changes.find((c: any) => c.entity_type === 'sub_sector' && c.data.id === bareSub).data).toMatchObject({ name: 'Renamed', ...noLocation });
+
+    const density = (await admin.get(`/reports/density?project_id=${f.projectId}&planting_year_id=${year}`).expect(200)).body;
+    const s = density.sectors.find((x: any) => x.id === bare);
+    expect(s).toMatchObject({ area_hectares: null, trees_per_hectare: null, ...noLocation });
+    expect(s.sub_sectors.find((x: any) => x.id === bareSub)).toMatchObject({ area_hectares: null, ...noLocation });
+    expect(density.sectors.find((x: any) => x.id === walked).area_hectares).toBeGreaterThan(100);
+
+    const geo = (await admin.get(`/projects/${f.projectId}/areas.geojson`).expect(200)).body;
+    expect(geo.features.find((x: any) => x.properties.id === bare).geometry).toBeNull();
+    await admin.get(`/reports/export.xlsx?project_id=${f.projectId}`).expect(200);
+    await admin.get(`/reports/summary?project_id=${f.projectId}`).expect(200);
+    const link = (await admin.post(`/projects/${f.projectId}/share-links`, { label: 'No GPS' }).expect(201)).body;
+    const view = (await request(app.getHttpServer()).get(`/api/v1/share/${link.token}`).expect(200)).body;
+    expect(view.areas.find((a: any) => a.id === bare)).toMatchObject({ reference_latitude: null, boundary: null });
+  });
+
+  it('migration 010 keeps a reference point whole and runs again safely', async () => {
+    const file = path.resolve(__dirname, '../../migrations/010_optional_area_location.sql');
+    await sql(fs.readFileSync(file, 'utf8'));
+    await expect(sql('UPDATE sectors SET reference_latitude = 9 WHERE id = $1', [bare])).rejects.toThrow(/sectors_reference_point_whole/);
+    await expect(sql('UPDATE sub_sectors SET reference_longitude = 5 WHERE id = $1', [bareSub])).rejects.toThrow(/sub_sectors_reference_point_whole/);
+    await sql('UPDATE sub_sectors SET reference_latitude = 9, reference_longitude = 5 WHERE id = $1', [bareSub]);
+    await expect(sql('UPDATE sectors SET reference_latitude = 95, reference_longitude = 5 WHERE id = $1', [bare])).rejects.toThrow(/check constraint/);
+  });
+});

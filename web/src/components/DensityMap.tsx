@@ -23,8 +23,9 @@ export interface DensityArea extends DensityStats {
   short_code: string;
   name: string;
   active: boolean;
-  reference_latitude: number;
-  reference_longitude: number;
+  /** Null for areas not located yet. */
+  reference_latitude: number | null;
+  reference_longitude: number | null;
   boundary: GeoJSON.Polygon | null;
   year_label?: string | null;
   sub_sectors?: DensityArea[];
@@ -54,6 +55,8 @@ interface DotMap {
   dots: GeoJSON.FeatureCollection;
   perDot: number;
   outlined: number;
+  /** Sectors and sub-sectors without an outline (no GPS corners yet). */
+  unoutlined: number;
   undrawn: number;
 }
 
@@ -66,6 +69,7 @@ function buildDotMap(sectors: DensityArea[]): DotMap {
   const areas: GeoJSON.Feature[] = [];
   const fill: DotArea[] = [];
   let outlined = 0;
+  let unoutlined = 0;
   let undrawn = 0;
   for (const s of sectors) {
     const subs = (s.sub_sectors ?? []).filter((ss) => ss.boundary);
@@ -75,13 +79,14 @@ function buildDotMap(sectors: DensityArea[]): DotMap {
       fill.push({ id: ss.id, polygon: ss.boundary!, counts: countsOf(ss) });
     }
     outlined += (s.boundary ? 1 : 0) + subs.length;
+    unoutlined += (s.boundary ? 0 : 1) + (s.sub_sectors ?? []).length - subs.length;
     const rest = countsOf(s);
     for (const ss of subs) for (const k of ['alive', 'dead', 'unknown'] as const) rest[k] = Math.max(0, rest[k] - countsOf(ss)[k]);
     if (s.boundary) fill.push({ id: s.id, polygon: s.boundary, exclude: subs.map((ss) => ss.boundary!), counts: rest });
     else undrawn += rest.alive + rest.dead + rest.unknown;
   }
   const perDot = treesPerDot(fill.map((a) => a.counts));
-  return { areas: { type: 'FeatureCollection', features: areas }, dots: { type: 'FeatureCollection', features: dotFeatures(fill, perDot) }, perDot, outlined, undrawn };
+  return { areas: { type: 'FeatureCollection', features: areas }, dots: { type: 'FeatureCollection', features: dotFeatures(fill, perDot) }, perDot, outlined, unoutlined, undrawn };
 }
 
 /**
@@ -116,6 +121,11 @@ export function DensityView({ report }: { report: DensityReport }) {
             <DensityLegend perDot={dotMap.perDot} />
             {dotMap.outlined > 0 && dotMap.undrawn > 0 && (
               <p className="muted" style={{ margin: 0 }}>{fmtNum(dotMap.undrawn)} trees are in areas without an outline: they are not drawn and are counted in the table only.</p>
+            )}
+            {dotMap.outlined > 0 && dotMap.unoutlined > 0 && (
+              <p className="muted" style={{ margin: 0 }}>
+                {fmtNum(dotMap.unoutlined)} {dotMap.unoutlined === 1 ? 'area has' : 'areas have'} no GPS corners yet, so {dotMap.unoutlined === 1 ? 'it is' : 'they are'} not on the map. {dotMap.unoutlined === 1 ? 'It is' : 'They are'} listed in the table.
+              </p>
             )}
           </>
         )}

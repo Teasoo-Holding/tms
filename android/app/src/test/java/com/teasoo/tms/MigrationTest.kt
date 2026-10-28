@@ -60,5 +60,9 @@ class MigrationTest {
         val v5 = helper.runMigrationsAndValidate("migration-test", 5, true)
         v5.query("SELECT count(*) FROM species_images").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
         v5.query("SELECT syncState FROM trees WHERE id = 't1'").use { it.moveToFirst(); assertEquals("PENDING", it.getString(0)) }
+        v5.close()
+        // Version 6: an area's GPS location is optional; existing areas keep theirs.
+        val v6 = helper.runMigrationsAndValidate("migration-test", 6, true)
+        v6.query("SELECT syncState FROM trees WHERE id = 't1'").use { it.moveToFirst(); assertEquals("PENDING", it.getString(0)) }
     }
 }

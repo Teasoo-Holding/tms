@@ -7,6 +7,11 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-10-28: GPS optional for sectors and sub-sectors (migration 010)
+- Admins can create sectors and sub-sectors with just a name and short code (and the planting year), and add GPS corners later, on the web or the phone.
+- Areas without GPS are marked "No GPS yet". They work for field sessions and reports but are left off the maps, which say how many are missing.
+- The phone's local database moves to version 6 (an area's location can be empty).
+
 ## 2026-10-27: Vendor in sessions and tree IDs, field activity report, client links (migration 009)
 - **Vendors:**
   - The vendor is chosen once when a field session starts, whenever the project has vendors.
