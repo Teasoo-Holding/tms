@@ -50,13 +50,27 @@ components:
         coordinates: { type: array, items: { type: array, items: { type: array, items: { type: number } } } }
     Area:
       type: object
-      required: [name, short_code, reference_latitude, reference_longitude]
+      description: >-
+        Location is optional: name and short code (plus planting_year_id for a sector) are enough, and corners or a reference point
+        can be added later. Responses (and sync rows) carry reference_latitude, reference_longitude and boundary as null until then;
+        latitude and longitude are both set or both null. An area with a boundary always has a reference point (a point inside it
+        unless one is given). On update, location fields left out keep their value; a new outline without a reference point gets a
+        point inside it; boundary null (with no reference point) clears the location. Error REFERENCE_POINT_INCOMPLETE when only one
+        coordinate would be set.
+      required: [name, short_code]
       properties:
         name: { type: string }
         short_code: { type: string, pattern: '^[A-Za-z0-9]{1,16}$' }
         description: { type: [string, 'null'] }
-        reference_latitude: { type: number, minimum: -90, maximum: 90 }
-        reference_longitude: { type: number, minimum: -180, maximum: 180 }
+        planting_year_id: { type: string, format: uuid, description: 'Sectors only (required when creating one).' }
+        reference_latitude: { type: [number, 'null'], minimum: -90, maximum: 90 }
+        reference_longitude: { type: [number, 'null'], minimum: -180, maximum: 180 }
+        corners:
+          type: array
+          minItems: 3
+          maxItems: 12
+          description: Request only. Corner points in any order; the boundary is built from them and wins over `boundary`.
+          items: { type: object, required: [latitude, longitude], properties: { latitude: { type: number }, longitude: { type: number } } }
         boundary: { oneOf: [{ $ref: '#/components/schemas/GeoJsonPolygon' }, { type: 'null' }] }
         active: { type: boolean }
     IdScheme:
@@ -140,8 +154,8 @@ components:
             short_code: { type: string }
             name: { type: string }
             active: { type: boolean, description: Inactive areas appear only while they still hold trees. }
-            reference_latitude: { type: number }
-            reference_longitude: { type: number }
+            reference_latitude: { type: [number, 'null'], description: Null for areas without a location yet. }
+            reference_longitude: { type: [number, 'null'] }
             boundary: { oneOf: [{ $ref: '#/components/schemas/GeoJsonPolygon' }, { type: 'null' }] }
             planting_year_id: { type: [string, 'null'], format: uuid, description: Sectors only. }
             year_label: { type: [string, 'null'], description: Sectors only. }
@@ -264,6 +278,8 @@ paths:
       description: >-
         Read in one REPEATABLE READ snapshot, so the cursor is consistent with the data. Reference data includes
         species, statuses, vendors and species_images (every SpeciesImage; fetch the bytes from /species-images/{id}/content).
+        sectors and sub_sectors rows have nullable reference_latitude, reference_longitude and boundary (null until the area is
+        located; see Area); the same holds for sector and sub_sector rows in /sync/changes.
       responses: { '200': { description: Bootstrap payload } }
   /mobile/trees:
     get:
@@ -343,9 +359,9 @@ paths:
   /projects/{id}/areas:
     get: { summary: Sectors with sub-sectors (GeoJSON boundaries), responses: { '200': { description: Areas } } }
   /projects/{id}/areas.geojson:
-    get: { summary: GeoJSON export of area boundaries and reference points, responses: { '200': { description: FeatureCollection } } }
+    get: { summary: 'GeoJSON export of area boundaries and reference points; areas without a location have geometry null', responses: { '200': { description: FeatureCollection } } }
   /projects/{id}/areas/import:
-    post: { summary: All-or-nothing GeoJSON import of sectors and sub-sectors (admin), responses: { '201': { description: '{ created }' } } }
+    post: { summary: 'All-or-nothing GeoJSON import of sectors and sub-sectors (admin); features with null geometry and no reference point are imported without a location', responses: { '201': { description: '{ created }' } } }
   /projects/{id}/sectors:
     post:
       summary: Create sector (admin)
@@ -355,7 +371,7 @@ paths:
     patch: { summary: Update sector (admin), responses: { '200': { description: Sector } } }
   /sectors/{id}/sub-sectors:
     post:
-      summary: Create sub-sector (admin). The boundary must lie within the sector boundary.
+      summary: Create sub-sector (admin). The boundary must lie within the sector boundary (not checked when either has no boundary).
       requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Area' } } } }
       responses: { '201': { description: Sub-sector } }
   /sub-sectors/{id}:

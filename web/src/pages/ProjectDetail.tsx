@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError, qs } from '../api/client';
 import { useIsAdmin } from '../auth';
-import { AreaMap, MapArea } from '../components/AreaMap';
+import { AreaMap, hasLocation, MapArea } from '../components/AreaMap';
 import { areaHectares, AreaSketch, boundaryCorners, LonLat, orderCorners } from '../components/AreaSketch';
 import { ShareLinksModal } from '../components/ShareLinks';
 import { ActivePill, CardHeader, clean, EditButton, EmptyState, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RowMenu, Tabs, useDelete, useForm } from '../components/ui';
@@ -386,7 +386,7 @@ function exampleId(scheme: { component_definition: SchemeComponent[]; separator:
 const AREA_ERRORS: Record<string, string> = {
   GEOMETRY_OUTSIDE_PARENT: 'This sub-sector is not inside its sector (15 m is allowed for GPS error). Check the corner points, or widen the sector first.',
   SHORT_CODE_TAKEN: 'Another area in this planting year already uses this short code. Choose a different one.',
-  LOCATION_REQUIRED: 'Enter the corner points of the area (or, under “Advanced”, a reference point).',
+  REFERENCE_POINT_INCOMPLETE: 'Give both the reference latitude and longitude, or leave both blank.',
   GEOMETRY_INVALID: 'The corner points do not form an area. Check that they are not all on one line and that no point was mistyped.',
 };
 
@@ -402,11 +402,14 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
   const all = areas.data ?? [];
   const yearSectors = year ? all.filter((s) => s.planting_year_id === year.id) : [];
   const legacy = all.filter((s) => s.planting_year_id == null);
-  const mapAreas: MapArea[] = useMemo(
+  const shownAreas: MapArea[] = useMemo(
     () => [...yearSectors, ...legacy].flatMap((s) => [{ ...s, kind: 'sector' as const }, ...s.sub_sectors.map((ss: any) => ({ ...ss, kind: 'sub_sector' as const }))]),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [areas.data, year?.id],
   );
+  // Areas can be created before anyone has walked them; those stay off the map until they get GPS.
+  const mapAreas = useMemo(() => shownAreas.filter(hasLocation), [shownAreas]);
+  const noGps = shownAreas.length - mapAreas.length;
   const exportGeoJson = async () => {
     const data = await api.get(`/projects/${projectId}/areas.geojson`);
     const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/geo+json' }));
@@ -419,6 +422,7 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
     const edit = () => setForm(kind === 'sector' ? { kind, area } : { kind, area, sector });
     return (
       <>
+        {!hasLocation(area) && <button className="link nowrap" onClick={edit} aria-label={`Add GPS to ${what} ${area.short_code}`}>Add GPS</button>}
         <EditButton name={`${what} ${area.short_code} · ${area.name}`} onClick={edit} />
         <RowMenu
           label={`${what} actions`}
@@ -435,6 +439,9 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
       </>
     );
   };
+  const noGpsTag = (area: any) => !hasLocation(area) && (
+    <span className="pill warning" title="Add corner points (or a reference point) when the area has been walked">No GPS yet</span>
+  );
   const hectares = (boundary: any) => (boundaryCorners(boundary).length ? `${areaHectares(orderCorners(boundaryCorners(boundary))).toFixed(1)} ha` : null);
   const sectorCard = (s: any) => (
     <section className="card flush" key={s.id}>
@@ -443,6 +450,7 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
           <span className="mono">{s.short_code}</span> · {s.name}
           {!s.active && <span className="pill" style={{ marginLeft: 8 }}>Inactive</span>}
           {hectares(s.boundary) && <span className="muted" style={{ fontWeight: 400, marginLeft: 8 }}>{hectares(s.boundary)}</span>}
+          {!hasLocation(s) && <span style={{ marginLeft: 8, fontWeight: 400 }}>{noGpsTag(s)}</span>}
         </h2>
         {isAdmin && (
           <div className="row" style={{ flexWrap: 'nowrap' }}>
@@ -458,7 +466,7 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
               {s.sub_sectors.map((ss: any) => (
                 <tr key={ss.id} onMouseEnter={() => setHighlight(ss.id)} onMouseLeave={() => setHighlight(undefined)}>
                   <td><span className="mono">{ss.short_code}</span> · {ss.name}</td>
-                  <td className="muted nowrap">{hectares(ss.boundary) ?? 'no outline'}</td>
+                  <td className="muted nowrap">{hectares(ss.boundary) ?? (hasLocation(ss) ? 'no outline' : noGpsTag(ss))}</td>
                   <td>{!ss.active && <ActivePill active={false} />}</td>
                   {isAdmin && <td className="actions">{areaMenu('sub_sector', ss, s)}</td>}
                 </tr>
@@ -490,6 +498,11 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
             }
           />
           {mapAreas.length > 0 && <AreaMap areas={mapAreas} highlightId={highlight} />}
+          {noGps > 0 && (
+            <p className="muted" style={{ margin: 0 }}>
+              {noGps} {noGps === 1 ? 'area has' : 'areas have'} no GPS yet{mapAreas.length > 0 ? ' and ' + (noGps === 1 ? 'is' : 'are') + ' not on the map' : ''}. Use “Add GPS” to enter the corner points once the area has been walked.
+            </p>
+          )}
           {yearSectors.map(sectorCard)}
           {areas.data && yearSectors.length === 0 && (
             <div className="card">
@@ -502,7 +515,7 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
                   </div>
                 )}
               >
-                Enter each sector’s corner points, or import a GeoJSON file.
+                Add each sector by name and short code (GPS corners are optional and can be added later), or import a GeoJSON file.
               </EmptyState>
             </div>
           )}
@@ -599,8 +612,6 @@ function AreaForm({ projectId, year, kind, area, sector, onClose }: { projectId:
       body.reference_latitude = num(v.reference_latitude);
       body.reference_longitude = num(v.reference_longitude);
     }
-    if (!area && !body.corners && !body.boundary && refGiven !== 2) return fail('Enter at least 3 corners (or, under “Advanced”, a reference point).');
-    if (area && body.boundary === null && refGiven !== 2 && !area.reference_latitude) return fail('Without corners, give a reference point under “Advanced”.');
     if (kind === 'sector' && !area) body.planting_year_id = year?.id;
     setLocalError(null);
     save.mutate(body);
@@ -627,8 +638,11 @@ function AreaForm({ projectId, year, kind, area, sector, onClose }: { projectId:
         <Field label="Description" hint="optional"><input {...f.bind('description')} /></Field>
         <div className="grid cols-2" style={{ alignItems: 'start' }}>
           <div className="stack" style={{ gap: 8 }}>
-            <h3 style={{ margin: 0 }}>Corner points</h3>
-            <p className="muted" style={{ margin: 0 }}>Decimal degrees, any order. Pasting “lat, lon” fills both boxes.</p>
+            <h3 style={{ margin: 0 }}>GPS corners <span className="muted" style={{ fontWeight: 400 }}>(optional)</span></h3>
+            <p className="muted" style={{ margin: 0 }}>
+              You can add them later: leave these blank to save the {label} with just its name and short code. Decimal degrees, any order. Pasting “lat, lon” fills both boxes.
+              {area && existing.length > 0 && ' Clear every corner to remove the GPS location.'}
+            </p>
             {existing.length > MAX_CORNERS && !touched && (
               <div className="notice">This outline has {existing.length} points (imported). Leave the corners blank to keep it, or enter new corners to replace it.</div>
             )}
@@ -680,7 +694,7 @@ function AreaForm({ projectId, year, kind, area, sector, onClose }: { projectId:
           <div className="stack" style={{ marginTop: 8 }}>
             <p className="muted" style={{ margin: 0 }}>
               With corners, the reference point is placed inside the area automatically. Set one only to override it, or for an area with no corners.
-              {area && ` Current: ${area.reference_latitude}, ${area.reference_longitude}.`}
+              {area && (area.reference_latitude != null ? ` Current: ${area.reference_latitude}, ${area.reference_longitude}.` : ' This area has no location yet.')}
             </p>
             <div className="form-grid">
               <Field label="Reference latitude" hint="optional"><input inputMode="decimal" {...f.bind('reference_latitude')} /></Field>

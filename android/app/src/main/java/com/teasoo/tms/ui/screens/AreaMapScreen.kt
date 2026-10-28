@@ -221,8 +221,10 @@ private fun render(
     val dots = mutableListOf<Feature>()
     val bounds = LatLngBounds.Builder()
     var count = 0
-    fun add(kind: String, id: String, lat: Double, lon: Double, boundary: String?, d: AreaDensity?, withDots: Boolean) {
-        bounds.include(LatLng(lat, lon)); count++
+    var anyPoint: LatLng? = null
+    fun add(kind: String, id: String, lat: Double?, lon: Double?, boundary: String?, d: AreaDensity?, withDots: Boolean) {
+        // Areas whose GPS location has not been added yet are listed below the map but cannot be drawn.
+        if (lat != null && lon != null) { bounds.include(LatLng(lat, lon)); count++; anyPoint = anyPoint ?: LatLng(lat, lon) }
         val polygon = boundary?.let { runCatching { Polygon.fromJson(it) }.getOrNull() }
         if (polygon != null) {
             polygons += Feature.fromGeometry(polygon).apply { addStringProperty("kind", kind) }
@@ -233,8 +235,11 @@ private fun render(
         val colours = List((d.alive + perDot - 1) / perDot) { ALIVE_DOT } + List((d.dead + perDot - 1) / perDot) { DEAD_DOT } +
             List((unseen + perDot - 1) / perDot) { UNSEEN_DOT }
         val ring = polygon?.coordinates()?.firstOrNull()?.map { it.longitude() to it.latitude() }
-        val spots = if (ring != null) scatter(ring, colours.size, id.hashCode().toLong())
-        else List(colours.size) { lon to lat } // no corner points: stacked on the reference point
+        val spots = when {
+            ring != null -> scatter(ring, colours.size, id.hashCode().toLong())
+            lat != null && lon != null -> List(colours.size) { lon to lat } // no corner points: stacked on the reference point
+            else -> return
+        }
         // Mix the colours so dead and unvisited trees are spread through the area rather than clustered.
         val mixed = colours.shuffled(java.util.Random(id.hashCode().toLong() xor 0x5DEECE66DL))
         spots.forEachIndexed { i, (x, y) ->
@@ -269,7 +274,7 @@ private fun render(
         ),
     )
     if (count >= 2) map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), 48))
-    else if (count == 1) map.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(sectors.firstOrNull()?.referenceLatitude ?: 0.0, sectors.firstOrNull()?.referenceLongitude ?: 0.0), 14.0))
+    else if (count == 1) anyPoint?.let { map.moveCamera(CameraUpdateFactory.newLatLngZoom(it, 14.0)) }
 }
 
 private fun Double.oneDecimal() = String.format(java.util.Locale.US, "%.1f", this)
@@ -325,7 +330,7 @@ private fun DensityRow(d: AreaDensity?, heading: Boolean) {
             Text(d.label, style = if (heading) MaterialTheme.typography.titleSmall else MaterialTheme.typography.bodyMedium)
             Text(
                 listOfNotNull(
-                    d.hectares?.let { "${it.oneDecimal()} ha" } ?: "no corner points",
+                    d.hectares?.let { "${it.oneDecimal()} ha" } ?: "no GPS corners yet",
                     "${d.trees} trees",
                     d.trees.takeIf { it > 0 }?.let { "${d.alive} alive · ${d.dead} dead" },
                 ).joinToString(" · "),

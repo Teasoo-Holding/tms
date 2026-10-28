@@ -18,7 +18,9 @@ const pctDead = (r: { alive_trees: number; dead_trees: number }) => {
 export function AreaShareView({ rows, sectors, boundaries }: { rows: ShareArea[]; sectors: any[]; boundaries: Map<string, GeoJSON.Polygon> }) {
   const [mapFailed, setMapFailed] = useState(false);
   const [asTable, setAsTable] = useState(false);
-  const located = rows.some((r) => (r.latitude != null && r.longitude != null) || boundaries.has(r.id));
+  const isLocated = (r: ShareArea) => (r.latitude != null && r.longitude != null) || boundaries.has(r.id);
+  const located = rows.some(isLocated);
+  const unlocated = rows.filter((r) => !isLocated(r)).length;
   const sectorLabel = (r: any) => `${r.short_code} · ${r.name}`;
   return (
     <section className="card chart">
@@ -57,6 +59,11 @@ export function AreaShareView({ rows, sectors, boundaries }: { rows: ShareArea[]
             <div className="print-avoid">
               <ShareMap areas={rows} boundaries={boundaries} onUnavailable={() => setMapFailed(true)} />
               <ShareLegend />
+              {unlocated > 0 && (
+                <p className="muted" style={{ margin: 0 }}>
+                  {fmtNum(unlocated)} sub-sector{unlocated === 1 ? ' has' : 's have'} no GPS yet and {unlocated === 1 ? 'is' : 'are'} not on the map; “Show table” lists every area.
+                </p>
+              )}
             </div>
           )}
         </div>

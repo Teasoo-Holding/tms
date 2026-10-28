@@ -48,8 +48,9 @@ data class SectorEntity(
     val projectId: String,
     val name: String,
     val shortCode: String,
-    val referenceLatitude: Double,
-    val referenceLongitude: Double,
+    /** Null until an administrator adds the area's GPS location (optional when the area is created). */
+    val referenceLatitude: Double?,
+    val referenceLongitude: Double?,
     /** GeoJSON Polygon, or null. */
     val boundaryJson: String?,
     val active: Boolean,
@@ -64,8 +65,9 @@ data class SubSectorEntity(
     val projectId: String,
     val name: String,
     val shortCode: String,
-    val referenceLatitude: Double,
-    val referenceLongitude: Double,
+    /** Null until an administrator adds the area's GPS location (optional when the area is created). */
+    val referenceLatitude: Double?,
+    val referenceLongitude: Double?,
     val boundaryJson: String?,
     val active: Boolean,
 )

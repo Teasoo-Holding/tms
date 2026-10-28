@@ -7,10 +7,15 @@ export interface MapArea {
   kind: 'sector' | 'sub_sector';
   name: string;
   short_code: string;
-  reference_latitude: number;
-  reference_longitude: number;
+  /** Null until the area has a location (both or neither). */
+  reference_latitude: number | null;
+  reference_longitude: number | null;
   boundary: GeoJSON.Polygon | null;
 }
+
+/** Whether the area has any location (an outline or a reference point) to draw. */
+export const hasLocation = (a: { boundary?: unknown; reference_latitude?: number | null; reference_longitude?: number | null }) =>
+  !!a.boundary || (a.reference_latitude != null && a.reference_longitude != null);
 
 // A licensed basemap is configured per deployment; without one the map shows boundaries only.
 export const STYLE_URL = import.meta.env.VITE_MAP_STYLE_URL as string | undefined;
@@ -25,13 +30,15 @@ function toGeoJson(areas: MapArea[]): GeoJSON.FeatureCollection {
   for (const a of areas) {
     const props = { id: a.id, kind: a.kind, name: a.name, code: a.short_code };
     if (a.boundary) features.push({ type: 'Feature', geometry: a.boundary, properties: props });
-    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [a.reference_longitude, a.reference_latitude] }, properties: { ...props, point: true } });
+    if (a.reference_latitude != null && a.reference_longitude != null) {
+      features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [a.reference_longitude, a.reference_latitude] }, properties: { ...props, point: true } });
+    }
   }
   return { type: 'FeatureCollection', features };
 }
 
 /**
- * Area map: sector and sub-sector boundaries plus administrator-entered reference points.
+ * Area map: sector and sub-sector boundaries plus administrator-entered reference points. Areas without a location are skipped.
  * It never draws individual tree positions — trees have none in Phase 1.
  */
 export function AreaMap({ areas, highlightId }: { areas: MapArea[]; highlightId?: string }) {
@@ -82,10 +89,11 @@ export function AreaMap({ areas, highlightId }: { areas: MapArea[]; highlightId?
 
 function update(m: maplibregl.Map, areas: MapArea[]) {
   (m.getSource('areas') as GeoJSONSource | undefined)?.setData(toGeoJson(areas));
-  if (areas.length === 0) return;
+  const located = areas.filter(hasLocation);
+  if (located.length === 0) return;
   const bounds = new maplibregl.LngLatBounds();
-  for (const a of areas) {
-    bounds.extend([a.reference_longitude, a.reference_latitude]);
+  for (const a of located) {
+    if (a.reference_latitude != null && a.reference_longitude != null) bounds.extend([a.reference_longitude, a.reference_latitude]);
     a.boundary?.coordinates[0].forEach((c) => bounds.extend(c as [number, number]));
   }
   m.fitBounds(bounds, { padding: 40, maxZoom: 16, duration: 0 });

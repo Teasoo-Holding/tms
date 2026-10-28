@@ -189,7 +189,7 @@ private fun SectorGroup(
 
 private fun shapeText(outline: List<CornerDto>) = when {
     outline.size >= MIN_CORNERS -> "about ${hectares(outline)}"
-    else -> "no outline"
+    else -> "no GPS yet – tap to add corners"
 }
 
 private fun hectares(outline: List<CornerDto>): String {
@@ -304,7 +304,8 @@ private fun AreaDialog(
     val filled = corners.mapNotNull { it.corner }
     val anyInvalid = corners.any { it.invalid }
     val isNew = initial == null
-    val cornersOk = !anyInvalid && (filled.size >= MIN_CORNERS || (!isNew && filled.isEmpty()))
+    // GPS is optional: an area can be saved with just its name and code, and corners added later.
+    val cornersOk = !anyInvalid && (filled.isEmpty() || filled.size >= MIN_CORNERS)
     val close = buildList {
         for (i in filled.indices) for (j in i + 1 until filled.size) if (distanceMetres(filled[i], filled[j]) < 3) add(i to j)
     }
@@ -329,8 +330,11 @@ private fun AreaDialog(
         TextInput(description, { description = it }, "Description (optional)", singleLine = false)
 
         HorizontalDivider()
-        Text("Corners", style = MaterialTheme.typography.titleSmall)
-        Hint(CORNER_HINT)
+        Text("GPS corners (optional)", style = MaterialTheme.typography.titleSmall)
+        Hint("You can save without them and add them later. $CORNER_HINT")
+        if (filled.isNotEmpty() && filled.size < MIN_CORNERS) {
+            Text("Enter at least $MIN_CORNERS corners, or clear them to save without GPS.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
         if (!isNew && prefill == null && initialOutline.size > MAX_CORNERS) Hint("Outline from the web portal is kept unless you enter corners.")
 
         corners.forEachIndexed { i, c ->
