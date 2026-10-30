@@ -87,8 +87,9 @@ internal fun AreasTab(year: AdminPlantingYearDto?, vm: ProjectSetupViewModel, on
     val olderSectors = areas.filter { it.plantingYearId == null }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        QuickAreaSetup(year, prominent = yearSectors.isEmpty(), saving = saving) { n, k -> vm.generateAreas(year, n, k) }
         if (yearSectors.isEmpty()) {
-            EmptyState(Icons.Default.Map, "No areas for ${year.yearLabel} yet", actionLabel = "Add sector", onAction = { open(AreaEdit.Sector(null)) })
+            TextButton(onClick = { open(AreaEdit.Sector(null)) }) { Text("Or add sectors one by one") }
         } else {
             FilledTonalButton(onClick = { open(AreaEdit.Sector(null)) }, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
                 Icon(Icons.Default.Add, null); Spacer(Modifier.width(8.dp)); Text("Add sector")
@@ -420,6 +421,43 @@ private fun CornerRow(index: Int, input: CornerInput, locating: Boolean, busy: B
             }
             if (input.accuracy != null && input.accuracy!! > 25) {
                 Text("Weak GPS. Wait in the open and try again.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+/**
+ * "How many sectors are in this planting area?" creates Sector 1..n (S1..Sn), each with sub-sectors SS1..SS4 by default.
+ * Names, codes and GPS can be changed afterwards; existing sectors are kept.
+ */
+@Composable
+private fun QuickAreaSetup(year: AdminPlantingYearDto, prominent: Boolean, saving: Boolean, onCreate: (Int, Int) -> Unit) {
+    var open by remember(year.id) { mutableStateOf(prominent) }
+    var sectors by remember(year.id) { mutableStateOf("") }
+    var subs by remember(year.id) { mutableStateOf("4") }
+    if (!open) {
+        TextButton(onClick = { open = true }) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(4.dp)); Text("Quick setup: add numbered sectors") }
+        return
+    }
+    val n = sectors.toIntOrNull()
+    val k = subs.toIntOrNull()
+    val ok = n != null && n in 1..200 && k != null && k in 1..26
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("How many sectors are in the ${year.yearLabel} planting area?", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(sectors, { sectors = it.filter(Char::isDigit).take(3) }, label = { Text("Sectors") }, singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                    modifier = Modifier.weight(1f))
+                OutlinedTextField(subs, { subs = it.filter(Char::isDigit).take(2) }, label = { Text("Sub-sectors each") }, singleLine = true,
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+                    modifier = Modifier.weight(1f))
+            }
+            Hint(if (n != null && n > 0) "Creates Sector 1 (S1) … Sector $n (S$n), each with ${k ?: 0} sub-sectors (SS1…SS${k ?: 0}). GPS can be added later."
+                else "Sectors are named Sector 1, Sector 2… with codes S1, S2…; sub-sectors SS1, SS2…")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onCreate(n!!, k!!) }, enabled = ok && !saving, modifier = Modifier.weight(1f).heightIn(min = 52.dp)) { Text(if (saving) "Creating…" else "Create") }
+                if (!prominent) OutlinedButton(onClick = { open = false }, modifier = Modifier.heightIn(min = 52.dp)) { Text("Cancel") }
             }
         }
     }

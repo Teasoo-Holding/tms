@@ -4,6 +4,7 @@ import { AccessService, AreaGrant } from '../common/access.service';
 import { AuthUser } from '../common/auth.decorators';
 import { SPECIES_IMAGE_COLUMNS } from '../admin/species-images.controller';
 import { Db, Queryable } from '../database/db.service';
+import { readSettings } from '../domain/settings';
 
 /** Row shapes sent to devices. Bootstrap and the change feed use the same loaders. */
 const LOADERS: Record<string, string> = {
@@ -116,6 +117,7 @@ export class SyncDataService {
         server_time: new Date().toISOString(),
         assignment_fingerprint: await this.assignmentFingerprint(tx, user.id),
         data_generation: await this.dataGeneration(tx),
+        settings: await readSettings(tx),
         ...data,
       };
     }, 'REPEATABLE READ', true);
@@ -177,6 +179,8 @@ export class SyncDataService {
       has_more: rows.length === limit,
       assignment_fingerprint: await this.assignmentFingerprint(this.db, user.id),
       data_generation: await this.dataGeneration(this.db),
+      // Organisation-wide settings travel on every page, so phones pick up changes without a full refresh.
+      settings: await readSettings(this.db),
       server_time: new Date().toISOString(),
     };
   }

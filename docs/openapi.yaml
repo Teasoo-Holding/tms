@@ -30,10 +30,19 @@ components:
       properties:
         access_token: { type: string }
         access_token_expires_in: { type: integer, description: seconds }
-        refresh_token: { type: string, description: Rotating; reuse of a spent token revokes the whole family. }
+        refresh_token:
+          type: string
+          description: >-
+            Rotating; always store the newest one. Presenting a spent token again is accepted once more as a retry (a fresh pair is issued and
+            the pair from the lost response stops working) as long as the token issued in its place has never been used. Presenting it after
+            that token was used, or presenting a revoked token, revokes the whole family (401 SESSION_INVALID).
         refresh_token_expires_at: { type: string, format: date-time }
-        offline_valid_until: { type: string, format: date-time, description: End of the offline access window; the device must revalidate online after this. }
+        offline_valid_until: { type: string, format: date-time, description: End of the offline access window (OFFLINE_SESSION_DAYS, default 30); the device must revalidate online after this. }
         user: { $ref: '#/components/schemas/User' }
+    Settings:
+      type: object
+      properties:
+        height_unit: { type: string, enum: [cm, m, in, ft], default: cm, description: Unit tree heights are shown in; heights are always stored and sent in cm. }
     User:
       type: object
       properties:
@@ -261,7 +270,7 @@ paths:
         '401': { $ref: '#/components/responses/Error' }
   /auth/refresh:
     post:
-      summary: Rotate the refresh token.
+      summary: Rotate the refresh token (tolerates a lost response; see Tokens.refresh_token).
       security: []
       requestBody: { content: { application/json: { schema: { type: object, properties: { refresh_token: { type: string } } } } } }
       responses:
@@ -279,7 +288,8 @@ paths:
         Read in one REPEATABLE READ snapshot, so the cursor is consistent with the data. Reference data includes
         species, statuses, vendors and species_images (every SpeciesImage; fetch the bytes from /species-images/{id}/content).
         sectors and sub_sectors rows have nullable reference_latitude, reference_longitude and boundary (null until the area is
-        located; see Area); the same holds for sector and sub_sector rows in /sync/changes.
+        located; see Area); the same holds for sector and sub_sector rows in /sync/changes. settings carries the organisation-wide
+        defaults ({ height_unit }), also sent on every /sync/changes page.
       responses: { '200': { description: Bootstrap payload } }
   /mobile/trees:
     get:
@@ -321,7 +331,8 @@ paths:
       responses:
         '200':
           description: >-
-            { changes: [{ seq, entity_type, data, deleted? }], next_cursor, has_more, assignment_fingerprint }. A changed fingerprint means
+            { changes: [{ seq, entity_type, data, deleted? }], next_cursor, has_more, assignment_fingerprint, data_generation, settings, server_time }.
+            settings is { height_unit: cm|m|in|ft } on every page (also when there are no changes). A changed fingerprint means
             the device should re-bootstrap. Deleted rows arrive as tombstones ({ deleted: true, data: { id } }). entity_type species_image
             carries a SpeciesImage.
 
@@ -362,6 +373,33 @@ paths:
     get: { summary: 'GeoJSON export of area boundaries and reference points; areas without a location have geometry null', responses: { '200': { description: FeatureCollection } } }
   /projects/{id}/areas/import:
     post: { summary: 'All-or-nothing GeoJSON import of sectors and sub-sectors (admin); features with null geometry and no reference point are imported without a location', responses: { '201': { description: '{ created }' } } }
+  /planting-years/{yearId}/areas/generate:
+    post:
+      summary: >-
+        Quick setup (admin): ensures sectors "Sector 1".."Sector n" (S1..Sn) in the planting year, each with sub-sectors "Sub-sector 1".."Sub-sector k"
+        (SS1..SSk), without locations, in one transaction. Existing short codes are skipped and nothing is renamed. Sector codes are unique within a
+        planting year, sub-sector codes within their sector. Phones receive the new areas through /sync/changes. Audited as areas.generate.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sectors]
+              properties:
+                sectors: { type: integer, minimum: 1, maximum: 200 }
+                sub_sectors_per_sector: { type: integer, minimum: 1, maximum: 26, default: 4 }
+      responses:
+        '201':
+          description: Counts of the areas created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created_sectors: { type: integer }
+                  created_sub_sectors: { type: integer }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
   /projects/{id}/sectors:
     post:
       summary: Create sector (admin)
@@ -581,6 +619,17 @@ paths:
     get: { summary: Devices with last sync and unverified photo counts (admin), responses: { '200': { description: Devices } } }
   /devices/{id}/revoke:
     post: { summary: Revoke a device and its sessions (admin), responses: { '201': { description: Device } } }
+  /admin/settings:
+    get:
+      summary: Organisation-wide defaults (admin)
+      responses:
+        '200': { description: Settings, content: { application/json: { schema: { $ref: '#/components/schemas/Settings' } } } }
+    patch:
+      summary: Change organisation-wide defaults (admin; audited as settings.update). Phones pick changes up on their next sync.
+      requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Settings' } } } }
+      responses:
+        '200': { description: Settings, content: { application/json: { schema: { $ref: '#/components/schemas/Settings' } } } }
+        '400': { $ref: '#/components/responses/Error' }
   /audit-logs:
     get:
       summary: >-

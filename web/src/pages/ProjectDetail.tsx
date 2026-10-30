@@ -64,7 +64,9 @@ export function ProjectDetailPage() {
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const [addingYear, setAddingYear] = useState(false);
+  // A new project starts with adding its first planting year; a new year is offered the quick area setup.
+  const [addingYear, setAddingYear] = useState(() => !!(location.state as any)?.created);
+  const [setupYear, setSetupYear] = useState<PlantingYear | null>(null);
   const del = useDelete();
   const project = useQuery({ queryKey: ['project', id], queryFn: () => api.get(`/projects/${id}`) });
   const p = project.data;
@@ -131,7 +133,21 @@ export function ProjectDetailPage() {
       {editing && <ProjectForm project={p} onClose={() => setEditing(false)} />}
       {sharing && <ShareLinksModal projectId={p.id} projectName={p.name} onClose={() => setSharing(false)} />}
       {del.dialog}
-      {addingYear && <YearForm projectId={p.id} onClose={() => setAddingYear(false)} onCreated={(y) => setParam({ year: y.id })} />}
+      {addingYear && (
+        <YearForm
+          projectId={p.id}
+          onClose={() => setAddingYear(false)}
+          onCreated={(y) => {
+            setParam({ year: y.id });
+            setSetupYear(y);
+          }}
+        />
+      )}
+      {setupYear && (
+        <Modal title={`Set up areas for ${setupYear.year_label}`} onClose={() => setSetupYear(null)}>
+          <QuickSetup year={setupYear} onDone={() => setSetupYear(null)} onSkip={() => setSetupYear(null)} />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -396,11 +412,12 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
   const areas = useQuery({ queryKey: ['areas', projectId], queryFn: () => api.get<any[]>(`/projects/${projectId}/areas`) });
   const [form, setForm] = useState<{ kind: 'sector' | 'sub_sector'; area?: any; sector?: any } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [quickSetup, setQuickSetup] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const toggle = useMutation({ mutationFn: ({ path, active }: { path: string; active: boolean }) => api.patch(path, { active }) });
   const del = useDelete();
   const all = areas.data ?? [];
-  const yearSectors = year ? all.filter((s) => s.planting_year_id === year.id) : [];
+  const yearSectors = year ? all.filter((s) => s.planting_year_id === year.id).sort(byCode) : [];
   const legacy = all.filter((s) => s.planting_year_id == null);
   const shownAreas: MapArea[] = useMemo(
     () => [...yearSectors, ...legacy].flatMap((s) => [{ ...s, kind: 'sector' as const }, ...s.sub_sectors.map((ss: any) => ({ ...ss, kind: 'sub_sector' as const }))]),
@@ -463,7 +480,7 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
         {s.sub_sectors.length > 0 && (
           <table>
             <tbody>
-              {s.sub_sectors.map((ss: any) => (
+              {[...s.sub_sectors].sort(byCode).map((ss: any) => (
                 <tr key={ss.id} onMouseEnter={() => setHighlight(ss.id)} onMouseLeave={() => setHighlight(undefined)}>
                   <td><span className="mono">{ss.short_code}</span> · {ss.name}</td>
                   <td className="muted nowrap">{hectares(ss.boundary) ?? (hasLocation(ss) ? 'no outline' : noGpsTag(ss))}</td>
@@ -492,7 +509,11 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
                 {isAdmin && <button className="primary" onClick={() => setForm({ kind: 'sector' })}>+ Sector</button>}
                 <RowMenu
                   label="GeoJSON"
-                  items={[isAdmin && { label: 'Import GeoJSON', onClick: () => setImporting(true) }, { label: 'Export GeoJSON', onClick: exportGeoJson }]}
+                  items={[
+                    isAdmin && { label: 'Quick setup (numbered sectors)', onClick: () => setQuickSetup(true) },
+                    isAdmin && { label: 'Import GeoJSON', onClick: () => setImporting(true) },
+                    { label: 'Export GeoJSON', onClick: exportGeoJson },
+                  ]}
                 />
               </>
             }
@@ -504,18 +525,23 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
             </p>
           )}
           {yearSectors.map(sectorCard)}
+          {areas.data && yearSectors.length === 0 && isAdmin && (
+            <section className="card quick-setup">
+              <QuickSetup year={year} />
+            </section>
+          )}
           {areas.data && yearSectors.length === 0 && (
             <div className="card">
               <EmptyState
                 title={`No areas surveyed for ${year.year_label} yet`}
                 action={isAdmin && (
                   <div className="row" style={{ justifyContent: 'center' }}>
-                    <button className="primary" onClick={() => setForm({ kind: 'sector' })}>+ Add sector</button>
+                    <button onClick={() => setForm({ kind: 'sector' })}>+ Add sector</button>
                     <button onClick={() => setImporting(true)}>Import GeoJSON</button>
                   </div>
                 )}
               >
-                Add each sector by name and short code (GPS corners are optional and can be added later), or import a GeoJSON file.
+                {isAdmin ? 'Or add' : 'Add'} each sector by name and short code (GPS corners are optional and can be added later), or import a GeoJSON file.
               </EmptyState>
             </div>
           )}
@@ -530,7 +556,56 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
       {del.dialog}
       {form && <AreaForm projectId={projectId} year={year} {...form} onClose={() => setForm(null)} />}
       {importing && year && <ImportForm projectId={projectId} year={year} onClose={() => setImporting(false)} />}
+      {quickSetup && year && (
+        <Modal title={`Quick setup for ${year.year_label}`} onClose={() => setQuickSetup(false)}>
+          <QuickSetup year={year} onDone={() => setQuickSetup(false)} />
+        </Modal>
+      )}
     </div>
+  );
+}
+
+/** Sector and sub-sector codes in natural order: S2 before S10. */
+const byCode = (a: { short_code: string }, b: { short_code: string }) => a.short_code.localeCompare(b.short_code, undefined, { numeric: true });
+
+/**
+ * Creates numbered sectors (S1, S2, …) each with numbered sub-sectors (SS1, SS2, …) in one step, without GPS.
+ * Codes that already exist are kept, so it can be used again to add more sectors.
+ */
+function QuickSetup({ year, onDone, onSkip }: { year: PlantingYear; onDone?: () => void; onSkip?: () => void }) {
+  const [sectors, setSectors] = useState('');
+  const [subs, setSubs] = useState('4');
+  const n = Number(sectors);
+  const k = Number(subs);
+  const valid = Number.isInteger(n) && n >= 1 && n <= 200 && Number.isInteger(k) && k >= 1 && k <= 26;
+  const generate = useMutation({
+    mutationFn: () => api.post<{ created_sectors: number; created_sub_sectors: number }>(`/planting-years/${year.id}/areas/generate`, { sectors: n, sub_sectors_per_sector: k }),
+    onSuccess: () => onDone?.(),
+  });
+  const r = generate.data;
+  return (
+    <form className="stack" style={{ gap: 12 }} onSubmit={(e) => (e.preventDefault(), valid && generate.mutate())}>
+      <div>
+        <h2 style={{ margin: 0 }}>Quick setup: how many sectors are in this planting area?</h2>
+        <p className="muted" style={{ margin: '4px 0 0' }}>
+          Creates Sector 1 to Sector {valid ? n : 'n'} (S1, S2, …), each with {valid ? k : 'its'} sub-sectors (SS1, SS2, …), for {year.year_label}. Rename them or add GPS later; existing codes are kept.
+        </p>
+      </div>
+      <ErrorNotice error={generate.error} />
+      {r && !onDone && <div className="notice">Created {r.created_sectors} sectors and {r.created_sub_sectors} sub-sectors.</div>}
+      <div className="form-grid">
+        <Field label="Sectors" hint="1–200">
+          <input type="number" required min={1} max={200} step={1} inputMode="numeric" autoFocus={!!onDone} value={sectors} onChange={(e) => setSectors(e.target.value)} />
+        </Field>
+        <Field label="Sub-sectors per sector" hint="1–26">
+          <input type="number" required min={1} max={26} step={1} inputMode="numeric" value={subs} onChange={(e) => setSubs(e.target.value)} />
+        </Field>
+      </div>
+      <div className="form-actions">
+        {onSkip && <button type="button" onClick={onSkip}>Not now</button>}
+        <button className="primary" disabled={!valid || generate.isPending}>{generate.isPending ? 'Creating…' : 'Create sectors'}</button>
+      </div>
+    </form>
   );
 }
 

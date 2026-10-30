@@ -59,7 +59,9 @@ class ProjectSetupViewModel @Inject constructor(
             val p = api.project(projectId)
             project.value = p
             if (p.plantingYears.none { it.id == selectedYearId.value }) selectYear(p.defaultYear()?.id)
-            areas.value = a.await()
+            // Natural order: S2 before S10.
+            areas.value = a.await().sortedWith(compareBy({ it.shortCode.length }, { it.shortCode }))
+                .map { s -> s.copy(subSectors = s.subSectors.sortedWith(compareBy({ it.shortCode.length }, { it.shortCode }))) }
             fields.value = f.await()
             assignments.value = s.await()
             users.value = u.await()
@@ -107,6 +109,14 @@ class ProjectSetupViewModel @Inject constructor(
         save(if (id == null) "Sub-sector added" else "Sub-sector saved", onDone, ::refresh) {
             if (id == null) api.createSubSector(sectorId, request.copy(plantingYearId = null)) else api.updateSubSector(id, request.toAreaPatch())
         }
+
+    /** Quick setup: "Sector 1".."Sector n" (S1..Sn), each with sub-sectors SS1..SSk; GPS can be added later. */
+    fun generateAreas(year: AdminPlantingYearDto, sectors: Int, subSectors: Int, onDone: () -> Unit = {}) {
+        var made: GenerateAreasResponse? = null
+        save(null, { made?.let { m -> messages.tryEmit("${m.createdSectors} sectors and ${m.createdSubSectors} sub-sectors created") }; onDone() }, ::refresh) {
+            made = api.generateAreas(year.id, GenerateAreasRequest(sectors, subSectors))
+        }
+    }
 
     fun linkVendor(year: AdminPlantingYearDto, vendorId: String, vendorName: String, onDone: () -> Unit) =
         save("$vendorName added to ${year.yearLabel}", onDone, ::refresh) { api.linkVendor(year.id, LinkVendorRequest(vendorId)) }

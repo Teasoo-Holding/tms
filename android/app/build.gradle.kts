@@ -29,6 +29,8 @@ android {
         buildConfigField("String", "MAP_STYLE_URL", "\"${project.findProperty("tmsMapStyleUrl") ?: ""}\"")
         // Web portal address, linked from the administrator screens for configuration work.
         buildConfigField("String", "PORTAL_URL", "\"${project.findProperty("tmsPortalUrl") ?: ""}\"")
+        // Where new versions are published (GitHub Releases of the public repository); the app offers them when online.
+        buildConfigField("String", "RELEASES_REPO", "\"${project.findProperty("tmsReleasesRepo") ?: "Teasoo-Holding/tms"}\"")
     }
 
     signingConfigs {

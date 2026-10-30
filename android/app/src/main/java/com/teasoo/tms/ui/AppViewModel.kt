@@ -8,6 +8,7 @@ import com.teasoo.tms.BuildConfig
 import com.teasoo.tms.data.local.KeyValueEntity
 import com.teasoo.tms.data.local.Keys
 import com.teasoo.tms.data.local.TmsDatabase
+import com.teasoo.tms.data.remote.ApiFailure
 import com.teasoo.tms.data.remote.LoginRequest
 import com.teasoo.tms.data.remote.RefreshRequest
 import com.teasoo.tms.data.remote.TmsApi
@@ -42,7 +43,11 @@ class AppViewModel @Inject constructor(
     private val db: TmsDatabase,
     private val photos: PhotoStore,
     private val fieldSessions: com.teasoo.tms.data.repo.FieldSessionRepository,
+    private val updates: com.teasoo.tms.data.repo.UpdateChecker,
 ) : AndroidViewModel(app) {
+    /** A newer app version, when one is published (checked once per app start, when online). */
+    val update = MutableStateFlow<com.teasoo.tms.data.repo.AppUpdate?>(null)
+
     val sessionState = session.state.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val projects = db.reference().projects().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -50,11 +55,23 @@ class AppViewModel @Inject constructor(
         .combine(projects) { saved, list -> saved?.takeIf { id -> list.any { it.id == id } } ?: list.firstOrNull()?.id }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    init {
+        // Records saved before records carried their author belong to the person who used the device last.
+        viewModelScope.launch { db.kv().get(Keys.LAST_USER)?.let { db.outbox().claimUnowned(it) } }
+        viewModelScope.launch { update.value = updates.check() }
+    }
+
+    // The signed-in person's own unsent records (other people's wait for them on a shared tablet).
+    private val myPending: Flow<Int> = session.state.flatMapLatest { st ->
+        (st as? com.teasoo.tms.data.session.SessionState.Active)?.user?.id?.let { db.outbox().pendingCountFor(it) } ?: db.outbox().pendingCount()
+    }
+
     private val running = SyncScheduler.isRunning(app).map { infos -> infos.any { !it.state.isFinished } }
 
     val sync: StateFlow<SyncSummary> = combine(
         listOf(
-            db.outbox().pendingCount(), db.outbox().attentionCount(), db.media().pendingCount(), db.media().failedCount(),
+            myPending,
+            db.outbox().attentionCount(), db.media().pendingCount(), db.media().failedCount(),
             db.outbox().oldestPending(), db.kv().observe(Keys.LAST_SUCCESSFUL_SYNC), db.kv().observe(Keys.LAST_SYNC_ERROR), running,
         ),
     ) { v ->
@@ -81,26 +98,38 @@ class AppViewModel @Inject constructor(
     private val _loggingIn = MutableStateFlow(false)
     val loggingIn = _loggingIn.asStateFlow()
 
-    fun login(email: String, password: String) = viewModelScope.launch {
+    /** [allowOffline]: fall back to this device's offline check when there is no internet (not when sending records). */
+    fun login(email: String, password: String, allowOffline: Boolean = true) = viewModelScope.launch {
         _loggingIn.value = true
         _loginError.value = null
-        try {
-            val previous = db.kv().get(Keys.LAST_USER)
-            val tokens = api.login(LoginRequest(email.trim(), password, session.deviceId(), "${Build.MANUFACTURER} ${Build.MODEL}", BuildConfig.VERSION_NAME))
-            // A different officer on a shared device: unsent work of the previous officer must sync first.
-            if (previous != null && previous != tokens.user.id && db.outbox().pendingCount().first() > 0) {
-                _loginError.value = "This device still holds unsynced records from another officer. They must sign in and sync first."
-                runCatching { api.logout(RefreshRequest(tokens.refreshToken)) }
-                return@launch
-            }
-            // A field session belongs to the person who started it: another account (e.g. switching from an
-            // officer to an administrator) starts with none.
-            if (previous != tokens.user.id) fieldSessions.end()
-            session.save(tokens)
-            db.kv().put(KeyValueEntity(Keys.LAST_USER, tokens.user.id))
+        val previous = db.kv().get(Keys.LAST_USER)
+        // A field session belongs to the person who started it: another account (e.g. switching from an
+        // officer to an administrator) starts with none. Each person's records are sent under their own account.
+        suspend fun signedIn(userId: String) {
+            if (previous != userId) fieldSessions.end()
+            db.kv().put(KeyValueEntity(Keys.LAST_USER, userId))
             SyncScheduler.syncNow(app)
+        }
+        try {
+            val tokens = api.login(LoginRequest(email.trim(), password, session.deviceId(), "${Build.MANUFACTURER} ${Build.MODEL}", BuildConfig.VERSION_NAME))
+            session.save(tokens)
+            session.rememberForOffline(email, password, tokens.user)
+            signedIn(tokens.user.id)
         } catch (e: Throwable) {
-            _loginError.value = e.toApiFailure().message
+            val failure = e.toApiFailure()
+            // No internet (or the server is unreachable): anyone who has signed in on this device before can carry on.
+            if (!allowOffline && (failure is ApiFailure.Offline || (failure is ApiFailure.Server && failure.status >= 500))) {
+                _loginError.value = "No internet yet. Your records stay saved; try again when you are connected."
+            } else if (failure is ApiFailure.Offline || (failure is ApiFailure.Server && failure.status >= 500)) {
+                val user = session.signInOffline(email, password)
+                when {
+                    user != null -> signedIn(user.id)
+                    session.knowsOffline(email) -> _loginError.value = "Wrong password. (No internet: checked against this device's last sign-in.)"
+                    else -> _loginError.value = "No internet. The first sign-in on a device needs internet; after that you can sign in offline."
+                }
+            } else {
+                _loginError.value = failure.message
+            }
         } finally {
             _loggingIn.value = false
         }

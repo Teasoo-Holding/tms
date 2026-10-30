@@ -87,6 +87,9 @@ interface AdminApi {
     // Each returns {deleted: true}, or 409 {code: IN_USE | HAS_TREES, message} suggesting deactivation instead.
     @DELETE("api/v1/tree-species/{id}") suspend fun deleteSpecies(@Path("id") id: String): JsonElement
 
+    /** Creates Sector 1..n (S1..Sn) with sub-sectors SS1..SSk in each; existing codes are kept. */
+    @POST("api/v1/planting-years/{id}/areas/generate") suspend fun generateAreas(@Path("id") yearId: String, @Body body: GenerateAreasRequest): GenerateAreasResponse
+
     // ---------------------------------------------------------------- field activity
     @GET("api/v1/reports/field-activity")
     suspend fun fieldActivity(

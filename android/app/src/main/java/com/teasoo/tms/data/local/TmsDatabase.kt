@@ -5,10 +5,10 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 
 @Database(
-    version = 6,
+    version = 7,
     exportSchema = true,
     // Additive changes only; field records on the device are kept across upgrades.
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7)],
     entities = [
         ProjectEntity::class, PlantingYearEntity::class, IdSchemeEntity::class, SectorEntity::class, SubSectorEntity::class,
         SpeciesEntity::class, StatusEntity::class, VendorEntity::class, AssignmentEntity::class, SerialAllocationEntity::class,
@@ -39,4 +39,6 @@ object Keys {
     const val LAST_USER = "session.last_user"
     /** Server data generation last seen; a change means an administrator cleared the data. */
     const val DATA_GENERATION = "sync.data_generation"
+    /** The administrator's default unit for tree heights. */
+    const val DEFAULT_HEIGHT_UNIT = "settings.height_unit"
 }

@@ -44,10 +44,21 @@ class SyncEngine @Inject constructor(
     @Named("upload") private val uploadClient: OkHttpClient,
     private val speciesImages: SpeciesImageStore,
 ) {
+    /** The signed-in person: only their own records and photos are sent, under their own account. */
+    private var userId: String = ""
+
     suspend fun run(): SyncOutcome {
         val current = session.current() as? SessionState.Active ?: return SyncOutcome.Blocked("Sign in to sync.")
         // Executives have read-only, online reporting; there is no field data to push or download.
         if (current.user.role == "EXECUTIVE") return SyncOutcome.Success
+        // Signed in without internet, or the server ended the session: nothing can be sent until the person signs in
+        // online. Records stay on the device; calling the server would only fail again.
+        current.onlineSignInReason?.let { reason ->
+            db.kv().put(KeyValueEntity(Keys.LAST_SYNC_ERROR, reason))
+            return SyncOutcome.Blocked(reason)
+        }
+        userId = current.user.id
+        db.outbox().claimUnowned(db.kv().get(Keys.LAST_USER) ?: current.user.id)
         val outcome = try {
             checkDataGeneration()
             push()
@@ -79,7 +90,7 @@ class SyncEngine @Inject constructor(
     private suspend fun push() {
         val deviceId = session.deviceId()
         while (true) {
-            val ops = db.outbox().due(System.currentTimeMillis(), BATCH)
+            val ops = db.outbox().dueFor(System.currentTimeMillis(), BATCH, userId)
             if (ops.isEmpty()) return
             val response = try {
                 api.submit(SyncBatchRequest(deviceId, ops.map { it.toDto() }))
@@ -166,7 +177,7 @@ class SyncEngine @Inject constructor(
 
     // ------------------------------------------------------------------ media
     private suspend fun uploadMedia() {
-        for (m in db.media().dueForUpload(System.currentTimeMillis())) {
+        for (m in db.media().dueForUploadBy(System.currentTimeMillis(), userId)) {
             // The server must already hold the tree/observation so it can verify the association.
             val tree = db.trees().get(m.treeId) ?: continue
             if (tree.serverRevision == null) continue

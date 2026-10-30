@@ -280,9 +280,11 @@ describe('access control', () => {
   it('detects refresh-token reuse', async () => {
     const s = await new Session(app, 'officer@tms.local').login();
     const first = await request(app.getHttpServer()).post('/api/v1/auth/refresh').send({ refresh_token: s.refresh }).expect(200);
+    const second = await request(app.getHttpServer()).post('/api/v1/auth/refresh').send({ refresh_token: first.body.refresh_token }).expect(200);
+    // The first token again, after its replacement was used (a lost-response retry is allowed only before that).
     await request(app.getHttpServer()).post('/api/v1/auth/refresh').send({ refresh_token: s.refresh }).expect(401);
-    // Reuse revokes the whole family, including the newly issued token.
-    await request(app.getHttpServer()).post('/api/v1/auth/refresh').send({ refresh_token: first.body.refresh_token }).expect(401);
+    // Reuse revokes the whole family, including the newest token.
+    await request(app.getHttpServer()).post('/api/v1/auth/refresh').send({ refresh_token: second.body.refresh_token }).expect(401);
   });
 });
 

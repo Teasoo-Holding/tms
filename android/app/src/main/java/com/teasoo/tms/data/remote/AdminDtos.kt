@@ -695,3 +695,9 @@ data class SessionActivityDto(
     val corrections: Int = 0,
     val photos: Int = 0,
 )
+
+@Serializable
+data class GenerateAreasRequest(val sectors: Int, @SerialName("sub_sectors_per_sector") val subSectorsPerSector: Int = 4)
+
+@Serializable
+data class GenerateAreasResponse(@SerialName("created_sectors") val createdSectors: Int = 0, @SerialName("created_sub_sectors") val createdSubSectors: Int = 0)

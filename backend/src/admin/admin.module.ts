@@ -5,11 +5,12 @@ import { MediaModule } from '../media/media.module';
 import { GeographyController } from './geography.controller';
 import { ProjectsController } from './projects.controller';
 import { ReferenceController } from './reference.controller';
+import { SettingsController } from './settings.controller';
 import { SpeciesImagesController } from './species-images.controller';
 import { UsersController } from './users.controller';
 
 @Module({
   imports: [AuthModule, MediaModule],
-  controllers: [ProjectsController, GeographyController, ReferenceController, UsersController, DeletionController, SpeciesImagesController],
+  controllers: [ProjectsController, GeographyController, ReferenceController, UsersController, DeletionController, SpeciesImagesController, SettingsController],
 })
 export class AdminModule {}

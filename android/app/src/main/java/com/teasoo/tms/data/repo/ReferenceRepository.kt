@@ -27,6 +27,7 @@ class ReferenceRepository @Inject constructor(private val db: TmsDatabase) {
         ref.pruneSpecies(b.species.map { it.id })
         ref.upsertSpeciesImages(b.speciesImages.map { it.toEntity() })
         ref.pruneSpeciesImages(b.speciesImages.map { it.id })
+        b.settings?.let { applySettings(it) }
         ref.upsertStatuses(b.statuses.map { it.toEntity() })
         ref.pruneStatuses(b.statuses.map { it.id })
         ref.upsertVendors(b.vendors.map { it.toEntity() })
@@ -51,7 +52,12 @@ class ReferenceRepository @Inject constructor(private val db: TmsDatabase) {
     /** Applies one page of the change feed and advances the cursor in the same transaction. */
     suspend fun applyChanges(page: ChangesResponse) = db.withTransaction {
         for (c in page.changes) if (c.deleted) applyDeletion(c.entityType, c.data["id"]!!.jsonPrimitive.content) else applyChange(c.entityType, c.data)
+        page.settings?.let { applySettings(it) }
         db.kv().put(KeyValueEntity(Keys.CURSOR, page.nextCursor))
+    }
+
+    private suspend fun applySettings(s: SettingsDto) {
+        s.heightUnit?.let { db.kv().put(KeyValueEntity(Keys.DEFAULT_HEIGHT_UNIT, it)) }
     }
 
     /** The server deleted configuration nothing depends on any more; drop it here too. */

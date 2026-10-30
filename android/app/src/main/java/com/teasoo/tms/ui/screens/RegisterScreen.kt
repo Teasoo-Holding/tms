@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -324,6 +325,7 @@ fun PhotoCapture(photos: List<CapturedPhoto>, photoStore: PhotoStore, onAdd: (Ca
     var retaking by remember { mutableStateOf<CapturedPhoto?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Photo", style = MaterialTheme.typography.titleMedium)
+        PhotoTip()
         photos.forEach { p ->
             PhotoPreview(p)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -380,4 +382,18 @@ private suspend fun decodeFile(file: java.io.File, maxPx: Int) = kotlinx.corouti
         while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxPx) sample *= 2
         android.graphics.BitmapFactory.decodeFile(file.path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
     }.getOrNull()
+}
+
+/** Shown wherever a tree photo is taken: glare on the tag makes the number unreadable. */
+@Composable
+fun PhotoTip() {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+            Icon(Icons.Default.WbSunny, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
+            Text(
+                "Turn the tag away from direct sunlight (or shade it with your hand) so the tag number is clear in the photo.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+    }
 }

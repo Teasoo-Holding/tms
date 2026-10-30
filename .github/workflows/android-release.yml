@@ -1,9 +1,14 @@
 name: Android release
 
-# Builds the signed TMS Field app: an APK to install directly on phones and an AAB for Google Play.
+# Builds the signed TMS Field app (an APK to install directly on phones and an AAB for Google Play) and
+# publishes it as a GitHub Release marked "latest", with the APK attached twice: tms-field-<version>.apk and
+# tms-field.apk. The web portal's download page (/download) links to
+#   https://github.com/Teasoo-Holding/tms/releases/latest/download/tms-field.apk
+# so it always offers the newest app.
 #
-# Run it from the Actions tab ("Run workflow"), or push a tag such as android-v0.2.0 to also publish
-# a GitHub Release with the APK attached.
+# Runs automatically on every merge to master that changes android/ (version 1.0.<run number>), when a tag
+# such as android-v1.2.0 is pushed (version 1.2.0), and from the Actions tab ("Run workflow"). The unit tests
+# must pass before anything is built or published.
 #
 # Repository secrets (Settings → Secrets and variables → Actions → Secrets):
 #   ANDROID_KEYSTORE_BASE64    the release keystore (.jks), base64-encoded
@@ -19,21 +24,25 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: Version shown to users, e.g. 0.2.0
-        required: true
-        default: 0.1.0
+        description: Version shown to users, e.g. 1.2.0 (leave empty for 1.0.<run number>)
+        required: false
+        default: ''
       api_base_url:
         description: Override the backend address for this build (leave empty to use TMS_API_BASE_URL)
         required: false
   push:
+    branches: [master]
+    # Path filters do not apply to tag pushes: every android-v* tag is released.
+    paths:
+      - android/**
+      - .github/workflows/android-release.yml
     tags: ['android-v*']
 
-concurrency:
-  group: android-release-${{ github.ref }}
-  cancel-in-progress: false
+# No concurrency group: a group would cancel a release still waiting behind another one. Each run has its own
+# version, and the newest version code is kept as "latest" whichever run finishes first.
 
 permissions:
-  contents: write # only used to publish a GitHub Release for android-v* tags
+  contents: write # to publish the GitHub Release
 
 jobs:
   build:
@@ -45,7 +54,8 @@ jobs:
       API_BASE_URL: ${{ inputs.api_base_url || vars.TMS_API_BASE_URL }}
       MAP_STYLE_URL: ${{ vars.TMS_MAP_STYLE_URL }}
       PORTAL_URL: ${{ vars.TMS_PORTAL_URL }}
-      VERSION_NAME: ${{ inputs.version_name || github.ref_name }}
+      # Tags look like android-v1.2.0 (users see 1.2.0); merges to master get 1.0.<run number>.
+      VERSION_NAME: ${{ inputs.version_name || (startsWith(github.ref, 'refs/tags/android-v') && github.ref_name) || format('1.0.{0}', github.run_number) }}
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       TMS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       TMS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -70,8 +80,11 @@ jobs:
             https://*/) ;;
             *) echo "::error::Backend address must start with https:// and end with / (got '$API_BASE_URL'). Set the TMS_API_BASE_URL variable."; exit 1 ;;
           esac
-          # Tags look like android-v0.2.0; users should see 0.2.0.
           VERSION_NAME="${VERSION_NAME#android-v}"
+          if ! echo "$VERSION_NAME" | grep -Eq '^[0-9]+(\.[0-9]+){1,3}([-+][0-9A-Za-z.-]+)?$'; then
+            echo "::error::Version '$VERSION_NAME' should look like 1.2.0."
+            exit 1
+          fi
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           # Android requires versionCode to increase with every release; the run number always does.
           echo "VERSION_CODE=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_ENV"
@@ -82,6 +95,9 @@ jobs:
           java-version: 17
 
       - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest
 
       - name: Decode keystore
         run: |
@@ -117,12 +133,27 @@ jobs:
           retention-days: 90
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/android-v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/out/tms-field-$VERSION_NAME.apk"
-          --title "TMS Field $VERSION_NAME" --notes "Backend: $API_BASE_URL"
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="android-v$VERSION_NAME"
+          cp "$RUNNER_TEMP/out/tms-field-$VERSION_NAME.apk" "$RUNNER_TEMP/out/tms-field.apk"
+          APKS=("$RUNNER_TEMP/out/tms-field-$VERSION_NAME.apk" "$RUNNER_TEMP/out/tms-field.apk")
+          # Stay "latest" only if no newer build was published meanwhile (the notes carry the version code).
+          LATEST_CODE="$(gh release view --json body --jq .body 2>/dev/null | sed -n 's/.*versionCode \([0-9][0-9]*\).*/\1/p' | head -1 || true)"
+          LATEST=true
+          if [ -n "$LATEST_CODE" ] && [ "$LATEST_CODE" -gt "$VERSION_CODE" ]; then LATEST=false; fi
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # Re-run of the same version: replace the files.
+            gh release upload "$TAG" "${APKS[@]}" --clobber
+            gh release edit "$TAG" --latest="$LATEST"
+          else
+            gh release create "$TAG" "${APKS[@]}" --target "$GITHUB_SHA" --latest="$LATEST" \
+              --title "TMS Field $VERSION_NAME" \
+              --notes "TMS Field $VERSION_NAME (versionCode $VERSION_CODE). Backend: $API_BASE_URL. Install tms-field.apk on Android 8 or later."
+          fi
+          echo "Published release [$TAG]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$TAG) (latest: $LATEST)." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove keystore
         if: always()

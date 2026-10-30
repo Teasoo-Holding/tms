@@ -157,7 +157,12 @@ data class BootstrapResponse(
     @SerialName("planting_year_vendors") val plantingYearVendors: List<PlantingYearVendorDto> = emptyList(),
     @SerialName("data_generation") val dataGeneration: Long = 1,
     @SerialName("species_images") val speciesImages: List<SpeciesImageDto> = emptyList(),
+    val settings: SettingsDto? = null,
 )
+
+/** Organisation-wide settings chosen by an administrator. */
+@Serializable
+data class SettingsDto(@SerialName("height_unit") val heightUnit: String? = null)
 
 @Serializable
 data class SpeciesImageDto(
@@ -254,6 +259,7 @@ data class ChangesResponse(
     @SerialName("assignment_fingerprint") val assignmentFingerprint: String,
     /** Changes when an administrator clears all data. */
     @SerialName("data_generation") val dataGeneration: Long = 1,
+    val settings: SettingsDto? = null,
 )
 
 @Serializable

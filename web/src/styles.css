@@ -378,6 +378,28 @@ details.card > summary { cursor: pointer; min-height: 28px; }
 .print-only { display: none; }
 .lightbox-preview { filter: blur(2px); min-width: min(640px, 90vw); }
 
+/* ---------------------------------------------------------------- public landing page */
+.landing { max-width: 1040px; margin: 0 auto; padding: 16px 16px 40px; display: flex; flex-direction: column; gap: 24px; min-height: 100%; }
+.landing-hero { text-align: center; padding: 40px 0 8px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.landing-logo { color: var(--brand); }
+.landing-hero h1 { font-size: 30px; }
+.landing-lead { margin: 0; max-width: 56ch; font-size: 17px; color: var(--text-secondary); }
+.landing-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin-top: 12px; }
+.btn.landing-download { font-size: 17px; padding: 14px 26px; min-height: 54px; border-radius: 10px; }
+.btn.landing-secondary { padding: 14px 22px; min-height: 54px; border-radius: 10px; }
+.landing-meta { margin: 0; font-size: 13px; }
+.landing-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.landing-features h2 { margin-bottom: 6px; }
+.landing-features p { margin: 0; }
+.landing-install ol { margin: 0 0 12px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.landing-footer { margin-top: auto; text-align: center; font-size: 12px; }
+.quick-setup { border-color: var(--brand); background: var(--brand-wash); }
+@media (max-width: 600px) {
+  .landing-hero { padding-top: 20px; }
+  .landing-hero h1 { font-size: 24px; }
+  .landing-actions, .landing-actions .btn { width: 100%; }
+}
+
 /* ---------------------------------------------------------------- responsive helpers */
 .show-sm { display: none; }
 @media (max-width: 600px) {

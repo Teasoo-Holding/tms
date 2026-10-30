@@ -7,6 +7,25 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-10-30: Offline sign-in, sessions that survive bad networks, quick area setup, landing page, automatic releases (migration 011)
+- **Offline sign-in:**
+  - Anyone who has signed in online once on a device can sign in again without internet and keep collecting.
+  - Records are sent after the next online sign-in ("Sign in to send" banner).
+  - The password itself is never stored; only a salted, slow hash is.
+- **Never locked out:** if the server ends a session (or the device was offline for a long time), field work continues and records wait. Previously the app locked and needed internet to sign in.
+- **Root cause of the field lock-out fixed:** a token refresh whose reply was lost on a weak network was treated as theft. The server now accepts that retry. The offline window is now 30 days and refresh tokens last 90 days.
+- **Shared tablets:** each record remembers who made it and is sent only under that person's account. Officers no longer block each other (local database version 7).
+- **Quick area setup:** "How many sectors?" creates Sector 1…n (S1…Sn), each with sub-sectors SS1…SS4 (web and phone). GPS can be added later.
+- **Height:**
+  - Shown in the web tree details.
+  - Admins set the default height unit (web Settings); phones follow it.
+- **Photo tip:** "Turn the tag away from direct sunlight" on the photo step and in the camera.
+- **Landing page:** at `/` for visitors and at `/download`, with the latest Android app.
+- **Updates:** the app offers new versions.
+- **Automation:**
+  - Every merge that changes the Android app builds, tests and publishes a signed APK as the latest GitHub Release, which the landing page links to.
+  - Migrations run on merge and can trigger the Render deploy.
+
 ## 2026-10-28: GPS optional for sectors and sub-sectors (migration 010)
 - Admins can create sectors and sub-sectors with just a name and short code (and the planting year), and add GPS corners later, on the web or the phone.
 - Areas without GPS are marked "No GPS yet". They work for field sessions and reports but are left off the maps, which say how many are missing.

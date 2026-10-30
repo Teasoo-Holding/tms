@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -95,6 +96,18 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
             Modifier.padding(padding).padding(horizontal = 20.dp, vertical = 8.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            session.onlineSignInReason?.let { reason -> OnlineSignInBanner(reason, session.user.loginName, vm) }
+            vm.update.collectAsStateWithLifecycle().value?.let { u ->
+                val context = LocalContext.current
+                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Version ${u.version} is available.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        TextButton(onClick = {
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(u.downloadUrl)))
+                        }) { Text("Download") }
+                    }
+                }
+            }
             if (sync.lowStorage) Notice("Phone storage is low. Open “Ready to send” → Free up space.", MaterialTheme.colorScheme.errorContainer)
             val c = ctx
             when {
@@ -196,4 +209,41 @@ private fun Pill(icon: ImageVector, label: String, count: Int? = null, alert: Bo
             count?.let { Text("$it", style = MaterialTheme.typography.titleMedium) }
         }
     }
+}
+
+/**
+ * Field work carries on without a server session; this asks the person to sign in online, when there is internet,
+ * so their saved records can be sent. Nothing on the device is lost either way.
+ */
+@Composable
+private fun OnlineSignInBanner(reason: String, loginName: String, vm: AppViewModel) {
+    var open by remember { mutableStateOf(false) }
+    var password by remember { mutableStateOf("") }
+    var submitted by remember { mutableStateOf(false) }
+    val busy by vm.loggingIn.collectAsStateWithLifecycle()
+    val error by vm.loginError.collectAsStateWithLifecycle()
+    Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(reason, style = MaterialTheme.typography.bodyMedium)
+            Text("You can keep collecting data; it is saved on this device.", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = { open = true }) { Text("Sign in to send") }
+        }
+    }
+    if (open) AlertDialog(
+        onDismissRequest = { if (!busy) open = false },
+        title = { Text("Sign in to send your records") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Signed in as $loginName. This needs internet.", style = MaterialTheme.typography.bodyMedium)
+                com.teasoo.tms.ui.components.PasswordField(password, { password = it }, "Password")
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { submitted = true; vm.login(loginName, password, allowOffline = false) }, enabled = password.isNotBlank() && !busy) { Text(if (busy) "Signing in…" else "Sign in") }
+        },
+        dismissButton = { TextButton(onClick = { open = false }, enabled = !busy) { Text("Later") } },
+    )
+    // Close once the online sign-in worked (the banner then disappears).
+    LaunchedEffect(busy, error) { if (submitted && !busy) { submitted = false; if (error == null) { open = false; password = "" } } }
 }

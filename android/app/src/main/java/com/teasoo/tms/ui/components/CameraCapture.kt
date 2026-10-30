@@ -88,6 +88,7 @@ fun CameraCaptureDialog(photoStore: PhotoStore, onCaptured: (CapturedPhoto) -> U
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 error?.let { Text(it, color = Color(0xFFFFB4AB), modifier = Modifier.padding(horizontal = 16.dp)) }
+                Text("Keep the tag out of direct sunlight so its number is readable.", color = Color.White, modifier = Modifier.padding(horizontal = 16.dp))
                 // A large round shutter button, always above the navigation bar.
                 Surface(
                     onClick = {

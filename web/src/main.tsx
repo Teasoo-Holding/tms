@@ -1,7 +1,7 @@
 import { MutationCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { auth } from './api/client';
 import { useAuth } from './auth';
 import { TooltipProvider } from './charts/Tooltip';
@@ -12,6 +12,7 @@ import { ConflictsPage } from './pages/Conflicts';
 import { DashboardPage } from './pages/Dashboard';
 import { DensityPage } from './pages/Density';
 import { FieldActivityPage } from './pages/FieldActivity';
+import { LandingPage } from './pages/Landing';
 import { LoginPage } from './pages/Login';
 import { ProjectDetailPage } from './pages/ProjectDetail';
 import { ProjectsPage } from './pages/Projects';
@@ -33,11 +34,12 @@ const queryClient: QueryClient = new QueryClient({
   }),
 });
 
-/** Client share links (/share/:token) are public: they render without signing in. */
+/** Client share links (/share/:token) and the app download page (/download) are public: they render without signing in. */
 function Root() {
   return (
     <Routes>
       <Route path="/share/:token" element={<SharePage />} />
+      <Route path="/download" element={<LandingPage />} />
       <Route path="*" element={<App />} />
     </Routes>
   );
@@ -45,11 +47,13 @@ function Root() {
 
 function App() {
   const user = useAuth();
-  if (!user) return <LoginPage />;
+  const { pathname } = useLocation();
+  // Visitors see the landing page at /; any other address (e.g. /login) asks them to sign in.
+  if (!user) return pathname === '/' ? <LandingPage /> : <LoginPage />;
   if (user.role === 'FIELD_OFFICER') {
     return (
       <div className="main">
-        <div className="notice">Field officers use the Android app.</div>
+        <div className="notice">Field officers use the Android app. <a href="/download">Download it here.</a></div>
         <button style={{ marginTop: 12 }} onClick={() => auth.logout()}>Sign out</button>
       </div>
     );

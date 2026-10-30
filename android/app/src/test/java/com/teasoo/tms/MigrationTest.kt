@@ -64,5 +64,9 @@ class MigrationTest {
         // Version 6: an area's GPS location is optional; existing areas keep theirs.
         val v6 = helper.runMigrationsAndValidate("migration-test", 6, true)
         v6.query("SELECT syncState FROM trees WHERE id = 't1'").use { it.moveToFirst(); assertEquals("PENDING", it.getString(0)) }
+        v6.close()
+        // Version 7: queued records remember who made them.
+        val v7 = helper.runMigrationsAndValidate("migration-test", 7, true)
+        v7.query("SELECT count(*) FROM outbox WHERE userId IS NOT NULL").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
     }
 }
