@@ -127,3 +127,13 @@ A database backup does **not** include photographs. Both must be backed up and r
   with sub-sectors (SS1, SS2, …) in one step; rename them or add GPS later. Running it again with a
   larger number adds the missing ones.
 - Exports (CSV/Excel) are audited and include sub-sector reference coordinates, never tree coordinates.
+
+## Web portal on Vercel
+
+- Every address of the portal (`/download`, `/login`, `/trees/…`) must be served by the single-page app, and `/api/*` is
+  forwarded to the backend on Render. Both rules live in `vercel.json` (repository root) and `web/vercel.json`
+  (used when the Vercel project's *Root Directory* is `web`). If `/download` shows Vercel's own "404: NOT_FOUND",
+  the deployed version predates these files or the project does not read them: redeploy from `master`.
+- Automatic deploys: either Vercel's Git integration (Settings → Git → Production Branch `master`), or the
+  *Web deploy* workflow (`.github/workflows/web-deploy.yml`) with the `VERCEL_TOKEN`, `VERCEL_ORG_ID` and
+  `VERCEL_PROJECT_ID` secrets. One is enough.
