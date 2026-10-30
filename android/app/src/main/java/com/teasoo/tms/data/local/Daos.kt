@@ -32,9 +32,9 @@ interface ReferenceDao {
     @Query("SELECT * FROM planting_years WHERE id = :id") suspend fun year(id: String): PlantingYearEntity?
     @Query("SELECT * FROM id_schemes WHERE projectId = :projectId AND active") suspend fun activeSchemes(projectId: String): List<IdSchemeEntity>
     @Query("SELECT * FROM id_schemes WHERE id = :id") suspend fun scheme(id: String): IdSchemeEntity?
-    @Query("SELECT * FROM sectors WHERE projectId = :projectId ORDER BY shortCode") fun sectors(projectId: String): Flow<List<SectorEntity>>
+    @Query("SELECT * FROM sectors WHERE projectId = :projectId ORDER BY length(shortCode), shortCode") fun sectors(projectId: String): Flow<List<SectorEntity>>
     /** The planting year's surveyed sectors, plus older sectors not tied to a year. */
-    @Query("SELECT * FROM sectors WHERE projectId = :projectId AND (plantingYearId = :yearId OR plantingYearId IS NULL) ORDER BY shortCode")
+    @Query("SELECT * FROM sectors WHERE projectId = :projectId AND (plantingYearId = :yearId OR plantingYearId IS NULL) ORDER BY length(shortCode), shortCode")
     fun sectorsForYear(projectId: String, yearId: String): Flow<List<SectorEntity>>
     @Upsert suspend fun upsertYearVendors(rows: List<PlantingYearVendorEntity>)
     @Query("DELETE FROM planting_year_vendors WHERE id NOT IN (:keep)") suspend fun pruneYearVendors(keep: List<String>)
@@ -45,7 +45,7 @@ interface ReferenceDao {
     )
     fun vendorsForYear(yearId: String): Flow<List<VendorEntity>>
     @Query("SELECT * FROM sectors WHERE id = :id") suspend fun sector(id: String): SectorEntity?
-    @Query("SELECT * FROM sub_sectors WHERE projectId = :projectId ORDER BY shortCode") fun subSectors(projectId: String): Flow<List<SubSectorEntity>>
+    @Query("SELECT * FROM sub_sectors WHERE projectId = :projectId ORDER BY length(shortCode), shortCode") fun subSectors(projectId: String): Flow<List<SubSectorEntity>>
     @Query("SELECT * FROM sub_sectors WHERE id = :id") suspend fun subSector(id: String): SubSectorEntity?
     @Query("SELECT * FROM species ORDER BY COALESCE(commonName, scientificName)") fun species(): Flow<List<SpeciesEntity>>
     @Query("SELECT * FROM statuses ORDER BY sortOrder") fun statuses(): Flow<List<StatusEntity>>
@@ -274,6 +274,13 @@ interface MediaDao {
     @Query("SELECT * FROM media WHERE observationId = :observationId ORDER BY capturedAt LIMIT 1") suspend fun firstForObservation(observationId: String): MediaEntity?
     @Query("SELECT * FROM media WHERE state <> 'VERIFIED' AND localPath IS NOT NULL AND nextAttemptAt <= :now ORDER BY capturedAt")
     suspend fun dueForUpload(now: Long): List<MediaEntity>
+    /** Photos of [userId]'s own records (or not tied to a record); others wait for their author to sign in. */
+    @Query(
+        """SELECT m.* FROM media m LEFT JOIN observations o ON o.id = m.observationId
+            WHERE m.state <> 'VERIFIED' AND m.localPath IS NOT NULL AND m.nextAttemptAt <= :now AND (o.recordedBy IS NULL OR o.recordedBy = :userId)
+            ORDER BY m.capturedAt""",
+    )
+    suspend fun dueForUploadBy(now: Long, userId: String): List<MediaEntity>
     @Query("SELECT * FROM media WHERE state = 'VERIFIED' AND localPath IS NOT NULL") suspend fun verifiedWithLocalCopy(): List<MediaEntity>
     @Query("SELECT * FROM media WHERE state <> 'VERIFIED' AND localPath IS NOT NULL ORDER BY capturedAt") suspend fun unsent(): List<MediaEntity>
     @Query("SELECT * FROM media") suspend fun all(): List<MediaEntity>
@@ -288,6 +295,12 @@ interface OutboxDao {
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insert(op: OutboxEntity)
     @Query("SELECT * FROM outbox WHERE state = 'PENDING' AND nextAttemptAt <= :now ORDER BY seq LIMIT :limit")
     suspend fun due(now: Long, limit: Int): List<OutboxEntity>
+    /** [userId]'s records that are due; other people's wait for them to sign in. */
+    @Query("SELECT * FROM outbox WHERE state = 'PENDING' AND nextAttemptAt <= :now AND userId = :userId ORDER BY seq LIMIT :limit")
+    suspend fun dueFor(now: Long, limit: Int, userId: String): List<OutboxEntity>
+    @Query("SELECT count(*) FROM outbox WHERE state = 'PENDING' AND userId = :userId") fun pendingCountFor(userId: String): Flow<Int>
+    /** Records saved before records carried their author belong to the person who used the device last. */
+    @Query("UPDATE outbox SET userId = :userId WHERE userId IS NULL") suspend fun claimUnowned(userId: String)
     @Query("SELECT * FROM outbox WHERE state = 'PENDING' AND entityId = :entityId AND operationType = 'update' AND attempts = 0 LIMIT 1")
     suspend fun unsentUpdateFor(entityId: String): OutboxEntity?
     @Query("UPDATE outbox SET payloadJson = :payload, clientRecordedAt = :at WHERE seq = :seq") suspend fun replacePayload(seq: Long, payload: String, at: String)

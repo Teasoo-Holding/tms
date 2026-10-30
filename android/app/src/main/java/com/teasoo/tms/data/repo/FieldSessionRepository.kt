@@ -59,7 +59,15 @@ class FieldSessionRepository @Inject constructor(private val db: TmsDatabase) {
     suspend fun setReferenceCm(cm: Double) = db.kv().put(KeyValueEntity(REFERENCE_KEY, cm.toString()))
 
     /** The unit this officer types tree heights in (cm unless they changed it); heights are always stored in cm. */
-    suspend fun heightUnit(): String = db.kv().get(HEIGHT_UNIT_KEY) ?: "cm"
+    suspend fun heightUnit(): String {
+        val adminDefault = db.kv().get(com.teasoo.tms.data.local.Keys.DEFAULT_HEIGHT_UNIT) ?: "cm"
+        // A new default from the administrator replaces the officer's own earlier choice.
+        if (db.kv().get(HEIGHT_DEFAULT_SEEN_KEY) != adminDefault) {
+            db.kv().put(KeyValueEntity(HEIGHT_DEFAULT_SEEN_KEY, adminDefault))
+            db.kv().remove(HEIGHT_UNIT_KEY)
+        }
+        return db.kv().get(HEIGHT_UNIT_KEY) ?: adminDefault
+    }
     suspend fun setHeightUnit(unit: String) = db.kv().put(KeyValueEntity(HEIGHT_UNIT_KEY, unit))
 
     private suspend fun save(session: FieldSession) =
@@ -69,5 +77,6 @@ class FieldSessionRepository @Inject constructor(private val db: TmsDatabase) {
         const val KEY = "field.session"
         const val REFERENCE_KEY = "height.reference_cm"
         const val HEIGHT_UNIT_KEY = "height.unit"
+        const val HEIGHT_DEFAULT_SEEN_KEY = "height.unit.default_seen"
     }
 }

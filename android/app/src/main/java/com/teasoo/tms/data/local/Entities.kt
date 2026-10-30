@@ -301,6 +301,8 @@ data class OutboxEntity(
     val nextAttemptAt: Long = 0,
     val lastError: String? = null,
     val resultCode: String? = null,
+    /** Who made the record: it is only ever sent under that person's account (tablets are shared). */
+    val userId: String? = null,
 )
 
 @Entity(tableName = "kv")

@@ -7,6 +7,9 @@ name: Database migrations
 # Required repository secret:
 #   NEON_DATABASE_URL_UNPOOLED  direct (non-pooled) connection string of the Neon "production" branch.
 #                               Migrations must not use the pooled (-pooler) URL.
+# Optional repository secret:
+#   RENDER_DEPLOY_HOOK_URL      the API service's Render deploy hook (Render → service → Settings → Deploy Hook).
+#                               When set, the API is redeployed after the migrations succeed; skipped otherwise.
 
 on:
   push:
@@ -73,3 +76,15 @@ jobs:
       - name: Load demo data
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.seed_demo_data }}
         run: node dist/database/seed.js
+
+      # The new API version starts only once the schema it needs is in place.
+      - name: Deploy the API on Render
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL is not set; not triggering a Render deploy."
+            exit 0
+          fi
+          curl --fail --silent --show-error --max-time 60 -X POST "$RENDER_DEPLOY_HOOK_URL" > /dev/null
+          echo "Render deploy triggered." >> "$GITHUB_STEP_SUMMARY"

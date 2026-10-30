@@ -34,6 +34,8 @@ export function TreeDetailPage() {
     .filter((o) => !o.superseded && o.height_cm != null)
     .map((o) => ({ x: new Date(o.observed_at).getTime(), y: Number(o.height_cm) }))
     .sort((a, b) => a.x - b.x);
+  // The most recent visit with a height (corrections replace the originals).
+  const latestHeight = heights[heights.length - 1];
   // Replanting: an active tree whose current status allows replacement and that has not been replaced yet.
   const currentStatus = statuses.data?.find((s) => s.code === t.status_code);
   const alreadyReplaced = t.lineage.some((l: any) => l.generation === 1);
@@ -72,6 +74,18 @@ export function TreeDetailPage() {
             <dt>Species</dt><dd>{t.species_name}{t.species_common_name && ` (${t.species_common_name})`}</dd>
             {t.vendor_name && (<><dt>Vendor</dt><dd>{t.vendor_name}</dd></>)}
             <dt>Planted on</dt><dd>{fmtDate(t.planted_on)}</dd>
+            {SHOW_HEIGHT && (
+              <>
+                <dt>Height</dt>
+                <dd>
+                  {latestHeight ? (
+                    <><strong>{fmtHeight(latestHeight.y)}</strong> <span className="muted">on {fmtDate(new Date(latestHeight.x).toISOString())}</span></>
+                  ) : (
+                    <span className="muted">not recorded</span>
+                  )}
+                </dd>
+              </>
+            )}
             {t.notes && (<><dt>Notes</dt><dd>{t.notes}</dd></>)}
           </dl>
           <CustomValues values={t.custom_fields} defs={treeDefs} empty="" />

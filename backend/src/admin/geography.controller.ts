@@ -64,6 +64,12 @@ const ImportBody = z.object({
     .max(2000),
 });
 
+/** Quick setup: numbered sectors S1..Sn, each with sub-sectors SS1..SSk. */
+const GenerateBody = z.object({
+  sectors: z.number().int().min(1).max(200),
+  sub_sectors_per_sector: z.number().int().min(1).max(26).default(4),
+});
+
 const SECTOR_COLUMNS = `id, project_id, planting_year_id, name, short_code, description, reference_latitude, reference_longitude,
   ${GEOMETRY_SQL()} AS boundary, active, created_at, updated_at`;
 const SUB_SECTOR_COLUMNS = `id, sector_id, project_id, name, short_code, description, reference_latitude, reference_longitude,
@@ -283,6 +289,48 @@ export class GeographyController {
       }
       await this.audit.record({ actorId: user.id, action: 'areas.import', entityType: 'project', entityId: projectId, projectId, metadata: { created } }, tx);
       return { created };
+    });
+  }
+
+  /**
+   * Creates sectors "Sector 1".."Sector n" (S1..Sn) in a planting year, each with sub-sectors "Sub-sector 1".."Sub-sector k"
+   * (SS1..SSk), without locations. Codes that already exist are skipped and nothing is renamed, so it can be run again
+   * to add more. Sector codes are unique within a planting year, sub-sector codes within their sector.
+   */
+  @Roles('ADMIN')
+  @Post('planting-years/:yearId/areas/generate')
+  async generate(@CurrentUser() user: AuthUser, @Param('yearId', ParseUUIDPipe) yearId: string, @Body() body: unknown) {
+    const b = parse(GenerateBody, body);
+    return this.db.tx(async (tx) => {
+      const year = await this.db.one(tx, 'SELECT id, project_id FROM planting_years WHERE id = $1', [yearId]);
+      if (!year) throw notFound('Planting year');
+      const numbers = Array.from({ length: b.sectors }, (_, i) => i + 1);
+      const sectors = await tx
+        .query(
+          `INSERT INTO sectors (project_id, planting_year_id, name, short_code)
+           SELECT $1, $2, 'Sector ' || n, 'S' || n FROM unnest($3::int[]) n
+            WHERE NOT EXISTS (SELECT 1 FROM sectors s WHERE s.planting_year_id = $2 AND s.short_code = 'S' || n)
+           RETURNING id`,
+          [year.project_id, yearId, numbers],
+        )
+        .catch(rethrowCode('A sector with one of these short codes was just added. Try again.'));
+      const subs = await tx
+        .query(
+          `INSERT INTO sub_sectors (sector_id, project_id, name, short_code)
+           SELECT s.id, s.project_id, 'Sub-sector ' || k, 'SS' || k
+             FROM sectors s CROSS JOIN generate_series(1, $3::int) k
+            WHERE s.planting_year_id = $1 AND s.short_code = ANY($2::text[])
+              AND NOT EXISTS (SELECT 1 FROM sub_sectors x WHERE x.sector_id = s.id AND x.short_code = 'SS' || k)
+           RETURNING id`,
+          [yearId, numbers.map((n) => `S${n}`), b.sub_sectors_per_sector],
+        )
+        .catch(rethrowCode('A sub-sector with one of these short codes was just added. Try again.'));
+      const result = { created_sectors: sectors.rowCount ?? 0, created_sub_sectors: subs.rowCount ?? 0 };
+      await this.audit.record(
+        { actorId: user.id, action: 'areas.generate', entityType: 'planting_year', entityId: yearId, projectId: year.project_id, metadata: { ...b, ...result } },
+        tx,
+      );
+      return result;
     });
   }
 }

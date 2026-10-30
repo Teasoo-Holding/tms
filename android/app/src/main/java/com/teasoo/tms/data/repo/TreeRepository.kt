@@ -241,7 +241,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
                 ),
             )
             t.photos.forEach { db.media().insert(it.toEntity(treeId, observationId, now)) }
-            db.outbox().insert(operation("tree", treeId, "create", null, payload, now))
+            db.outbox().insert(operation("tree", treeId, "create", null, payload, now, userId))
         }
         return treeId
     }
@@ -281,7 +281,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
                 ),
             )
             photos.forEach { db.media().insert(it.toEntity(treeId, id, now)) }
-            db.outbox().insert(operation("observation", id, if (amendsObservationId != null) "amendment" else "observation", null, payload, now))
+            db.outbox().insert(operation("observation", id, if (amendsObservationId != null) "amendment" else "observation", null, payload, now, userId))
             db.trees().recomputeStatus(treeId)
         }
         return id
@@ -322,7 +322,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
                 }
                 // A tree not yet accepted by the server will be created at revision 1, and the outbox
                 // is processed in order, so the create always lands before this update.
-                db.outbox().insert(operation("tree", treeId, "update", tree.serverRevision ?: 1, payload, now))
+                db.outbox().insert(operation("tree", treeId, "update", tree.serverRevision ?: 1, payload, now, db.kv().get(com.teasoo.tms.data.local.Keys.LAST_USER)))
             }
         }
     }
@@ -348,9 +348,9 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
     private fun CapturedPhoto.toEntity(treeId: String, observationId: String, now: String) =
         MediaEntity(mediaId, treeId, observationId, file.absolutePath, sha256, byteSize, mimeType, now, MediaState.LOCAL)
 
-    private fun operation(entityType: String, entityId: String, type: String, baseRevision: Int?, payload: JsonObject, now: String) =
+    private fun operation(entityType: String, entityId: String, type: String, baseRevision: Int?, payload: JsonObject, now: String, userId: String?) =
         OutboxEntity(
             operationId = UUID.randomUUID().toString(), entityType = entityType, entityId = entityId, operationType = type,
-            baseRevision = baseRevision, clientRecordedAt = now, payloadJson = payload.toString(),
+            baseRevision = baseRevision, clientRecordedAt = now, payloadJson = payload.toString(), userId = userId,
         )
 }

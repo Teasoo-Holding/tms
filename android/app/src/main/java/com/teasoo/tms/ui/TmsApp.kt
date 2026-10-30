@@ -94,7 +94,7 @@ private fun LoginScreen(vm: AppViewModel, prefillEmail: String, reason: String?)
             verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         ) {
             Text("TMS Field", style = MaterialTheme.typography.headlineMedium)
-            Text("Sign in while connected. After that you can work offline.", style = MaterialTheme.typography.bodyMedium)
+            Text("The first sign-in on this device needs internet. After that you can sign in and work offline.", style = MaterialTheme.typography.bodyMedium)
             reason?.let { Notice("$it Records on this device are kept and will sync after you sign in.") }
             OutlinedTextField(email, { email = it }, label = { Text("Username, email or phone") }, singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, autoCorrectEnabled = false), modifier = Modifier.fillMaxWidth())

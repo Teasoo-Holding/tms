@@ -341,6 +341,15 @@ class LocalStoreTest {
     }
 
     @Test
+    fun eachOfficersRecordsAreSentOnlyUnderTheirOwnAccount() = runBlocking {
+        trees.register(newTree("701"), "u-1")
+        trees.register(newTree("702"), "u-2")
+        assertEquals(1, db.outbox().dueFor(Long.MAX_VALUE, 10, "u-1").size)
+        assertEquals(1, db.outbox().dueFor(Long.MAX_VALUE, 10, "u-2").size)
+        assertEquals(1, db.outbox().pendingCountFor("u-2").first())
+    }
+
+    @Test
     fun speciesReferencePhotosFollowServerChanges() = runBlocking {
         val repo = ReferenceRepository(db)
         fun change(seq: Long, id: String, order: Int, deleted: Boolean = false) = ChangeDto(

@@ -1,4 +1,4 @@
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { FormEvent, useState } from 'react';
 import { api, ApiError } from '../api/client';
 import { ErrorNotice, Field, fmtNum, PageHeader, PasswordInput, todayStamp } from '../components/ui';
@@ -23,6 +23,7 @@ export function SettingsPage() {
   return (
     <div className="stack">
       <PageHeader title="Settings" />
+      <Defaults />
       <section className="card">
         <div className="card-header" style={{ alignItems: 'center', marginBottom: 0 }}>
           <h2>Export all data</h2>
@@ -34,6 +35,38 @@ export function SettingsPage() {
       </section>
       <ClearData />
     </div>
+  );
+}
+
+const HEIGHT_UNITS: [string, string][] = [
+  ['cm', 'Centimetres (cm)'],
+  ['m', 'Metres (m)'],
+  ['in', 'Inches (in)'],
+  ['ft', 'Feet (ft)'],
+];
+
+/** Organisation-wide defaults; phones pick up a change on their next sync. */
+function Defaults() {
+  const settings = useQuery({ queryKey: ['admin-settings'], queryFn: () => api.get<{ height_unit: string }>('/admin/settings') });
+  const save = useMutation({ mutationFn: (height_unit: string) => api.patch('/admin/settings', { height_unit }) });
+  return (
+    <section className="card">
+      <h2>Defaults</h2>
+      <ErrorNotice error={settings.error ?? save.error} />
+      <div className="form-grid">
+        <Field label="Default height unit" hint="how tree heights are shown in the field app; heights are stored in cm">
+          <select
+            value={settings.data?.height_unit ?? ''}
+            disabled={!settings.data || save.isPending}
+            onChange={(e) => save.mutate(e.target.value)}
+          >
+            {!settings.data && <option value="">Loading…</option>}
+            {HEIGHT_UNITS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </Field>
+      </div>
+      {save.isSuccess && <p className="muted" style={{ margin: '8px 0 0' }}>Saved. Phones use it after their next sync.</p>}
+    </section>
   );
 }
 

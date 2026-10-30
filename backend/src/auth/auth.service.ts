@@ -45,12 +45,21 @@ export class AuthService {
     });
   }
 
-  /** Rotating refresh tokens; presenting an already-used token revokes the whole family. */
+  /**
+   * Rotating refresh tokens. Presenting an already-used token normally revokes the whole family (possible theft),
+   * except when the token issued in its place has never been used: the phone did not receive the earlier response
+   * (common on poor field networks) and is retrying, so that unused token is revoked and a fresh pair issued.
+   */
   async refresh(refreshToken: string) {
     const result = await this.db.tx(async (tx) => {
       const session = await this.db.one(tx, 'SELECT * FROM refresh_sessions WHERE token_hash = $1 FOR UPDATE', [sha256(refreshToken)]);
       if (!session) throw new AppError(401, 'SESSION_INVALID', 'Your session is no longer valid. Sign in again.');
-      if (session.used_at || session.revoked_at) {
+      const successor =
+        session.used_at && !session.revoked_at && session.replaced_by
+          ? await this.db.one(tx, 'SELECT id, used_at, revoked_at FROM refresh_sessions WHERE id = $1 FOR UPDATE', [session.replaced_by])
+          : null;
+      const retry = !!successor && !successor.used_at && !successor.revoked_at;
+      if ((session.used_at || session.revoked_at) && !retry) {
         // Possible token theft: revoke the family. Returned (not thrown) so the revocation commits.
         await tx.query('UPDATE refresh_sessions SET revoked_at = now() WHERE family_id = $1 AND revoked_at IS NULL', [session.family_id]);
         return null;
@@ -63,8 +72,9 @@ export class AuthService {
         if (device?.revoked_at) throw new AppError(401, 'DEVICE_REVOKED', 'This device has been revoked. Contact an administrator.');
         await tx.query('UPDATE devices SET last_seen_at = now() WHERE id = $1', [session.device_id]);
       }
-      await tx.query('UPDATE refresh_sessions SET used_at = now() WHERE id = $1', [session.id]);
-      return this.issue(tx, user, session.device_id, session.family_id);
+      // The lost response's token can no longer be used; only the pair issued now is valid.
+      if (retry) await tx.query('UPDATE refresh_sessions SET revoked_at = now() WHERE id = $1', [successor.id]);
+      return this.issue(tx, user, session.device_id, session.family_id, session.id);
     });
     if (!result) throw new AppError(401, 'SESSION_INVALID', 'Your session is no longer valid. Sign in again.');
     return result;
@@ -100,17 +110,21 @@ export class AuthService {
     }
   }
 
-  private async issue(q: Queryable, user: any, deviceId: string | null, familyId: string) {
+  /** [replacesId]: the refresh session being exchanged; it is marked used and linked to the new one. */
+  private async issue(q: Queryable, user: any, deviceId: string | null, familyId: string, replacesId?: string) {
     const accessToken = await this.jwt.signAsync(
       { sub: user.id, role: user.role, ...(deviceId ? { did: deviceId } : {}) },
       { secret: config.jwtAccessSecret, expiresIn: config.accessTokenTtlSeconds },
     );
     const refreshToken = randomBytes(32).toString('base64url');
     const refreshExpires = new Date(Date.now() + config.refreshTokenTtlDays * 86400_000);
-    await q.query(
-      'INSERT INTO refresh_sessions (user_id, device_id, family_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5)',
+    const { rows } = await q.query(
+      'INSERT INTO refresh_sessions (user_id, device_id, family_id, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5) RETURNING id',
       [user.id, deviceId, familyId, sha256(refreshToken), refreshExpires],
     );
+    if (replacesId) {
+      await q.query('UPDATE refresh_sessions SET used_at = COALESCE(used_at, now()), replaced_by = $2 WHERE id = $1', [replacesId, rows[0].id]);
+    }
     return {
       access_token: accessToken,
       access_token_expires_in: config.accessTokenTtlSeconds,
