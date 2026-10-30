@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm ci --prefix web",
+  "buildCommand": "npm run build --prefix web",
+  "outputDirectory": "web/dist",
+  "framework": null,
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://tms-yl0r.onrender.com/api/:path*" },
+    { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }
+  ]
+}
