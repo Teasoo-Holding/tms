@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, qs } from '../api/client';
 import { TreePhotos } from '../components/Photos';
+import { Pagination, usePage } from '../components/Pagination';
 import { EmptyState, ErrorNotice, Field, fmtDateTime, Modal, PageHeader, Tabs } from '../components/ui';
 
 const TYPE_LABEL: Record<string, string> = {
@@ -31,17 +32,23 @@ const RESOLUTIONS: Record<string, [string, string, boolean][]> = {
 export function ConflictsPage() {
   const [status, setStatus] = useState<'OPEN' | 'RESOLVED'>('OPEN');
   const [selected, setSelected] = useState<string | null>(null);
-  const conflicts = useQuery({ queryKey: ['conflicts', status], queryFn: () => api.get<any[]>(`/conflicts${qs({ status })}`) });
+  const page = usePage('', 25);
+  // Paged on the server: conflicts can pile up after a large import.
+  const conflicts = useQuery({
+    queryKey: ['conflicts', status, page.offset, page.limit],
+    queryFn: () => api.get<{ items: any[]; total: number }>(`/conflicts${qs({ status, limit: page.limit, offset: page.offset })}`),
+  });
+  const items = conflicts.data?.items;
   return (
     <div>
       <PageHeader title="Conflicts" />
-      <Tabs tabs={[['OPEN', 'Open'], ['RESOLVED', 'Resolved']]} value={status} onChange={setStatus} />
+      <Tabs tabs={[['OPEN', 'Open'], ['RESOLVED', 'Resolved']]} value={status} onChange={(s) => (setStatus(s), page.go(0))} />
       <ErrorNotice error={conflicts.error} />
       <div className="card table-wrap">
         <table>
           <thead><tr><th>Type</th><th>Project</th><th>Incoming</th><th>Existing</th><th>Submitted</th>{status === 'RESOLVED' && <th>Resolution</th>}<th /></tr></thead>
           <tbody>
-            {conflicts.data?.map((c) => (
+            {items?.map((c) => (
               <tr key={c.id}>
                 <td>{TYPE_LABEL[c.conflict_type]}</td>
                 <td>{c.project_name}</td>
@@ -54,8 +61,9 @@ export function ConflictsPage() {
             ))}
           </tbody>
         </table>
-        {conflicts.data?.length === 0 && <EmptyState title={status === 'OPEN' ? 'No open conflicts' : 'Nothing resolved yet'} />}
+        {items?.length === 0 && <EmptyState title={status === 'OPEN' ? 'No open conflicts' : 'Nothing resolved yet'} />}
       </div>
+      <Pagination page={page} total={conflicts.data?.total ?? 0} label="conflicts" />
       {selected && <ConflictReview id={selected} onClose={() => setSelected(null)} />}
     </div>
   );

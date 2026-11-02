@@ -24,9 +24,8 @@ export function BrandMark() {
   );
 }
 
-/** Read-only client view of one project, opened from a secret share link. No sign-in. */
-export function SharePage() {
-  const { token = '' } = useParams<{ token: string }>();
+/** Overview: the dashboard-style summary with its filters, map and downloads (the original client report). */
+function ShareOverview({ token, base }: ShareContext) {
   const [params, setParams] = useSearchParams();
   const get = (k: string) => params.get(k) ?? '';
   const set = (k: string, v: string) => {
@@ -39,7 +38,6 @@ export function SharePage() {
   const filters = Object.fromEntries(FILTER_KEYS.map((k) => [k, get(k)]));
   const activeCount = FILTER_KEYS.filter((k) => get(k)).length;
   const filter = qs(filters);
-  const base = `/share/${encodeURIComponent(token)}`;
   const view = useQuery({ queryKey: ['share', token, filter], queryFn: () => publicGet(`${base}${filter}`), retry: (n, e) => (e as ApiError).status !== 404 && n < 1 });
   const d = view.data;
   const yearId = get('planting_year_id');
@@ -60,29 +58,10 @@ export function SharePage() {
     return m;
   }, [areas]);
 
-  if (view.error) {
-    const e = view.error as ApiError;
-    return (
-      <div className="share-shell">
-        <div className="share-error card">
-          <BrandMark />
-          <h1>{e.code === 'LINK_INVALID' ? 'This link is no longer active' : 'Something went wrong'}</h1>
-          <p className="subtle" style={{ margin: 0 }}>{e.code === 'LINK_INVALID' ? 'Ask Teasoo Consulting for a new link.' : e.message}</p>
-          {e.code !== 'LINK_INVALID' && <button onClick={() => view.refetch()}>Try again</button>}
-        </div>
-      </div>
-    );
-  }
-  if (!d) {
-    return (
-      <div className="share-shell">
-        <div className="empty">Loading…</div>
-      </div>
-    );
-  }
+  if (view.error) return <ErrorNotice error={view.error} />;
+  if (!d) return <div className="empty">Loading…</div>;
 
   const s = d.summary;
-  const p = d.project;
   const statusRows: any[] = s.by_status ?? [];
   const alive = statusRows.filter((r) => !r.is_terminal && r.code !== 'UNKNOWN').reduce((n, r) => n + r.count, 0);
   const unknown = statusRows.filter((r) => r.code === 'UNKNOWN').reduce((n, r) => n + r.count, 0);
@@ -107,20 +86,12 @@ export function SharePage() {
   const lifeSectors = sectorShare.filter((r: any) => r.registered_trees > 0);
   const lifeValue = (c: string, k: string) => lifeSectors.find((r: any) => sectorLabel(r) === c)?.[k] ?? 0;
   const aliveShare = (r: any) => (r.alive_trees + r.dead_trees ? `${Math.round((r.alive_trees / (r.alive_trees + r.dead_trees)) * 100)}%` : '—');
-  const dates = [p.start_date && fmtDate(p.start_date), p.end_date && fmtDate(p.end_date)].filter(Boolean).join(' – ');
 
   return (
-    <div className="share-shell">
-      <header className="share-header">
-        <BrandMark />
-        <span className="spacer" />
-        <span className="muted print-only">Printed {fmtDateTime(new Date().toISOString())}</span>
-      </header>
-
+    <div className="stack">
       <div className="page-header" style={{ marginBottom: 0 }}>
         <div className="page-title">
-          <h1>{p.name}</h1>
-          {(p.location || dates) && <p className="page-sub">{[p.location, dates].filter(Boolean).join(' · ')}</p>}
+          <h2 style={{ margin: 0 }}>Overview</h2>
         </div>
         <span className="spacer" />
         <div className="page-actions no-print" role="group" aria-label="Download the report">

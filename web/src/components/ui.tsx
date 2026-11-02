@@ -2,6 +2,7 @@ import { useMutation } from '@tanstack/react-query';
 import { InputHTMLAttributes, KeyboardEvent as ReactKeyboardEvent, ReactNode, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api, ApiError } from '../api/client';
+import { Pagination, useLocalPage, usePaged } from './Pagination';
 
 export function Modal({ title, onClose, children, wide, small }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; small?: boolean }) {
   useEffect(() => {
@@ -386,8 +387,9 @@ export function SortTh({ label, column, sort, order, onSort, className, initial 
 }
 
 /** A plain table for chart data and small summaries. */
-export function SimpleTable({ head, rows, numeric = [] }: { head: string[]; rows: ReactNode[][]; numeric?: number[] }) {
-  if (rows.length === 0) return <div className="empty">No data for these filters.</div>;
+export function SimpleTable({ head, rows: all, numeric = [] }: { head: string[]; rows: ReactNode[][]; numeric?: number[] }) {
+  const { rows, page, total } = usePaged(all, useLocalPage(25));
+  if (all.length === 0) return <div className="empty">No data for these filters.</div>;
   const isNum = (i: number) => numeric.includes(i) || (i > 0 && numeric.length === 0);
   return (
     <div className="table-wrap">
@@ -409,6 +411,7 @@ export function SimpleTable({ head, rows, numeric = [] }: { head: string[]; rows
           ))}
         </tbody>
       </table>
+      <Pagination page={page} total={total} />
     </div>
   );
 }
@@ -444,3 +447,31 @@ export const todayStamp = () => {
   const d = new Date();
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 };
+
+/** One active filter as a removable chip: "Planting year: 2024 ×". */
+export interface ActiveFilter {
+  key: string;
+  label: string;
+  value: ReactNode;
+  onClear: () => void;
+}
+
+/** The active filters as chips, each with its own clear button, plus "Clear all" when there are several. */
+export function FilterChips({ filters, onClearAll }: { filters: ActiveFilter[]; onClearAll?: () => void }) {
+  if (filters.length === 0) return null;
+  return (
+    <div className="filter-chips no-print" role="group" aria-label="Active filters">
+      {filters.map((x) => (
+        <span key={x.key} className="filter-chip">
+          <span><span className="muted">{x.label}:</span> {x.value}</span>
+          <button type="button" className="icon-btn" aria-label={`Clear the ${x.label.toLowerCase()} filter`} title="Clear" onClick={x.onClear}>
+            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden>
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+            </svg>
+          </button>
+        </span>
+      ))}
+      {onClearAll && filters.length > 1 && <button type="button" className="link" onClick={onClearAll}>Clear all</button>}
+    </div>
+  );
+}

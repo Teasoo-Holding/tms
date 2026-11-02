@@ -27,7 +27,7 @@ export async function resetDatabase() {
 export async function bootApp(): Promise<INestApplication> {
   const { createApp } = await import('../../src/app.factory');
   const app = await createApp();
-  app.useLogger(false);
+  if (!process.env.TEST_LOG) app.useLogger(false);
   await app.init();
   return app;
 }

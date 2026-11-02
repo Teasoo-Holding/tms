@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useIsAdmin } from '../auth';
+import { Pagination, usePage, usePaged } from '../components/Pagination';
 import { clean, EditButton, EmptyState, ErrorNotice, Field, fmtNum, Modal, PageHeader, RowMenu, useDelete, useForm } from '../components/ui';
 
 export function ProjectsPage() {
@@ -12,6 +13,7 @@ export function ProjectsPage() {
   const [editing, setEditing] = useState<any | null>(null);
   const del = useDelete();
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
+  const paged = usePaged(projects.data ?? [], usePage('', 25));
   return (
     <div>
       <PageHeader title="Projects" actions={isAdmin && <button className="primary" onClick={() => setCreating(true)}>+ New project</button>} />
@@ -28,7 +30,7 @@ export function ProjectsPage() {
               </tr>
             </thead>
             <tbody>
-              {projects.data.map((p) => (
+              {paged.rows.map((p) => (
                 <tr key={p.id} className="clickable" onClick={() => navigate(`/projects/${p.id}`)}>
                   <td>
                     <Link to={`/projects/${p.id}`} onClick={(e) => e.stopPropagation()}>{p.name}</Link>
@@ -66,6 +68,7 @@ export function ProjectsPage() {
         )}
         {projects.isLoading && <div className="empty">Loading…</div>}
       </div>
+      <Pagination page={paged.page} total={paged.total} label="projects" />
       {del.dialog}
       {editing && <ProjectForm project={editing} onClose={() => setEditing(null)} />}
       {creating && <ProjectForm onClose={() => setCreating(false)} onSaved={(p) => navigate(`/projects/${p.id}`, { state: { created: true } })} />}

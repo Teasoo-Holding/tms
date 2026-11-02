@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '../api/client';
+import { Pagination, usePage, usePaged } from '../components/Pagination';
 import { copyText, EXPIRY, linkState, ShareLink, shareUrl } from '../components/ShareLinks';
 import { EmptyState, ErrorNotice, Field, fmtDate, Modal, PageHeader, relativeTime, RowMenu } from '../components/ui';
 
@@ -20,6 +21,7 @@ export function ClientLinksPage() {
   const all = links.data ?? [];
   const active = all.filter((l) => l.status === 'ACTIVE');
   const shown = showOld ? all : active;
+  const paged = usePaged(shown, usePage('', 25));
 
   return (
     <div className="stack">
@@ -45,7 +47,7 @@ export function ClientLinksPage() {
               </tr>
             </thead>
             <tbody>
-              {shown.map((l) => {
+              {paged.rows.map((l) => {
                 const [tone, state] = linkState(l);
                 const usable = state === 'Active';
                 return (
@@ -83,6 +85,7 @@ export function ClientLinksPage() {
         )}
         {links.isLoading && <div className="empty">Loading…</div>}
       </div>
+      <Pagination page={paged.page} total={paged.total} label="client links" />
       {creating && <NewLinkForm onClose={() => setCreating(false)} />}
     </div>
   );

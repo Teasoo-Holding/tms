@@ -60,13 +60,13 @@ function presetRange(preset: string): { from: string; to: string } {
 const PRESETS: [string, string][] = [['7', 'Last 7 days'], ['30', '30 days'], ['90', '90 days'], ['year', 'This year'], ['all', 'All time']];
 
 /** The single "Filters" button that opens the filter panel; shows how many filters are active. */
-export function FiltersButton({ count, open, onToggle }: { count: number; open: boolean; onToggle: () => void }) {
+export function FiltersButton({ count, open, onToggle, label = 'Filters' }: { count: number; open: boolean; onToggle: () => void; label?: string }) {
   return (
     <button type="button" className={`no-print${count ? ' has-count' : ''}`} aria-expanded={open} onClick={onToggle}>
       <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
         <path d="M4 5h16l-6 8v5l-4 2v-7z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
       </svg>
-      Filters
+      {label}
       {count > 0 && <span className="count">{count}</span>}
     </button>
   );

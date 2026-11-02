@@ -358,7 +358,8 @@ export class ReportsService {
   private async visitScope(user: AuthUser, f: VisitQuery, tz?: string) {
     const { baseWhere, inRange, params } = await this.scope(user, tz ? { ...f, from: undefined, to: undefined } : f);
     const p = [...params];
-    const extra: string[] = [];
+    // With a time zone the scope's own (UTC) range is empty, but its parameters still need a typed reference.
+    const extra: string[] = [inRange('o.observed_at')];
     let tzParam = '';
     if (tz) {
       p.push(tz, f.from ?? null, f.to ?? null);
@@ -367,8 +368,6 @@ export class ReportsService {
       const to = `$${p.length}::date`;
       extra.push(`(${from} IS NULL OR o.observed_at >= ${from}::timestamp AT TIME ZONE ${tzParam})`);
       extra.push(`(${to} IS NULL OR o.observed_at < (${to} + 1)::timestamp AT TIME ZONE ${tzParam})`);
-    } else {
-      extra.push(inRange('o.observed_at'));
     }
     const eq = (sql: string, v?: string | null) => {
       if (v == null) return;

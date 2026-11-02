@@ -194,7 +194,9 @@ export class ShareController {
       this.reports.summary(SHARE_READER, f),
     ]);
     // Clients see results, not staff: field officers' names are left out.
-    const { officer_activity: _officers, ...shared } = summary as any;
+    // Nor anything about staff devices.
+    const { officer_activity: _officers, data_completeness: { devices_not_synced_7_days: _devices, ...completeness }, ...rest } = summary as any;
+    const shared = { ...rest, data_completeness: completeness };
     return { project, planting_years: years.rows, vendors: vendors.rows, areas: areas.rows, statuses: statuses.rows, species: species.rows, summary: shared };
   }
 

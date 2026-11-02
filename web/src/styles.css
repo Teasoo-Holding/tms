@@ -360,6 +360,26 @@ tr.details-row:hover td { background: var(--surface-2); }
 .filters label.field { flex: 1 1 180px; min-width: 0; max-width: 260px; }
 @media (max-width: 600px) { .filters label.field { max-width: none; flex-basis: 140px; } }
 .pager { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
+.pager .page-size { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; margin-left: 8px; }
+.pager .page-size select { min-height: 34px; padding: 4px 8px; }
+.card > .pager { margin: 0; padding: 10px 12px; border-top: 1px solid var(--border); }
+/* Search with the main filters beside it on wide screens; the filters wrap below the search on narrow ones. */
+.filter-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.stack > .filter-bar { margin-bottom: 0; }
+.filter-bar .search { flex: 1 1 220px; max-width: 320px; display: flex; }
+.filter-bar .search input { width: 100%; }
+.filter-bar .inline-filters { display: contents; }
+.filter-bar .inline-filters select { flex: 0 1 170px; min-width: 0; max-width: 220px; }
+@media (max-width: 860px) {
+  .filter-bar .search { flex-basis: 100%; max-width: none; }
+  .filter-bar .inline-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; flex: 1 1 100%; order: 2; }
+  .filter-bar .inline-filters select { max-width: none; width: 100%; }
+}
+.filter-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+.stack > .filter-chips { margin-bottom: 0; }
+.filter-chip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border-strong); border-radius: 999px; padding: 0 2px 0 12px; font-size: 13px; background: var(--surface-1); max-width: 100%; }
+.filter-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-chip .icon-btn { width: 30px; min-width: 30px; min-height: 30px; border-radius: 999px; }
 .more-toggle { display: flex; justify-content: center; }
 .more-toggle button { min-width: 180px; }
 details.more > summary { cursor: pointer; color: var(--focus); font-weight: 500; min-height: 32px; display: flex; align-items: center; list-style: none; gap: 6px; }
@@ -367,6 +387,16 @@ details.more > summary::-webkit-details-marker { display: none; }
 details.more > summary::before { content: '›'; display: inline-block; transition: transform 0.12s; font-size: 16px; line-height: 1; }
 details.more[open] > summary::before { transform: rotate(90deg); }
 details.card > summary { cursor: pointer; min-height: 28px; }
+
+/* visits: a day's field sessions and their records */
+.visit-day { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+.visit-session { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.visit-session > header { padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; border-bottom: 1px solid var(--border); }
+tr.details-row .visit-session td, tr.details-row .visit-session th { background: var(--surface-1); }
+.thumb-cell { display: flex; align-items: center; gap: 6px; }
+.thumb-cell .thumbs { margin-top: 0; }
+.thumb-cell .thumb { width: 56px; height: 42px; }
+.thumb-cell .thumb.placeholder { font-size: 9px; padding: 2px; }
 
 /* simple list (share links) */
 .item-list { list-style: none; margin: 0; padding: 0; }
