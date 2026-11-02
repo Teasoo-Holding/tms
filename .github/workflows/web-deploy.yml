@@ -63,6 +63,11 @@ jobs:
           case "$VERCEL_ORG_ID" in team_*) scope="?teamId=$VERCEL_ORG_ID" ;; *) scope="" ;; esac
           if [ "$(api "/v9/projects/$VERCEL_PROJECT_ID$scope")" = 200 ]; then
             echo "Project found: $(jq -r '.name' /tmp/body) (root directory: $(jq -r '.rootDirectory // "repository root"' /tmp/body))"
+            # The CLI needs the project's owner id exactly; take it from Vercel rather than trusting the secret's format.
+            owner=$(jq -r '.accountId' /tmp/body)
+            echo "::add-mask::$owner"
+            [ "$owner" = "$VERCEL_ORG_ID" ] || echo "::warning::VERCEL_ORG_ID doesn't match the project's owner; using the owner from Vercel. Update the secret to the Team ID (team_…) to remove this warning."
+            echo "VERCEL_OWNER_ID=$owner" >> "$GITHUB_ENV"
             exit 0
           fi
           if [ -n "$scope" ] && [ "$(api "/v9/projects/$VERCEL_PROJECT_ID")" = 200 ]; then
@@ -75,6 +80,7 @@ jobs:
       - name: Build and deploy to production
         if: steps.config.outputs.ready == 'true'
         run: |
+          export VERCEL_ORG_ID="${VERCEL_OWNER_ID:-$VERCEL_ORG_ID}"
           npm install --global vercel@39.3.0
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           vercel build --prod --token="$VERCEL_TOKEN"
