@@ -21,6 +21,13 @@ const ResolveBody = z.object({
   notes: z.string().trim().min(3).max(2000),
 });
 
+const ConflictQuery = z.object({
+  status: z.enum(['OPEN', 'RESOLVED']).default('OPEN'),
+  project_id: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 const ALLOWED: Record<string, string[]> = {
   DUPLICATE_PHYSICAL_ID: ['REJECT_INCOMING', 'CORRECT_INCOMING_SERIAL', 'CORRECT_EXISTING_SERIAL'],
   DUPLICATE_SERIAL: ['REJECT_INCOMING', 'CORRECT_INCOMING_SERIAL', 'CORRECT_EXISTING_SERIAL'],
@@ -33,8 +40,15 @@ const ALLOWED: Record<string, string[]> = {
 export class ConflictsController {
   constructor(private readonly db: Db, private readonly trees: TreesService, private readonly audit: AuditService) {}
 
+  /**
+   * Conflicts with one status, oldest first. Without limit, the whole list (the Android app); with limit (and offset),
+   * one page as { items, total, limit, offset } for the portal.
+   */
   @Get()
-  async list(@Query('status') status = 'OPEN', @Query('project_id') projectId?: string) {
+  async list(@Query() query: unknown) {
+    const q = parse(ConflictQuery, query);
+    const where = `c.status = $1 AND ($2::uuid IS NULL OR c.project_id = $2)`;
+    const params = [q.status, q.project_id ?? null];
     const { rows } = await this.db.query(
       `SELECT c.*, p.name AS project_name, u.full_name AS submitted_by_name, r.full_name AS resolved_by_name,
               it.physical_tree_id AS incoming_physical_id, it.record_state AS incoming_state,
@@ -42,11 +56,14 @@ export class ConflictsController {
          FROM conflict_records c JOIN projects p ON p.id = c.project_id
          LEFT JOIN users u ON u.id = c.submitted_by LEFT JOIN users r ON r.id = c.resolved_by
          LEFT JOIN trees it ON it.id = c.entity_id LEFT JOIN trees et ON et.id = c.existing_entity_id
-        WHERE c.status = $1 AND ($2::uuid IS NULL OR c.project_id = $2)
-        ORDER BY c.created_at`,
-      [status, projectId ?? null],
+        WHERE ${where}
+        ORDER BY ${q.status === 'RESOLVED' ? 'c.resolved_at DESC NULLS LAST, ' : ''}c.created_at, c.id
+        ${q.limit ? `LIMIT ${q.limit} OFFSET ${q.offset}` : ''}`,
+      params,
     );
-    return rows;
+    if (!q.limit) return rows;
+    const [{ total }] = (await this.db.query(`SELECT count(*)::int AS total FROM conflict_records c WHERE ${where}`, params)).rows;
+    return { items: rows, total, limit: q.limit, offset: q.offset };
   }
 
   @Get(':id')

@@ -34,6 +34,20 @@ function fillWeeks(rows: { week: string; trees: number }[]) {
   return out;
 }
 
+export interface VisitQuery extends ReportFilter {
+  recorded_by?: string;
+  /** Tree ID search (part of the ID; spaces ignored). */
+  q?: string;
+  visit_type?: string;
+}
+
+/** One visit day: the project, the day (YYYY-MM-DD in the request's time zone) and optionally one field session ('none': without one). */
+export interface VisitDayQuery extends VisitQuery {
+  project_id: string;
+  date: string;
+  field_session_id?: string;
+}
+
 export interface ReportFilter {
   project_id?: string;
   planting_year_id?: string;
@@ -338,26 +352,40 @@ export class ReportsService {
   }
 
   /**
+   * WHERE clause and parameters for visits (observations) in scope: tree filters apply to the tree, the date range to
+   * the visit date. With [tz] the dates are days in that time zone (and $tz is the zone's parameter), else UTC days.
+   */
+  private async visitScope(user: AuthUser, f: VisitQuery, tz?: string) {
+    const { baseWhere, inRange, params } = await this.scope(user, tz ? { ...f, from: undefined, to: undefined } : f);
+    const p = [...params];
+    // With a time zone the scope's own (UTC) range is empty, but its parameters still need a typed reference.
+    const extra: string[] = [inRange('o.observed_at')];
+    let tzParam = '';
+    if (tz) {
+      p.push(tz, f.from ?? null, f.to ?? null);
+      tzParam = `$${p.length - 2}`;
+      const from = `$${p.length - 1}::date`;
+      const to = `$${p.length}::date`;
+      extra.push(`(${from} IS NULL OR o.observed_at >= ${from}::timestamp AT TIME ZONE ${tzParam})`);
+      extra.push(`(${to} IS NULL OR o.observed_at < (${to} + 1)::timestamp AT TIME ZONE ${tzParam})`);
+    }
+    const eq = (sql: string, v?: string | null) => {
+      if (v == null) return;
+      p.push(v);
+      extra.push(sql.replace('?', `$${p.length}`));
+    };
+    eq('o.visit_type = ?', f.visit_type);
+    eq('o.recorded_by = ?', f.recorded_by);
+    if (f.q) eq(`t.physical_tree_id_normalized LIKE '%' || ? || '%'`, f.q.replace(/\s+/g, '').toUpperCase());
+    return { whereSql: `${baseWhere} AND ${extra.join(' AND ')}`, p, tzParam };
+  }
+
+  /**
    * Every visit (observation) in scope, newest first, for the visits table and its CSV export.
    * Tree filters apply to the tree; the date range applies to the visit date.
    */
-  async visitRows(user: AuthUser, f: ReportFilter & { recorded_by?: string; q?: string; visit_type?: string }, limit: number, offset: number) {
-    const { baseWhere, inRange, params } = await this.scope(user, f);
-    const p = [...params];
-    const extra: string[] = [inRange('o.observed_at')];
-    if (f.visit_type) {
-      p.push(f.visit_type);
-      extra.push(`o.visit_type = $${p.length}`);
-    }
-    if (f.recorded_by) {
-      p.push(f.recorded_by);
-      extra.push(`o.recorded_by = $${p.length}`);
-    }
-    if (f.q) {
-      p.push(f.q.replace(/\s+/g, '').toUpperCase());
-      extra.push(`t.physical_tree_id_normalized LIKE '%' || $${p.length} || '%'`);
-    }
-    const whereSql = `${baseWhere} AND ${extra.join(' AND ')}`;
+  async visitRows(user: AuthUser, f: VisitQuery, limit: number, offset: number) {
+    const { whereSql, p } = await this.visitScope(user, f);
     const [rows, count] = await Promise.all([
       this.db.query(
         `SELECT o.id, o.observed_at, o.recorded_at, o.synced_at, o.tree_id, t.physical_tree_id, p.short_code AS project,
@@ -372,6 +400,117 @@ export class ReportsService {
            JOIN sub_sectors ss ON ss.id = t.sub_sector_id JOIN tree_species sp ON sp.id = t.species_id
            JOIN tree_statuses st ON st.id = o.observed_status_id JOIN users u ON u.id = o.recorded_by
           WHERE ${whereSql} ORDER BY o.observed_at DESC, o.recorded_at DESC LIMIT ${limit} OFFSET ${offset}`,
+        p,
+      ),
+      this.db.query(`SELECT count(*)::int AS total FROM tree_observations o JOIN trees t ON t.id = o.tree_id WHERE ${whereSql}`, p),
+    ]);
+    return { items: rows.rows, total: count.rows[0].total, limit, offset };
+  }
+
+  /**
+   * Visit days: one row per project and day (in [tz]) with field work matching the filters, newest first. Counts are
+   * of the matching records: trees registered (first visits), follow-up visits, corrections and photos, with the data
+   * collectors and their field sessions (records without a session count as one session per collector and day).
+   */
+  async visitDays(user: AuthUser, f: VisitQuery, tz: string, limit: number, offset: number) {
+    const { whereSql, p, tzParam } = await this.visitScope(user, f, tz);
+    const days = `
+      SELECT o.recorded_by, o.observed_at, o.is_initial, o.is_amendment, t.project_id,
+             COALESCE(o.field_session_id::text, 'user:' || o.recorded_by::text) AS session_key,
+             (o.observed_at AT TIME ZONE ${tzParam})::date AS day,
+             (SELECT count(*) FROM tree_media m WHERE m.observation_id = o.id)::int AS photos
+        FROM tree_observations o JOIN trees t ON t.id = o.tree_id WHERE ${whereSql}`;
+    const [rows, count] = await Promise.all([
+      this.db.query(
+        `WITH o AS (${days})
+         SELECT to_char(o.day, 'YYYY-MM-DD') AS date, o.project_id, p.name AS project_name, p.short_code AS project_code,
+                count(*)::int AS records,
+                count(*) FILTER (WHERE o.is_initial)::int AS trees_registered,
+                count(*) FILTER (WHERE NOT o.is_initial AND NOT o.is_amendment)::int AS visits,
+                count(*) FILTER (WHERE o.is_amendment)::int AS corrections,
+                sum(o.photos)::int AS photos, min(o.observed_at) AS first_at, max(o.observed_at) AS last_at,
+                count(DISTINCT (o.session_key, o.recorded_by))::int AS sessions,
+                json_agg(DISTINCT jsonb_build_object('user_id', u.id, 'user_name', u.full_name)) AS collectors
+           FROM o JOIN projects p ON p.id = o.project_id JOIN users u ON u.id = o.recorded_by
+          GROUP BY o.day, o.project_id, p.name, p.short_code
+          ORDER BY o.day DESC, p.name, o.project_id LIMIT ${limit} OFFSET ${offset}`,
+        p,
+      ),
+      this.db.query(`WITH o AS (${days}) SELECT count(*)::int AS total FROM (SELECT DISTINCT o.day, o.project_id FROM o) d`, p),
+    ]);
+    const items = rows.rows.map((r) => {
+      const collectors = [...r.collectors].sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
+      return { ...r, first_at: new Date(r.first_at).toISOString(), last_at: new Date(r.last_at).toISOString(), collectors, collector_count: collectors.length };
+    });
+    return { items, total: count.rows[0].total, limit, offset, tz };
+  }
+
+  /** WHERE for one visit day of one project (the day in [tz]), optionally one field session of one collector. */
+  private async visitDayScope(user: AuthUser, f: VisitDayQuery, tz: string) {
+    await this.access.assertProject(user, f.project_id);
+    const s = await this.visitScope(user, f, tz);
+    const p = [...s.p, f.project_id, f.date];
+    const extra = [`t.project_id = $${p.length - 1}`, `(o.observed_at AT TIME ZONE ${s.tzParam})::date = $${p.length}::date`];
+    if (f.field_session_id === 'none') extra.push('o.field_session_id IS NULL');
+    else if (f.field_session_id) {
+      p.push(f.field_session_id);
+      extra.push(`o.field_session_id = $${p.length}`);
+    }
+    return { whereSql: `${s.whereSql} AND ${extra.join(' AND ')}`, p };
+  }
+
+  /**
+   * One visit day of one project, grouped by field session and data collector (records without a field session form
+   * one group per collector), in the order the work started.
+   */
+  async visitDay(user: AuthUser, f: VisitDayQuery, tz: string) {
+    const { whereSql, p } = await this.visitDayScope(user, f, tz);
+    const project = await this.db.one(this.db, 'SELECT id, name, short_code FROM projects WHERE id = $1', [f.project_id]);
+    if (!project) throw notFound('Project');
+    const { rows } = await this.db.query(
+      `SELECT o.field_session_id, o.recorded_by AS user_id, u.full_name AS user_name,
+              min(o.observed_at) AS first_at, max(o.observed_at) AS last_at, count(*)::int AS records,
+              array_agg(DISTINCT py.year_label ORDER BY py.year_label) AS planting_years,
+              array_agg(DISTINCT s.short_code ORDER BY s.short_code) AS sectors,
+              array_agg(DISTINCT s.short_code || '/' || ss.short_code ORDER BY s.short_code || '/' || ss.short_code) AS sub_sectors,
+              array_remove(array_agg(DISTINCT COALESCE(v.short_code, v.name) ORDER BY COALESCE(v.short_code, v.name)), NULL) AS vendors,
+              count(*) FILTER (WHERE o.is_initial)::int AS trees_registered,
+              count(*) FILTER (WHERE NOT o.is_initial AND NOT o.is_amendment)::int AS visits,
+              count(*) FILTER (WHERE o.is_amendment)::int AS corrections,
+              COALESCE(sum((SELECT count(*) FROM tree_media m WHERE m.observation_id = o.id)), 0)::int AS photos
+         FROM tree_observations o JOIN trees t ON t.id = o.tree_id JOIN users u ON u.id = o.recorded_by
+         JOIN planting_years py ON py.id = t.planting_year_id JOIN sectors s ON s.id = t.sector_id
+         JOIN sub_sectors ss ON ss.id = t.sub_sector_id LEFT JOIN vendors v ON v.id = t.vendor_id
+        WHERE ${whereSql}
+        GROUP BY o.field_session_id, o.recorded_by, u.full_name ORDER BY min(o.observed_at), u.full_name`,
+      p,
+    );
+    const iso = (d: Date | string) => new Date(d).toISOString();
+    return {
+      date: f.date, tz, project,
+      sessions: rows.map((r) => ({ ...r, first_at: iso(r.first_at), last_at: iso(r.last_at) })),
+    };
+  }
+
+  /** The tree records of one visit day (optionally one session of one collector), in time order, with each record's photos. */
+  async visitDayRecords(user: AuthUser, f: VisitDayQuery, tz: string, limit: number, offset: number) {
+    const { whereSql, p } = await this.visitDayScope(user, f, tz);
+    const [rows, count] = await Promise.all([
+      this.db.query(
+        `SELECT o.id, o.observed_at, o.tree_id, t.physical_tree_id, o.field_session_id, o.recorded_by AS user_id, u.full_name AS recorded_by,
+                py.year_label AS planting_year, s.short_code AS sector, s.name AS sector_name, ss.short_code AS sub_sector, ss.name AS sub_sector_name,
+                COALESCE(sp.common_name, sp.scientific_name) AS species, st.code AS status_code, st.name AS status, st.is_terminal AS status_terminal,
+                COALESCE(v.short_code, v.name) AS vendor, o.visit_type, o.is_initial, o.is_amendment, o.amendment_reason,
+                o.height_cm::float8 AS height_cm, o.remarks,
+                EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id) AS superseded,
+                COALESCE((SELECT json_agg(json_build_object('id', m.id, 'observation_id', m.observation_id, 'upload_state', m.upload_state,
+                                                            'captured_at', m.captured_at) ORDER BY m.captured_at)
+                            FROM tree_media m WHERE m.observation_id = o.id), '[]') AS media
+           FROM tree_observations o JOIN trees t ON t.id = o.tree_id JOIN users u ON u.id = o.recorded_by
+           JOIN planting_years py ON py.id = t.planting_year_id JOIN sectors s ON s.id = t.sector_id
+           JOIN sub_sectors ss ON ss.id = t.sub_sector_id JOIN tree_species sp ON sp.id = t.species_id
+           JOIN tree_statuses st ON st.id = o.observed_status_id LEFT JOIN vendors v ON v.id = t.vendor_id
+          WHERE ${whereSql} ORDER BY o.observed_at, o.recorded_at, o.id LIMIT ${limit} OFFSET ${offset}`,
         p,
       ),
       this.db.query(`SELECT count(*)::int AS total FROM tree_observations o JOIN trees t ON t.id = o.tree_id WHERE ${whereSql}`, p),

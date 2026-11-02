@@ -5,6 +5,7 @@ import { sectorLabel, subSectorLabel } from '../areaLabels';
 import { StatTile } from '../charts/charts';
 import { BLANK_STYLE, STYLE_URL } from './AreaMap';
 import { DotArea, DotCounts, dotFeatures, DotState, treesPerDot } from './densityDots';
+import { Pagination, useLocalPage, usePaged } from './Pagination';
 import { fmtNum } from './ui';
 
 /** Counts and rates of one area, as returned by GET /reports/density (and /share/:token/density). */
@@ -165,7 +166,9 @@ export function DensityLegend({ perDot }: { perDot: number }) {
   );
 }
 
-function DensityTable({ sectors }: { sectors: DensityArea[] }) {
+/** Paged by sector, each with its sub-sectors. */
+function DensityTable({ sectors: all }: { sectors: DensityArea[] }) {
+  const { rows: sectors, page, total } = usePaged(all, useLocalPage(25));
   const row = (a: DensityArea, parent?: DensityArea) => (
     <tr key={a.id} style={a.active ? undefined : { opacity: 0.65 }}>
       <td style={parent ? { paddingLeft: 28 } : { fontWeight: 600 }}>
@@ -182,8 +185,9 @@ function DensityTable({ sectors }: { sectors: DensityArea[] }) {
       <td className="num">{fmtShare(a.alive_share)}</td>
     </tr>
   );
-  if (sectors.length === 0) return <div className="empty">No areas for this selection.</div>;
+  if (all.length === 0) return <div className="empty">No areas for this selection.</div>;
   return (
+    <>
     <table>
       <thead>
         <tr>
@@ -200,6 +204,8 @@ function DensityTable({ sectors }: { sectors: DensityArea[] }) {
         ))}
       </tbody>
     </table>
+    <Pagination page={page} total={total} label="sectors" />
+    </>
   );
 }
 

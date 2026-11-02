@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { SHOW_HEIGHT } from '../features';
 import { fmtDateTime } from './ui';
@@ -25,14 +25,30 @@ function useInView<T extends Element>() {
   return { ref, inView };
 }
 
+/** Where signed photo URLs come from: the signed-in API, or a client share link's own photo endpoint. */
+export interface PhotoSource {
+  /** Part of the cache key, so URLs from different sources never mix. */
+  key: string;
+  viewUrl: (mediaId: string, size: 'thumb' | 'full') => Promise<{ url: string; size?: 'thumb' | 'full' }>;
+}
+const portalPhotos: PhotoSource = {
+  key: 'portal',
+  viewUrl: (id, size) => api.get(`/media/${id}/view-url${size === 'thumb' ? '?size=thumb' : ''}`),
+};
+const PhotoSourceContext = createContext<PhotoSource>(portalPhotos);
+/** Wrap a public page (e.g. a client link) so its photos load through that page's own endpoint. */
+export const PhotoSourceProvider = PhotoSourceContext.Provider;
+const urlKey = (source: PhotoSource, id: string, size: 'thumb' | 'full') => ['media-url', source.key, id, size];
+
 /**
  * Signed photo URL: `thumb` (~320 px) for galleries, `full` only in the lightbox. Signed URLs live a few
  * minutes, so results are cached for 4 minutes and then fetched again.
  */
 export function useViewUrl(media: any, size: 'thumb' | 'full', enabled = true) {
+  const source = useContext(PhotoSourceContext);
   return useQuery({
-    queryKey: ['media-url', media.id, size],
-    queryFn: () => api.get<{ url: string; size?: 'thumb' | 'full' }>(`/media/${media.id}/view-url${size === 'thumb' ? '?size=thumb' : ''}`),
+    queryKey: urlKey(source, media.id, size),
+    queryFn: () => source.viewUrl(media.id, size),
     enabled: enabled && media.upload_state === 'VERIFIED',
     staleTime: 240_000,
     gcTime: 240_000,
@@ -78,7 +94,8 @@ export function Lightbox({ media, index: initial, observation, onClose }: { medi
   const m = media[index];
   const url = useViewUrl(m, 'full');
   // The thumbnail is usually cached already: show it while the full-size photo loads.
-  const thumb = useQueryClient().getQueryData<{ url: string }>(['media-url', m.id, 'thumb']);
+  const source = useContext(PhotoSourceContext);
+  const thumb = useQueryClient().getQueryData<{ url: string }>(urlKey(source, m.id, 'thumb'));
   const go = useCallback((d: number) => (setSize(null), setIndex((i) => (i + d + media.length) % media.length)), [media.length]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

@@ -2,10 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import { Fragment, ReactNode, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, qs } from '../api/client';
+import { Pagination, usePage } from '../components/Pagination';
 import { FiltersButton } from '../components/ReportFilters';
 import { Chevron, EmptyState, ErrorNotice, fmtDateTime, fmtNum, PageHeader, SortOrder, SortTh, todayStamp } from '../components/ui';
 
-const PAGE = 50;
 
 /** Activity filter options: [action prefix, friendly name]. The API matches actions by prefix. */
 const ACTIVITY_GROUPS: [string, [string, string][]][] = [
@@ -268,7 +268,7 @@ export function AuditPage() {
   const toggle = (key: string) => setOpen((o) => (o === key ? null : key));
   const sort = SORTS.includes(get('sort')) ? get('sort') : 'time';
   const order: SortOrder = get('order') === 'asc' || get('order') === 'desc' ? (get('order') as SortOrder) : sort === 'time' ? 'desc' : 'asc';
-  const offset = Number(get('offset') || 0);
+  const page = usePage('', 50);
   const filter = {
     q: get('q'), actor_id: get('actor'), action: get('action'), entity_type: get('entity'), project_id: get('project'), from: get('from'), to: get('to'),
     sort, order,
@@ -276,7 +276,7 @@ export function AuditPage() {
   const users = useQuery({ queryKey: ['users'], queryFn: () => api.get<any[]>('/users') });
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
   const facets = useQuery({ queryKey: ['audit-facets'], queryFn: () => api.get<{ entity_types: string[]; actions: string[] }>('/audit-logs/facets') });
-  const logs = useQuery({ queryKey: ['audit', filter, offset], queryFn: () => api.get(`/audit-logs/search${qs({ ...filter, limit: PAGE, offset })}`) });
+  const logs = useQuery({ queryKey: ['audit', filter, page.offset, page.limit], queryFn: () => api.get(`/audit-logs/search${qs({ ...filter, limit: page.limit, offset: page.offset })}`) });
   const rows: any[] = logs.data?.items ?? [];
   const total: number = logs.data?.total ?? 0;
   const actor = users.data?.find((u) => u.id === get('actor'));
@@ -394,13 +394,7 @@ export function AuditPage() {
         )}
         {logs.isLoading && <div className="empty">Loading…</div>}
       </div>
-      {total > PAGE && (
-        <div className="pager">
-          <button disabled={offset === 0} onClick={() => update({ offset: offset - PAGE > 0 ? String(offset - PAGE) : '' })}>Previous</button>
-          <span className="muted">{fmtNum(offset + 1)}–{fmtNum(Math.min(offset + PAGE, total))} of {fmtNum(total)}</span>
-          <button disabled={offset + PAGE >= total} onClick={() => update({ offset: String(offset + PAGE) })}>Next</button>
-        </div>
-      )}
+      <Pagination page={page} total={total} label="audit entries" />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api, qs } from '../api/client';
 import { ChartCard, Legend, SERIES, StackedColumns, StatTile } from '../charts/charts';
 import { CardHeader, Chevron, EmptyState, ErrorNotice, fmtNum, PageHeader, SimpleTable } from '../components/ui';
+import { Pagination, usePage, usePaged } from '../components/Pagination';
 
 interface Counts {
   trees_registered: number;
@@ -108,6 +109,7 @@ export function FieldActivityPage() {
   const allOfficers = r?.officers ?? [];
   const officers = allOfficers.filter((o) => !userId || o.user_id === userId);
   const days = (r?.days ?? []).filter((d) => !userId || d.user_id === userId);
+  const dayPage = usePaged(days, usePage('days', 25));
   const quick = QUICK.find(([, n]) => from === daysAgo(n) && to === ymd(new Date()))?.[0];
 
   // Trees registered per day, stacked by officer (the eight most active get their own colour).
@@ -216,7 +218,7 @@ export function FieldActivityPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {days.map((d) => {
+                    {dayPage.rows.map((d) => {
                       const key = `${d.date}|${d.user_id}`;
                       return (
                         <Fragment key={key}>
@@ -243,6 +245,7 @@ export function FieldActivityPage() {
                   </tbody>
                 </table>
               </div>
+              <Pagination page={dayPage.page} total={dayPage.total} label="days" />
             </section>
           )}
           <p className="muted" style={{ margin: 0 }}>

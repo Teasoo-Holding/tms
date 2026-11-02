@@ -4,9 +4,9 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { FiltersButton } from '../components/ReportFilters';
 import { api, qs } from '../api/client';
 import { sectorLabel, subSectorLabel } from '../areaLabels';
-import { EmptyState, ErrorNotice, fmtDate, fmtNum, PageHeader, RecordStatePill, SortOrder, SortTh, StatusBadge } from '../components/ui';
+import { Pagination, usePage } from '../components/Pagination';
+import { ActiveFilter, EmptyState, ErrorNotice, FilterChips, fmtDate, fmtNum, PageHeader, RecordStatePill, SortOrder, SortTh, StatusBadge } from '../components/ui';
 
-const PAGE = 50;
 const FILTER_KEYS = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'record_state'];
 /** Keys cleared when a parent filter changes: each planting year has its own survey, so its sectors differ. */
 const DEPENDENTS: Record<string, string[]> = {
@@ -44,14 +44,14 @@ export function TreesPage() {
   const areas = useQuery({ queryKey: ['areas', areaProject], queryFn: () => api.get<any[]>(`/projects/${areaProject}/areas`), enabled: !!areaProject });
   const species = useQuery({ queryKey: ['tree-species'], queryFn: () => api.get<any[]>('/tree-species') });
   const statuses = useQuery({ queryKey: ['tree-statuses'], queryFn: () => api.get<any[]>('/tree-statuses') });
+  const page = usePage('', 50);
   const sort = SORTS.includes(get('sort')) ? get('sort') : 'tree_id';
   const order: SortOrder = get('order') === 'desc' ? 'desc' : 'asc';
   const filter = qs({
     ...Object.fromEntries(FILTER_KEYS.map((k) => [k, get(k)])),
-    q: get('q'), sort: sort === 'tree_id' ? '' : sort, order: order === 'asc' ? '' : order, limit: PAGE, offset: get('offset') || 0,
+    q: get('q'), sort: sort === 'tree_id' ? '' : sort, order: order === 'asc' ? '' : order, limit: page.limit, offset: page.offset,
   });
   const trees = useQuery({ queryKey: ['trees', filter], queryFn: () => api.get(`/trees${filter}`) });
-  const offset = Number(get('offset') || 0);
 
   const yearId = get('planting_year_id');
   const sectorId = get('sector_id');
@@ -65,20 +65,30 @@ export function TreesPage() {
   const subSectors: any[] = sector?.sub_sectors ?? [];
   const needsProject = !areaProject;
 
-  const select = (k: string, label: string, options: [string, string][], all: string, disabled = false) => (
+  /** A compact select for the filter bar: the "All …" option names the filter, the aria-label says it in full. */
+  const inline = (k: string, label: string, options: [string, string][], all: string, disabled = false, hint?: string) => (
+    <select aria-label={label} title={disabled && hint ? hint : label} value={get(k)} onChange={(e) => set(k, e.target.value)} disabled={disabled}>
+      <option value="">{all}</option>
+      {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+    </select>
+  );
+  const select = (k: string, label: string, options: [string, string][], all: string) => (
     <label className="field">
       {label}
-      <select value={get(k)} onChange={(e) => set(k, e.target.value)} disabled={disabled}>
+      <select value={get(k)} onChange={(e) => set(k, e.target.value)}>
         <option value="">{all}</option>
         {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
     </label>
   );
 
-  const filterCount = FILTER_KEYS.filter((k) => get(k)).length;
+  // Project is chosen first when there are several: years and areas belong to one project.
+  const manyProjects = (projects.data?.length ?? 0) > 1;
+  const moreKeys = manyProjects ? ['record_state'] : ['project_id', 'record_state'];
+  const moreCount = moreKeys.filter((k) => get(k)).length;
   const clearFilters = () => {
     const next = new URLSearchParams(params);
-    [...FILTER_KEYS, 'offset'].forEach((k) => next.delete(k));
+    [...FILTER_KEYS, 'q', 'offset'].forEach((k) => next.delete(k));
     setParams(next, { replace: true });
   };
   const onSort = (column: string, dir: SortOrder) => update({ sort: column === 'tree_id' ? '' : column, order: dir === 'asc' ? '' : dir });
@@ -86,33 +96,53 @@ export function TreesPage() {
     <SortTh label={label} column={column} sort={sort} order={order} onSort={onSort} className={className} initial={initial} />
   );
 
+  // Active filters as chips, named the way the selects show them.
+  const nameOf = (list: any[] | undefined, id: string, fmt: (x: any) => string) => {
+    const x = list?.find((i) => i.id === id);
+    return x ? fmt(x) : '…';
+  };
+  const chip = (key: string, label: string, value: string): ActiveFilter | null => (get(key) ? { key, label, value, onClear: () => set(key, '') } : null);
+  const chips = [
+    chip('q', 'Tree ID', get('q')),
+    chip('project_id', 'Project', nameOf(projects.data, get('project_id'), (p) => p.name)),
+    chip('planting_year_id', 'Planting year', yearLabel.get(yearId) ?? '…'),
+    chip('sector_id', 'Sector', sector ? sectorLabel(sector) : '…'),
+    chip('sub_sector_id', 'Sub-sector', nameOf(subSectors, get('sub_sector_id'), (s) => subSectorLabel(sector?.short_code, s.short_code, s.name))),
+    chip('species_id', 'Species', nameOf(species.data, get('species_id'), (s) => s.common_name ?? s.scientific_name)),
+    chip('status_id', 'Status', nameOf(statuses.data, get('status_id'), (s) => s.name)),
+    chip('record_state', 'Record', get('record_state') === 'CONFLICT' ? 'In conflict' : 'Rejected'),
+  ].filter((c): c is ActiveFilter => !!c);
+  const total: number = trees.data?.total ?? 0;
+
   return (
     <div>
-      <PageHeader title="Trees" actions={trees.data && <span className="pill">{fmtNum(trees.data.total)}</span>} />
-      <div className="toolbar">
+      <PageHeader title="Trees" actions={trees.data && <span className="pill">{fmtNum(total)}</span>} />
+      <div className="filter-bar">
         <form className="search" role="search" onSubmit={(e) => (e.preventDefault(), set('q', q.trim()))}>
           <input type="search" aria-label="Search by tree ID" placeholder="Search tree ID" value={q} onChange={(e) => setQ(e.target.value)} onBlur={() => q.trim() !== get('q') && set('q', q.trim())} />
         </form>
-        <FiltersButton count={filterCount} open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} />
+        <div className="inline-filters" role="group" aria-label="Filters">
+          {manyProjects && inline('project_id', 'Project', (projects.data ?? []).map((p) => [p.id, p.name]), 'All projects')}
+          {inline('status_id', 'Current status', (statuses.data ?? []).map((s) => [s.id, s.active === false ? `${s.name} (old)` : s.name]), 'Any status')}
+          {inline('planting_year_id', 'Planting year', years.map((y) => [y.id, y.year_label]), 'All years', needsProject, 'Choose a project first')}
+          {inline('sector_id', 'Sector', sectors.map((s) => [s.id, sectorOption(s)]), 'All sectors', needsProject, 'Choose a project first')}
+          {inline('sub_sector_id', 'Sub-sector', subSectors.map((s) => [s.id, subSectorLabel(sector?.short_code, s.short_code, s.name)]), 'All sub-sectors', !sector, 'Choose a sector first')}
+          {inline('species_id', 'Species', (species.data ?? []).map((s) => [s.id, s.common_name ?? s.scientific_name]), 'All species')}
+        </div>
+        <FiltersButton count={moreCount} open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} label="More filters" />
       </div>
       {filtersOpen && (
-        <section className="card filter-panel" aria-label="Filters">
+        <section className="card filter-panel" aria-label="More filters">
           <div className="filters" style={{ marginBottom: 0 }}>
-            {select('project_id', 'Project', (projects.data ?? []).map((p) => [p.id, p.name]), 'All projects')}
-            {select('planting_year_id', 'Planting year', years.map((y) => [y.id, y.year_label]), 'All years', needsProject)}
-            {select('sector_id', 'Sector', sectors.map((s) => [s.id, sectorOption(s)]), 'All sectors', needsProject)}
-            {select('sub_sector_id', 'Sub-sector', subSectors.map((s) => [s.id, subSectorLabel(sector?.short_code, s.short_code, s.name)]), 'All sub-sectors', !sector)}
-            {select('species_id', 'Species', (species.data ?? []).map((s) => [s.id, s.common_name ?? s.scientific_name]), 'All species')}
-            {select('status_id', 'Current status', (statuses.data ?? []).map((s) => [s.id, s.active === false ? `${s.name} (old)` : s.name]), 'Any status')}
+            {!manyProjects && select('project_id', 'Project', (projects.data ?? []).map((p) => [p.id, p.name]), 'All projects')}
             {select('record_state', 'Record', [['CONFLICT', 'In conflict'], ['REJECTED', 'Rejected']], 'Registry (active)')}
           </div>
-          {needsProject && <p className="muted" style={{ margin: '10px 0 0' }}>Choose a project to filter by planting year, sector and sub-sector.</p>}
           <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
-            <button type="button" onClick={clearFilters} disabled={!filterCount}>Clear all</button>
             <button type="button" className="primary" onClick={() => setFiltersOpen(false)}>Done</button>
           </div>
         </section>
       )}
+      <FilterChips filters={chips} onClearAll={clearFilters} />
       <ErrorNotice error={trees.error} />
       <div className={`card table-wrap tall ${trees.isFetching ? 'refetching' : ''}`}>
         {!!trees.data?.items.length && (
@@ -147,16 +177,10 @@ export function TreesPage() {
             </tbody>
           </table>
         )}
-        {trees.data?.items.length === 0 && <EmptyState title="No trees found">{filterCount || get('q') ? 'Clear a filter or check the tree ID.' : undefined}</EmptyState>}
+        {trees.data?.items.length === 0 && <EmptyState title="No trees found">{chips.length ? 'Clear a filter or check the tree ID.' : undefined}</EmptyState>}
         {trees.isLoading && <div className="empty">Loading…</div>}
       </div>
-      {trees.data && trees.data.total > PAGE && (
-        <div className="pager">
-          <button disabled={offset === 0} onClick={() => update({ offset: offset - PAGE > 0 ? String(offset - PAGE) : '' })}>Previous</button>
-          <span className="muted">{fmtNum(offset + 1)}–{fmtNum(Math.min(offset + PAGE, trees.data.total))} of {fmtNum(trees.data.total)}</span>
-          <button disabled={offset + PAGE >= trees.data.total} onClick={() => update({ offset: String(offset + PAGE) })}>Next</button>
-        </div>
-      )}
+      <Pagination page={page} total={total} label="trees" />
     </div>
   );
 }

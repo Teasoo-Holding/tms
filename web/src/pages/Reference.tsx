@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 import { api } from '../api/client';
+import { Pagination, usePage, usePaged } from '../components/Pagination';
 import { PendingPhoto, PendingPhotos, SpeciesCover, SpeciesImagesEditor, uploadPendingPhotos } from '../components/SpeciesImages';
 import { ActivePill, Chevron, clean, Details, EditButton, EmptyState, ErrorNotice, Field, Modal, PageHeader, RowMenu, Tabs, useDelete, useForm } from '../components/ui';
 
@@ -55,6 +56,8 @@ export function ReferencePage() {
   const del = useDelete();
   const cfg = CONFIG[kind];
   const rows = useQuery({ queryKey: [kind], queryFn: () => api.get<any[]>(`/${kind}`) });
+  const page = usePage('', 50);
+  const paged = usePaged(rows.data ?? [], page);
   const toggle = useMutation({ mutationFn: (r: any) => api.patch(`/${kind}/${r.id}`, { active: !r.active }) });
   const main = cfg.columns.filter((c) => c.main);
   const rest = cfg.columns.filter((c) => !c.main);
@@ -64,7 +67,7 @@ export function ReferencePage() {
   return (
     <div>
       <PageHeader title="Lists" actions={<button className="primary" onClick={() => setEditing({})}>+ {cfg.singular[0].toUpperCase() + cfg.singular.slice(1)}</button>} />
-      <Tabs tabs={(Object.keys(CONFIG) as Kind[]).map((k) => [k, CONFIG[k].title])} value={kind} onChange={(k) => (setKind(k), setOpen(null))} />
+      <Tabs tabs={(Object.keys(CONFIG) as Kind[]).map((k) => [k, CONFIG[k].title])} value={kind} onChange={(k) => (setKind(k), setOpen(null), page.go(0))} />
       <ErrorNotice error={rows.error ?? toggle.error} />
       {kind === 'vendors' && !!missingCodes && (
         <div className="notice warning" style={{ marginBottom: 12 }}>
@@ -85,7 +88,7 @@ export function ReferencePage() {
               </tr>
             </thead>
             <tbody>
-              {rows.data.map((r) => (
+              {paged.rows.map((r) => (
                 <Fragment key={r.id}>
                   <tr className="clickable" onClick={() => setOpen(open === r.id ? null : r.id)} aria-expanded={open === r.id}>
                     <td className="expander"><Chevron open={open === r.id} /></td>
@@ -124,6 +127,7 @@ export function ReferencePage() {
         )}
         {rows.data?.length === 0 && <EmptyState title={`No ${cfg.title.toLowerCase()} yet`} />}
       </div>
+      <Pagination page={paged.page} total={paged.total} label={cfg.title.toLowerCase()} />
       {del.dialog}
       {editing && <ReferenceForm kind={kind} row={editing} onClose={() => setEditing(null)} />}
     </div>

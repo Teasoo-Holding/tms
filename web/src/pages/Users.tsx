@@ -3,6 +3,7 @@ import { Fragment, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { useAuth } from '../auth';
+import { Pagination, usePage, usePaged } from '../components/Pagination';
 import { ActivePill, Chevron, clean, Details, EditButton, EmptyState, ErrorNotice, Field, fmtDateTime, fmtNum, isStale, Modal, PageHeader, PasswordInput, relativeTime, RowMenu, Tabs, useForm } from '../components/ui';
 
 const ROLE_LABEL: Record<string, string> = { ADMIN: 'Administrator', FIELD_OFFICER: 'Field officer', EXECUTIVE: 'Executive' };
@@ -17,12 +18,15 @@ export function UsersPage() {
   const devices = useQuery({ queryKey: ['devices'], queryFn: () => api.get<any[]>('/devices'), enabled: tab === 'devices' });
   const toggle = useMutation({ mutationFn: (u: any) => api.patch(`/users/${u.id}`, { active: !u.active }) });
   const revoke = useMutation({ mutationFn: (id: string) => api.post(`/devices/${id}/revoke`) });
+  const people = usePaged(users.data ?? [], usePage('', 50));
+  const phones = usePaged(devices.data ?? [], usePage('phones', 50));
   return (
     <div>
       <PageHeader title="Users" actions={tab === 'users' && <button className="primary" onClick={() => setEditing({})}>+ User</button>} />
       <Tabs tabs={[['users', 'People'], ['devices', 'Phones']]} value={tab} onChange={setTab} />
       <ErrorNotice error={users.error ?? toggle.error ?? revoke.error} />
       {tab === 'users' ? (
+        <>
         <div className="card table-wrap tall">
           {!!users.data?.length && (
           <table>
@@ -32,7 +36,7 @@ export function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {users.data.map((u) => {
+              {people.rows.map((u) => {
                 const fieldUser = u.role === 'FIELD_OFFICER';
                 const stale = fieldUser && u.active && isStale(u.last_sync_at, 7);
                 return (
@@ -91,12 +95,14 @@ export function UsersPage() {
           )}
           {users.data?.length === 0 && <EmptyState title="No users yet" />}
         </div>
+        <Pagination page={people.page} total={people.total} label="users" />
+        </>
       ) : (
         <div className="card table-wrap tall">
           <table>
             <thead><tr><th>Phone</th><th>Officer</th><th>Last sync</th><th className="hide-sm">State</th><th className="actions" /></tr></thead>
             <tbody>
-              {devices.data?.map((d) => (
+              {phones.rows.map((d) => (
                 <tr key={d.id}>
                   <td>
                     {d.name ?? 'Unnamed'}
@@ -117,6 +123,7 @@ export function UsersPage() {
           {devices.data?.length === 0 && <EmptyState title="No phones yet">They appear after an officer signs in on the app.</EmptyState>}
         </div>
       )}
+      {tab === 'devices' && <Pagination page={phones.page} total={phones.total} label="phones" />}
       {editing && <UserForm user={editing} onClose={() => setEditing(null)} />}
     </div>
   );

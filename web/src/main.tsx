@@ -37,7 +37,7 @@ const queryClient: QueryClient = new QueryClient({
 function Root() {
   return (
     <Routes>
-      <Route path="/share/:token" element={<SharePage />} />
+      <Route path="/share/:token/*" element={<SharePage />} />
       <Route path="/download" element={<LandingPage />} />
       <Route path="*" element={<App />} />
     </Routes>

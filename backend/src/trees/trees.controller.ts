@@ -10,7 +10,7 @@ import { OperationResult } from './operation-result';
 import { runOperation } from './operation-runner';
 import { CreateTreePayload, ObservationPayload, TreesService, UpdateTreePayload } from './trees.service';
 
-const TreeQuery = pagination.extend({
+export const TreeQuery = pagination.extend({
   project_id: z.string().uuid().optional(),
   planting_year_id: z.string().uuid().optional(),
   sector_id: z.string().uuid().optional(),
@@ -27,7 +27,7 @@ const TreeQuery = pagination.extend({
 /** Codes such as S2 and S10 sort by their number: the letters first, then the trailing digits as a number. */
 const natural = (col: string) => [`regexp_replace(${col}, '[0-9]+$', '')`, `NULLIF(substring(${col} from '[0-9]+$'), '')::bigint`];
 /** Columns the tree list can be sorted by (whitelist: the request names a key, never SQL). */
-const TREE_SORTS: Record<z.infer<typeof TreeQuery>['sort'], string[]> = {
+export const TREE_SORTS: Record<z.infer<typeof TreeQuery>['sort'], string[]> = {
   tree_id: ['t.physical_tree_id'],
   planting_year: ['py.year_label'],
   area: [...natural('s.short_code'), ...natural('ss.short_code')],

@@ -25,6 +25,7 @@ import {
 } from '../idscheme';
 import { ProjectForm } from './Projects';
 import { ReferenceForm } from './Reference';
+import { Paged } from '../components/Pagination';
 
 type Tab = 'areas' | 'vendors' | 'schemes' | 'years' | 'fields' | 'assignments' | 'serials';
 const TABS: Tab[] = ['areas', 'vendors', 'schemes', 'years', 'fields', 'assignments', 'serials'];
@@ -238,12 +239,13 @@ function CustomFieldsTab({ projectId }: { projectId: string }) {
           <section className="card flush" key={appliesTo}>
             <CardHeader title={title} actions={isAdmin && <button onClick={() => setForm({ appliesTo })}>+ Field</button>} />
             <div className="table-wrap" style={{ marginTop: 12 }}>
+              <Paged items={rows} label="fields">{(page) => (
               <table>
                 <thead>
                   <tr><th>Field</th><th>Type</th><th>State</th>{isAdmin && <th className="actions" />}</tr>
                 </thead>
                 <tbody>
-                  {rows.map((f) => (
+                  {page.map((f) => (
                     <tr key={f.id}>
                       <td>
                         {f.label}
@@ -270,6 +272,7 @@ function CustomFieldsTab({ projectId }: { projectId: string }) {
                   ))}
                 </tbody>
               </table>
+              )}</Paged>
               {fields.data && rows.length === 0 && <EmptyState title="No fields" />}
             </div>
           </section>
@@ -478,9 +481,10 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
       </div>
       <div className="table-wrap" style={{ marginTop: 8 }}>
         {s.sub_sectors.length > 0 && (
+          <Paged items={[...s.sub_sectors].sort(byCode)} label="sub-sectors">{(page) => (
           <table>
             <tbody>
-              {[...s.sub_sectors].sort(byCode).map((ss: any) => (
+              {page.map((ss: any) => (
                 <tr key={ss.id} onMouseEnter={() => setHighlight(ss.id)} onMouseLeave={() => setHighlight(undefined)}>
                   <td><span className="mono">{ss.short_code}</span> · {ss.name}</td>
                   <td className="muted nowrap">{hectares(ss.boundary) ?? (hasLocation(ss) ? 'no outline' : noGpsTag(ss))}</td>
@@ -490,6 +494,7 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
               ))}
             </tbody>
           </table>
+          )}</Paged>
         )}
         {s.sub_sectors.length === 0 && <EmptyState title="No sub-sectors yet">Each sector needs at least one.</EmptyState>}
       </div>
@@ -851,10 +856,11 @@ function VendorsTab({ project, year, onAddYear }: { project: any; year?: Plantin
         />
         <div className="table-wrap" style={{ marginTop: 12 }}>
           {ordered.length > 0 && (
+            <Paged items={ordered} label="vendors">{(page) => (
             <table>
               <thead><tr><th>Vendor</th>{isAdmin && <th className="actions" />}</tr></thead>
               <tbody>
-                {ordered.map((l) => {
+                {page.map((l) => {
                   const vendor = vendors.data?.find((v) => v.id === l.vendor_id);
                   return (
                     <tr key={l.id} style={l.active ? undefined : { opacity: 0.65 }}>
@@ -889,6 +895,7 @@ function VendorsTab({ project, year, onAddYear }: { project: any; year?: Plantin
                 })}
               </tbody>
             </table>
+            )}</Paged>
           )}
           {ordered.length === 0 && <EmptyState title={`No vendors in ${year.year_label} yet`} />}
         </div>
@@ -996,10 +1003,11 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
         <details className="card">
           <summary><strong>Earlier versions ({history.length})</strong></summary>
           <div className="table-wrap" style={{ marginTop: 12 }}>
+            <Paged items={history} label="versions">{(page) => (
             <table>
               <thead><tr><th>Version</th><th>Applied to</th><th>Example</th>{isAdmin && <th className="actions" />}</tr></thead>
               <tbody>
-                {history.map((s) => (
+                {page.map((s) => (
                   <tr key={s.id}>
                     <td title={`Since ${fmtDateTime(s.active_from)}`}>{s.version}</td>
                     <td>{appliedTo(s)}</td>
@@ -1009,6 +1017,7 @@ function SchemesTab({ project, year }: { project: any; year?: PlantingYear }) {
                 ))}
               </tbody>
             </table>
+            )}</Paged>
           </div>
         </details>
       )}
@@ -1191,10 +1200,11 @@ function YearsTab({ project, selected, onSelect, onAdd }: { project: any; select
       <ErrorNotice error={toggle.error} />
       <div className="card table-wrap">
         {years.length > 0 && (
+          <Paged items={years} label="planting years">{(page) => (
           <table>
             <thead><tr><th>Year</th><th>Dates</th><th className="num">Vendors</th><th>State</th>{isAdmin && <th className="actions" />}</tr></thead>
             <tbody>
-              {years.map((y) => (
+              {page.map((y) => (
                 <tr key={y.id} className="clickable" onClick={() => onSelect(y.id)} aria-selected={y.id === selected?.id}>
                   <td className="mono">{y.year_label}{y.id === selected?.id && <span className="pill" style={{ marginLeft: 8 }}>Selected</span>}</td>
                   <td className="nowrap">{y.start_date || y.end_date ? `${fmtDate(y.start_date)} – ${fmtDate(y.end_date)}` : <span className="muted">—</span>}</td>
@@ -1221,6 +1231,7 @@ function YearsTab({ project, selected, onSelect, onAdd }: { project: any; select
               ))}
             </tbody>
           </table>
+          )}</Paged>
         )}
         {years.length === 0 && <EmptyState title="No planting years yet" action={isAdmin && <button className="primary" onClick={onAdd}>+ Add planting year</button>} />}
       </div>
@@ -1246,10 +1257,11 @@ function AssignmentsTab({ projectId, year }: { projectId: string; year?: Plantin
     <div className="stack">
       <div className="card table-wrap">
         {!!assignments.data?.length && (
+          <Paged items={assignments.data} label="people">{(page) => (
           <table>
             <thead><tr><th>Person</th><th>Access</th><th className="actions" /></tr></thead>
             <tbody>
-              {assignments.data.map((a) => (
+              {page.map((a) => (
                 <tr key={a.id}>
                   <td>{a.user_name}<div className="muted">{a.user_role === 'EXECUTIVE' ? 'Client / sponsor' : a.user_role.replace('_', ' ').toLowerCase()}</div></td>
                   <td>{a.sub_sector_id ? subSectorLabel(a.sector_code, a.sub_sector_code, a.sub_sector_name) : a.sector_id ? sectorLabel({ short_code: a.sector_code, name: a.sector_name }) : 'Whole project'}</td>
@@ -1260,6 +1272,7 @@ function AssignmentsTab({ projectId, year }: { projectId: string; year?: Plantin
               ))}
             </tbody>
           </table>
+          )}</Paged>
         )}
         {assignments.data?.length === 0 && <EmptyState title="Nobody assigned">Unassigned officers and clients cannot see this project.</EmptyState>}
       </div>
@@ -1328,10 +1341,11 @@ function SerialsTab({ project, year }: { project: any; year?: PlantingYear }) {
       <div className="notice warning">When a scope has ranges, serials outside them are rejected at sync.</div>
       <div className="card table-wrap">
         {!!allocations.data?.length && (
+          <Paged items={allocations.data} label="ranges">{(page) => (
           <table>
             <thead><tr><th>Officer</th><th className="num">Range</th><th>Scope</th><th className="actions" /></tr></thead>
             <tbody>
-              {allocations.data.map((a) => (
+              {page.map((a) => (
                 <tr key={a.id}>
                   <td>{a.user_name ?? 'Any officer'}{a.notes && <div className="muted">{a.notes}</div>}</td>
                   <td className="num nowrap">{a.range_start} – {a.range_end}</td>
@@ -1343,6 +1357,7 @@ function SerialsTab({ project, year }: { project: any; year?: PlantingYear }) {
               ))}
             </tbody>
           </table>
+          )}</Paged>
         )}
         {allocations.data?.length === 0 && <EmptyState title="No ranges">Any serial is accepted; duplicates become conflicts.</EmptyState>}
       </div>

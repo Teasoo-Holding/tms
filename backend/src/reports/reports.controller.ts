@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Res } from '@nestjs/common';
+import { Controller, Get, Param, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
 import ExcelJS from 'exceljs';
 import { z } from 'zod';
@@ -31,6 +31,21 @@ export const VisitFilter = Filter.extend({
   limit: z.coerce.number().int().min(1).max(500).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 });
+/** Visit days: the visits filters plus the time zone days are counted in. */
+export const VisitDaysQuery = VisitFilter.extend({
+  tz: z.string().trim().max(64).default('UTC'),
+  limit: z.coerce.number().int().min(1).max(500).default(25),
+});
+/** One visit day of a project; field_session_id narrows it to one session ('none': records without one, with recorded_by). */
+const VisitDayQuery = VisitDaysQuery.extend({
+  project_id: z.string().uuid(),
+  field_session_id: z.union([z.string().uuid(), z.literal('none')]).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(50),
+});
+/** Visit-day export columns ("Days" sheet). */
+const VISIT_DAY_COLUMNS = ['date', 'project_name', 'trees_registered', 'visits', 'corrections', 'photos', 'collector_count', 'collectors', 'sessions',
+  'first_at', 'last_at', 'records', 'project_id', 'time_zone'];
+
 /** Density map: one project, optionally one planting year. */
 export const DensityFilter = z.object({
   project_id: z.string().uuid(),
@@ -48,6 +63,14 @@ export const FieldActivityQuery = z.object({
 
 const MAX_ACTIVITY_DAYS = 366;
 
+/** [d] when it is a real date (YYYY-MM-DD), else 400 DATE_INVALID. */
+function realDay(d: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(Date.parse(`${d}T00:00:00Z`)) || new Date(`${d}T00:00:00Z`).toISOString().slice(0, 10) !== d) {
+    throw badRequest('DATE_INVALID', 'Use a real date (YYYY-MM-DD).');
+  }
+  return d;
+}
+
 /** Visit export columns (CSV and Excel). */
 const VISIT_COLUMNS = ['observed_at', 'visit_type', 'physical_tree_id', 'project', 'planting_year', 'sector', 'sub_sector', 'species', 'status', 'height_cm', 'height_method',
   'remarks', 'custom_fields', 'recorded_by', 'recorded_at', 'synced_at', 'photos', 'is_initial', 'is_amendment', 'superseded', 'amendment_reason', 'id', 'tree_id'];
@@ -62,14 +85,18 @@ async function sendWorkbook(res: Response, wb: ExcelJS.Workbook, filename: strin
   res.end();
 }
 
+/** The canonical IANA name of [name]; 400 TIME_ZONE_UNKNOWN when it is not one. */
+function timeZone(name: string) {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: name }).resolvedOptions().timeZone;
+  } catch {
+    throw badRequest('TIME_ZONE_UNKNOWN', `Unknown time zone "${name}". Use an IANA name such as Africa/Lagos.`);
+  }
+}
+
 function fieldActivityFilter(query: unknown) {
   const q = parse(FieldActivityQuery, query);
-  let tz: string;
-  try {
-    tz = new Intl.DateTimeFormat('en-US', { timeZone: q.tz }).resolvedOptions().timeZone;
-  } catch {
-    throw badRequest('TIME_ZONE_UNKNOWN', `Unknown time zone "${q.tz}". Use an IANA name such as Africa/Lagos.`);
-  }
+  const tz = timeZone(q.tz);
   const dayMs = 86_400_000;
   const shift = (d: string, days: number) => new Date(Date.parse(`${d}T00:00:00Z`) + days * dayMs).toISOString().slice(0, 10);
   // Today in the caller's zone (en-CA formats as YYYY-MM-DD).
@@ -150,6 +177,27 @@ export class ReportsController {
     return this.reports.visitRows(user, f, f.limit, f.offset);
   }
 
+  /** The visits page: one row per project and day (in tz), newest first. */
+  @Get('visit-days')
+  visitDays(@CurrentUser() user: AuthUser, @Query() query: unknown) {
+    const f = parse(VisitDaysQuery, query);
+    return this.reports.visitDays(user, f, timeZone(f.tz), f.limit, f.offset);
+  }
+
+  /** One visit day of one project, grouped by field session and data collector. */
+  @Get('visit-days/:date')
+  visitDay(@CurrentUser() user: AuthUser, @Param('date') date: string, @Query() query: unknown) {
+    const f = parse(VisitDayQuery, query);
+    return this.reports.visitDay(user, { ...f, date: realDay(date) }, timeZone(f.tz));
+  }
+
+  /** The tree records of one visit day (or one of its sessions), in time order, paginated. */
+  @Get('visit-days/:date/records')
+  visitDayRecords(@CurrentUser() user: AuthUser, @Param('date') date: string, @Query() query: unknown) {
+    const f = parse(VisitDayQuery, query);
+    return this.reports.visitDayRecords(user, { ...f, date: realDay(date) }, timeZone(f.tz), f.limit, f.offset);
+  }
+
   @Get('visits.csv')
   async visitsCsv(@CurrentUser() user: AuthUser, @Query() query: unknown, @Res() res: Response) {
     const f = parse(VisitFilter, query);
@@ -165,11 +213,17 @@ export class ReportsController {
   /** The visits table (with its filters) as an Excel sheet: the same columns as the CSV. */
   @Get('visits.xlsx')
   async visitsXlsx(@CurrentUser() user: AuthUser, @Query() query: unknown, @Res() res: Response) {
-    const f = parse(VisitFilter, query);
-    const { items } = await this.reports.visitRows(user, f, 1_000_000, 0);
-    await this.audit.record({ actorId: user.id, action: 'export.xlsx', entityType: 'report', projectId: f.project_id, metadata: { rows: items.length, kind: 'visits' } });
+    const f = parse(VisitDaysQuery, query);
+    const tz = timeZone(f.tz);
+    const [{ items }, days] = await Promise.all([this.reports.visitRows(user, f, 1_000_000, 0), this.reports.visitDays(user, f, tz, 1_000_000, 0)]);
+    await this.audit.record({ actorId: user.id, action: 'export.xlsx', entityType: 'report', projectId: f.project_id, metadata: { rows: items.length, days: days.total, kind: 'visits' } });
     const wb = new ExcelJS.Workbook();
     wb.created = new Date();
+    // "Days" (one row per project and day, as on the visits page) first, then every record.
+    addSheet(wb, 'Days', days.items.map((d: any) => {
+      const r: any = { ...d, collectors: d.collectors.map((c: any) => c.user_name).join(', '), time_zone: tz };
+      return Object.fromEntries(VISIT_DAY_COLUMNS.map((h) => [h, r[h]]));
+    }));
     addSheet(wb, 'Visits', items.map((r: any) => Object.fromEntries(VISIT_COLUMNS.map((h) => [h, r[h]]))));
     await sendWorkbook(res, wb, `visits-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
