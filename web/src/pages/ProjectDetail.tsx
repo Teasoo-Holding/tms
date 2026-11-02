@@ -92,7 +92,6 @@ export function ProjectDetailPage() {
         title={p.name}
         actions={
           <>
-            <Link className="btn" to={`/density?project_id=${p.id}${year ? `&planting_year_id=${year.id}` : ''}`}>Density map</Link>
             {isAdmin && (
               <>
                 <button className="primary" onClick={() => setSharing(true)}>Share</button>

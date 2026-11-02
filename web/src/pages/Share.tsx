@@ -5,7 +5,7 @@ import { ApiError, apiUrl, publicGet, qs } from '../api/client';
 import { sectorLabel } from '../areaLabels';
 import { ChartCard, Donut, HBarChart, Legend, LineChart, SERIES, StackedBars, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
-import { DensityReport, DensityView } from '../components/DensityMap';
+import { DensityReport, DensityView, hasOutlines } from '../components/DensityMap';
 import { ShareArea } from '../components/ShareMap';
 import { fmtDate, fmtDateTime, fmtNum, relativeTime, SimpleTable } from '../components/ui';
 
@@ -220,7 +220,8 @@ export function SharePage() {
 
         <AreaShareView rows={coverage} sectors={sectorShare} boundaries={boundaries} />
 
-        {density.data && (
+        {/* Shown only when there is something to draw: areas with GPS outlines. */}
+        {density.data && hasOutlines(density.data) && (
           <section className="stack" aria-label="Tree density">
             <h2 style={{ margin: '8px 0 0' }}>Tree density</h2>
             <DensityView report={density.data} />

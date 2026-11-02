@@ -31,7 +31,6 @@ export function Layout() {
   }, [navOpen]);
   const links: [string, string, boolean][] = [
     ['/', 'Dashboard', true],
-    ['/density', 'Density map', true],
     ['/trees', 'Trees', true],
     ['/visits', 'Visits', true],
     ['/field-activity', 'Field activity', true],
@@ -90,7 +89,6 @@ export function Layout() {
 
 const ICONS: Record<string, string> = {
   '/': 'M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 4v4h6V4z',
-  '/density': 'M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15',
   '/trees': 'M12 3 6 12h4l-3 5h10l-3-5h4zM12 17v4',
   '/visits': 'M8 3v3M16 3v3M4 8h16M5 5h14v15H5zM9 14l2 2 4-4',
   '/field-activity': 'M3 12h4l3-8 4 16 3-8h4',
