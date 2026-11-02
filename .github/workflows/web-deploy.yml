@@ -84,6 +84,10 @@ jobs:
           # The CLI talks to Vercel's live API, so it is kept current rather than pinned to an old release.
           npm install --global vercel@latest
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+          # The portal always calls its own /api, which vercel.json forwards to the backend. A VITE_API_BASE left in
+          # the Vercel project's settings would send requests elsewhere (sign-in failed with 405), so it is dropped.
+          sed -i '/^VITE_API_BASE=/d' .vercel/.env.production.local 2>/dev/null || true
+          unset VITE_API_BASE
           vercel build --prod --token="$VERCEL_TOKEN"
           url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
           echo "Deployed: $url" >> "$GITHUB_STEP_SUMMARY"
