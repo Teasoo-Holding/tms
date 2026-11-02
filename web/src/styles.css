@@ -422,6 +422,24 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 .teasoo-mark svg { color: var(--brand); }
 .share-error { max-width: 460px; margin: 12vh auto 0; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; padding: 28px; }
 .print-only { display: none; }
+/* client link sections: side navigation on wide screens, tabs on top on phones */
+.share-body { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 24px; align-items: start; }
+.share-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 16px; }
+.share-nav a { display: flex; align-items: center; min-height: 40px; padding: 0 12px; border-radius: 6px; color: var(--text-secondary); font-weight: 550; text-decoration: none; }
+.share-nav a:hover { background: var(--surface-2); text-decoration: none; }
+.share-nav a.active { background: var(--brand-wash, var(--surface-2)); color: var(--text-primary); box-shadow: inset 3px 0 0 var(--brand); }
+.share-main { min-width: 0; }
+@media (max-width: 860px) {
+  .share-body { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .share-nav { flex-direction: row; position: static; border-bottom: 1px solid var(--border); overflow-x: auto; gap: 4px; }
+  .share-nav a { border-radius: 0; min-height: 44px; box-shadow: none; }
+  .share-nav a.active { background: none; box-shadow: inset 0 -2px 0 var(--brand); }
+}
+@media print { .share-body { display: block; } }
+.area-card-head { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.area-card-head .sketch { width: 240px; max-width: 100%; height: auto; flex: 0 0 auto; }
+.gps { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.corner-list { margin: 6px 0; padding-left: 22px; font-size: 12px; }
 .lightbox-preview { filter: blur(2px); min-width: min(640px, 90vw); }
 
 /* ---------------------------------------------------------------- public landing page (phone first) */

@@ -1,13 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Navigate, NavLink, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, apiUrl, publicGet, qs } from '../api/client';
 import { sectorLabel } from '../areaLabels';
 import { ChartCard, Donut, HBarChart, Legend, LineChart, SERIES, StackedBars, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
 import { DensityReport, DensityView, hasOutlines } from '../components/DensityMap';
 import { ShareArea } from '../components/ShareMap';
-import { fmtDate, fmtDateTime, fmtNum, relativeTime, SimpleTable } from '../components/ui';
+import { PhotoSource, PhotoSourceProvider } from '../components/Photos';
+import { ErrorNotice, fmtDate, fmtDateTime, fmtNum, relativeTime, SimpleTable } from '../components/ui';
+import { ShareAreas } from './ShareAreas';
+import { ShareTree, ShareTrees } from './ShareTrees';
 
 const FILTER_KEYS = ['planting_year_id', 'vendor_id', 'sector_id', 'from', 'to'] as const;
 /** Changing a filter clears the ones that depend on it. */
@@ -21,6 +24,91 @@ export function BrandMark() {
       </svg>
       Teasoo Consulting
     </span>
+  );
+}
+
+/** What every section of a client link gets: the token, the API path and the project view (unfiltered). */
+export interface ShareContext {
+  token: string;
+  /** API path of the link, e.g. /share/<token>. */
+  base: string;
+  /** Portal path of the link (the same, for navigation). */
+  root: string;
+  view?: any;
+}
+
+const isMissing = (e: unknown) => (e as ApiError).status === 404;
+
+/**
+ * Read-only mini-portal for one project, opened from a secret share link (no sign-in): Overview, Trees and Areas,
+ * as a side navigation on wide screens and tabs on top on phones. Nothing here names who collected the data; the
+ * share endpoints never return it.
+ */
+export function SharePage() {
+  const { token = '' } = useParams<{ token: string }>();
+  const base = `/share/${encodeURIComponent(token)}`;
+  const view = useQuery({ queryKey: ['share', token, ''], queryFn: () => publicGet(base), retry: (n, e) => !isMissing(e) && n < 1 });
+  // Photos load through the link's own endpoint (only this project's photos).
+  const photos = useMemo<PhotoSource>(
+    () => ({ key: `share:${token}`, viewUrl: (id, size) => publicGet(`${base}/media/${id}${size === 'thumb' ? '?size=thumb' : ''}`) }),
+    [token, base],
+  );
+
+  if (view.error) {
+    const e = view.error as ApiError;
+    return (
+      <div className="share-shell">
+        <div className="share-error card">
+          <BrandMark />
+          <h1>{e.code === 'LINK_INVALID' ? 'This link is no longer active' : 'Something went wrong'}</h1>
+          <p className="subtle" style={{ margin: 0 }}>{e.code === 'LINK_INVALID' ? 'Ask Teasoo Consulting for a new link.' : e.message}</p>
+          {e.code !== 'LINK_INVALID' && <button onClick={() => view.refetch()}>Try again</button>}
+        </div>
+      </div>
+    );
+  }
+  if (!view.data) {
+    return (
+      <div className="share-shell">
+        <div className="empty">Loading…</div>
+      </div>
+    );
+  }
+  const p = view.data.project;
+  const dates = [p.start_date && fmtDate(p.start_date), p.end_date && fmtDate(p.end_date)].filter(Boolean).join(' – ');
+  const ctx: ShareContext = { token, base, root: base, view: view.data };
+  const navClass = ({ isActive }: { isActive: boolean }) => (isActive ? 'active' : undefined);
+
+  return (
+    <PhotoSourceProvider value={photos}>
+      <div className="share-shell">
+        <header className="share-header">
+          <BrandMark />
+          <span className="spacer" />
+          <span className="muted print-only">Printed {fmtDateTime(new Date().toISOString())}</span>
+        </header>
+        <div className="page-title">
+          <h1 style={{ margin: 0 }}>{p.name}</h1>
+          {(p.location || dates) && <p className="page-sub">{[p.location, dates].filter(Boolean).join(' · ')}</p>}
+        </div>
+        <div className="share-body">
+          <nav className="share-nav no-print" aria-label="Sections">
+            <NavLink to={ctx.root} end className={navClass}>Overview</NavLink>
+            <NavLink to={`${ctx.root}/trees`} className={navClass}>Trees</NavLink>
+            <NavLink to={`${ctx.root}/areas`} className={navClass}>Areas</NavLink>
+          </nav>
+          <main className="share-main">
+            <Routes>
+              <Route index element={<ShareOverview {...ctx} />} />
+              <Route path="trees" element={<ShareTrees {...ctx} />} />
+              <Route path="trees/:treeId" element={<ShareTree {...ctx} />} />
+              <Route path="areas" element={<ShareAreas {...ctx} />} />
+              <Route path="*" element={<Navigate to={ctx.root} replace />} />
+            </Routes>
+          </main>
+        </div>
+      </div>
+    </PhotoSourceProvider>
   );
 }
 
@@ -38,7 +126,7 @@ function ShareOverview({ token, base }: ShareContext) {
   const filters = Object.fromEntries(FILTER_KEYS.map((k) => [k, get(k)]));
   const activeCount = FILTER_KEYS.filter((k) => get(k)).length;
   const filter = qs(filters);
-  const view = useQuery({ queryKey: ['share', token, filter], queryFn: () => publicGet(`${base}${filter}`), retry: (n, e) => (e as ApiError).status !== 404 && n < 1 });
+  const view = useQuery({ queryKey: ['share', token, filter], queryFn: () => publicGet(`${base}${filter}`), retry: (n, e) => !isMissing(e) && n < 1 });
   const d = view.data;
   const yearId = get('planting_year_id');
   const densityFilter = qs({ planting_year_id: yearId });

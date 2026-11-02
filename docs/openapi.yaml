@@ -582,7 +582,14 @@ paths:
     get: { summary: Short-lived signed download URL, responses: { '200': { description: '{ url, expires_in }' } } }
 
   /conflicts:
-    get: { summary: Conflicts (admin), responses: { '200': { description: Conflicts } } }
+    get:
+      summary: Conflicts with one status (admin); OPEN oldest first, RESOLVED newest resolution first
+      parameters:
+        - { name: status, in: query, schema: { enum: [OPEN, RESOLVED], default: OPEN } }
+        - { name: project_id, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 }, description: 'Omitted: the whole list as an array (Android). Given: one page as { items, total, limit, offset }.' }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses: { '200': { description: 'Conflicts (array), or { items, total, limit, offset } with limit' }, '400': { description: Invalid status } }
   /conflicts/{id}:
     get: { summary: Conflict with incoming and existing records (admin), responses: { '200': { description: Conflict } } }
   /conflicts/{id}/resolve:
@@ -697,6 +704,49 @@ paths:
             visits, corrections, photos }] }] }
         '400': { description: 'Invalid query: TIME_ZONE_UNKNOWN, DATE_INVALID, RANGE_INVALID (from after to), RANGE_TOO_LONG (over 366 days)' }
         '403': { description: Not an administrator or executive, or not assigned to the project }
+  /reports/visit-days:
+    get:
+      summary: Visit days - one row per project and day (in tz) with field work, newest first (the portal's Visits page)
+      description: >-
+        Takes the visits filters (project_id, planting_year_id, sector_id, sub_sector_id, species_id, vendor_id, status_id, from/to as days in tz,
+        recorded_by, visit_type, q = tree ID search) plus tz (IANA, default UTC), limit (default 25, max 500) and offset. A day is listed when any of
+        its records match; its counts are of the matching records. Records of trees not in the registry (conflict, rejected) are left out.
+        sessions counts field sessions per collector; records without field_session_id count as one session per collector and day.
+      responses:
+        '200':
+          description: >-
+            { items: [{ date, project_id, project_name, project_code, records, trees_registered, visits (follow-ups), corrections, photos,
+            first_at, last_at, sessions, collectors: [{ user_id, user_name }] (by name), collector_count }], total (days), limit, offset, tz }
+        '400': { description: 'TIME_ZONE_UNKNOWN or invalid filters' }
+  /reports/visit-days/{date}:
+    get:
+      summary: One visit day of one project, grouped by field session and data collector (same filters; project_id required)
+      parameters:
+        - { name: date, in: path, required: true, schema: { type: string, format: date }, description: The day in tz; not a real date gives 400 DATE_INVALID. }
+        - { name: project_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: tz, in: query, schema: { type: string, default: UTC } }
+      responses:
+        '200':
+          description: >-
+            { date, tz, project: { id, name, short_code }, sessions: [{ field_session_id (null: no session), user_id, user_name, first_at, last_at,
+            records, planting_years, sectors, sub_sectors (SECTOR/SUB), vendors, trees_registered, visits, corrections, photos }] } in start order
+        '403': { description: Not assigned to the project }
+  /reports/visit-days/{date}/records:
+    get:
+      summary: The tree records of one visit day, in time order, paginated (limit default 50)
+      parameters:
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+        - { name: project_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: field_session_id, in: query, schema: { type: string }, description: 'A session id, or "none" for records without one (with recorded_by for one collector).' }
+        - { name: recorded_by, in: query, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: >-
+            { items: [{ id, observed_at, tree_id, physical_tree_id, field_session_id, user_id, recorded_by, planting_year, sector, sector_name,
+            sub_sector, sub_sector_name, species, status_code, status, status_terminal, vendor, visit_type, is_initial, is_amendment, amendment_reason,
+            height_cm, remarks, superseded, media: [{ id, observation_id, upload_state, captured_at }] }], total, limit, offset }
+  /reports/visits.xlsx:
+    get: { summary: 'Visits workbook: a Days sheet (one row per project and day in tz, as /reports/visit-days) and a Visits sheet (every record); visits filters plus tz', responses: { '200': { description: XLSX } } }
   /reports/field-activity.csv:
     get: { summary: The field-activity report as CSV, one row per session (same parameters; audited), responses: { '200': { description: CSV } } }
   /share-links:
@@ -724,7 +774,40 @@ paths:
       security: []
       parameters:
         - { name: token, in: path, required: true, schema: { type: string } }
-      responses: { '200': { description: Project view }, '404': { description: LINK_INVALID } }
+      responses: { '200': { description: 'Project view, plus statuses [{ id, code, name, is_terminal }] and species [{ id, scientific_name, common_name }] for the tree filters' }, '404': { description: LINK_INVALID } }
+  /share/{token}/trees:
+    get:
+      summary: The link's project's trees (registry only), filtered, searched and sorted like /trees (no sign-in)
+      description: >-
+        Filters planting_year_id, sector_id, sub_sector_id, species_id, status_id, vendor_id, q (tree ID); sort tree_id | planting_year | area | species |
+        status | last_observed, order asc | desc, limit (default 50, max 500), offset. Only client-safe columns are returned: never who registered,
+        visited or photographed a tree (no user ids, names, emails or devices).
+      security: []
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: >-
+            { items: [{ id, physical_tree_id, planting_year_id, year_label, sector_id, sector_code, sector_name, sub_sector_id, sub_sector_code,
+            sub_sector_name, species_id, species_name, species_common_name, status_code, status_name, status_terminal, planted_on, last_observed_at,
+            vendor_name, vendor_short_code, photos }], total, limit, offset }
+        '404': { description: LINK_INVALID }
+  /share/{token}/trees/{id}:
+    get:
+      summary: One tree of the link's project with its visits and photos (no sign-in)
+      description: >-
+        The tree's list columns plus observations [{ id, observed_at, visit_type, is_initial, is_amendment, height_cm, remarks, status_code,
+        status_name, status_terminal }] (newest first; corrected records replace the ones they correct) and media [{ id, observation_id,
+        upload_state, captured_at }] (verified photos only; a corrected visit's photos belong to its correction). No collector data.
+      security: []
+      responses: { '200': { description: Tree }, '404': { description: 'LINK_INVALID, or NOT_FOUND when the tree is not in the link''s project' } }
+  /share/{token}/media/{id}:
+    get:
+      summary: Signed URL (5 minutes) for a photo of the link's project; size=thumb for the ≈320 px copy (no sign-in)
+      security: []
+      parameters:
+        - { name: size, in: query, schema: { enum: [thumb, full] } }
+      responses: { '200': { description: '{ url, expires_in, size }' }, '404': { description: 'LINK_INVALID, or NOT_FOUND outside the link''s project' }, '409': { description: MEDIA_NOT_AVAILABLE } }
   /reports/trees.csv:
     get: { summary: CSV export (formula-injection safe; audited), responses: { '200': { description: CSV } } }
   /reports/trees.xlsx:
