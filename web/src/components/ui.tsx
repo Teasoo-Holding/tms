@@ -132,20 +132,27 @@ export function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>,
   );
 }
 
-const STATUS_TONE: Record<string, string> = {
-  ALIVE: 'good',
-  HEALTHY: 'good',
-  PLANTED: 'good',
-  NEEDS_INSPECTION: 'warning',
-  DAMAGED: 'warning',
-  DEAD: 'critical',
-  MISSING: 'critical',
-};
-/** Tree status pill: always a text label; the tone is a secondary cue only. */
-export function StatusPill({ code, name }: { code?: string | null; name?: string | null }) {
+/** Statuses that mean the tree is alive. Older installs may still have trees recorded with these. */
+const ALIVE_CODES = new Set(['ALIVE', 'HEALTHY', 'PLANTED']);
+/** Terminal statuses when the record does not say (lists that only carry the code). */
+const TERMINAL_CODES = new Set(['DEAD', 'MISSING']);
+export type StatusTone = 'alive' | 'dead' | 'neutral';
+export function statusTone(code?: string | null, terminal?: boolean | null): StatusTone {
+  if (!code) return 'neutral';
+  if (terminal || TERMINAL_CODES.has(code)) return 'dead';
+  return ALIVE_CODES.has(code) ? 'alive' : 'neutral';
+}
+const STATUS_SYMBOL: Record<StatusTone, string> = { alive: '✓', dead: '✕', neutral: '–' };
+
+/**
+ * A tree's status, the same everywhere: alive is green with ✓, dead (or any terminal status) red with ✕, not yet
+ * observed and other statuses grey with –. The text label is always there, so colour is never the only cue.
+ */
+export function StatusBadge({ code, name, terminal }: { code?: string | null; name?: string | null; terminal?: boolean | null }) {
+  const tone = statusTone(code, terminal);
   return (
-    <span className={`pill ${code ? (STATUS_TONE[code] ?? '') : ''}`}>
-      <span className="dot" aria-hidden />
+    <span className={`status-badge ${tone}`}>
+      <span className="symbol" aria-hidden>{STATUS_SYMBOL[tone]}</span>
       {name ?? 'Not observed'}
     </span>
   );
@@ -167,19 +174,6 @@ export const fmtNum = (v?: number | null) => (v == null ? '—' : v.toLocaleStri
 const DAY = 86_400_000;
 /** True when the timestamp is missing or older than `days`. */
 export const isStale = (v: string | null | undefined, days: number) => !v || Date.now() - new Date(v).getTime() > days * DAY;
-
-/** Builds a CSV file client-side and downloads it. Values are quoted; formula-leading cells are neutralised. */
-export function downloadCsv(filename: string, head: string[], rows: (string | number | null | undefined)[][]) {
-  const cell = (v: string | number | null | undefined) => {
-    let s = v == null ? '' : String(v);
-    if (typeof v === 'string' && /^[=+\-@]/.test(s)) s = `'${s}`;
-    return `"${s.replace(/"/g, '""')}"`;
-  };
-  const text = [head, ...rows].map((r) => r.map(cell).join(',')).join('\r\n');
-  const url = URL.createObjectURL(new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' }));
-  Object.assign(document.createElement('a'), { href: url, download: filename }).click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 export function relativeTime(v?: string | null) {
   if (!v) return 'never';
@@ -362,6 +356,33 @@ export function DeleteDialog({ target, onClose }: { target: DeleteTarget; onClos
 export function useDelete() {
   const [target, setTarget] = useState<DeleteTarget | null>(null);
   return { ask: setTarget, dialog: target && <DeleteDialog target={target} onClose={() => setTarget(null)} /> };
+}
+
+export type SortOrder = 'asc' | 'desc';
+/**
+ * A column header that sorts the table: the header is a button, ▲/▼ shows the direction and aria-sort tells
+ * assistive technology. Clicking the sorted column again reverses it. Only sortable columns use this.
+ */
+export function SortTh({ label, column, sort, order, onSort, className, initial = 'asc' }: {
+  label: string;
+  /** Direction of the first click (newest first suits dates). */
+  initial?: SortOrder;
+  column: string;
+  sort: string;
+  order: SortOrder;
+  onSort: (column: string, order: SortOrder) => void;
+  className?: string;
+}) {
+  const active = sort === column;
+  const next: SortOrder = active ? (order === 'asc' ? 'desc' : 'asc') : initial;
+  return (
+    <th className={`sortable${className ? ` ${className}` : ''}`} aria-sort={active ? (order === 'asc' ? 'ascending' : 'descending') : undefined}>
+      <button type="button" className="sort-btn" onClick={() => onSort(column, next)} title={`Sort by ${label.toLowerCase()}${active ? (order === 'asc' ? ', descending' : ', ascending') : ''}`}>
+        {label}
+        <span className={`arrow${active ? '' : ' idle'}`} aria-hidden>{active ? (order === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </button>
+    </th>
+  );
 }
 
 /** A plain table for chart data and small summaries. */

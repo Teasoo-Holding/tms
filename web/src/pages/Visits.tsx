@@ -2,10 +2,11 @@ import { useQuery } from '@tanstack/react-query';
 import { Fragment, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, qs } from '../api/client';
+import { subSectorLabel } from '../areaLabels';
 import { useIsAdmin } from '../auth';
 import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
 import { fmtHeight, TreePhotos } from '../components/Photos';
-import { Chevron, Details, EmptyState, ErrorNotice, fmtDate, fmtDateTime, fmtNum, PageHeader, StatusPill } from '../components/ui';
+import { Chevron, Details, EmptyState, ErrorNotice, fmtDate, fmtDateTime, fmtNum, PageHeader, StatusBadge, todayStamp } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 
 const PAGE = 100;
@@ -27,11 +28,11 @@ export function VisitsPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [exportError, setExportError] = useState<unknown>(null);
-  const exportCsv = async () => {
+  const exportXlsx = async () => {
     setExporting(true);
     setExportError(null);
     try {
-      await api.download(`/reports/visits.csv${exportQuery}`, 'visits.csv');
+      await api.download(`/reports/visits.xlsx${exportQuery}`, `visits-${todayStamp()}.xlsx`);
     } catch (e) {
       setExportError(e);
     } finally {
@@ -49,7 +50,7 @@ export function VisitsPage() {
         actions={
           <>
             {visits.data && <span className="pill">{fmtNum(total)}</span>}
-            <button onClick={exportCsv} disabled={exporting}>{exporting ? 'Exporting…' : 'Export CSV'}</button>
+            <button onClick={exportXlsx} disabled={exporting}>{exporting ? 'Exporting…' : 'Export to Excel'}</button>
           </>
         }
       />
@@ -97,7 +98,7 @@ export function VisitsPage() {
                     </td>
                     <td>
                       <div className="row" style={{ gap: 4 }}>
-                        <StatusPill code={v.status_code} name={v.status} />
+                        <StatusBadge code={v.status_code} name={v.status} terminal={v.status_terminal} />
                         {v.is_amendment && <span className="pill warning">Correction</span>}
                         {v.superseded && <span className="pill">Superseded</span>}
                       </div>
@@ -112,7 +113,7 @@ export function VisitsPage() {
                           items={[
                             ['Visited', fmtDateTime(v.observed_at)],
                             ['Project', `${v.project} · ${v.planting_year}`],
-                            ['Area', `${v.sector} / ${v.sub_sector}`],
+                            ['Area', subSectorLabel(v.sector, v.sub_sector, null)],
                             ['Species', v.species],
                             ['Recorded by', v.recorded_by],
                             SHOW_HEIGHT && v.height_cm != null ? ['Height', fmtHeight(Number(v.height_cm))] : ['', null],

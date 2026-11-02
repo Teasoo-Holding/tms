@@ -1,10 +1,11 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { Fragment, ReactNode, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Fragment, ReactNode, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { api, qs } from '../api/client';
-import { downloadCsv, EmptyState, ErrorNotice, fmtDateTime, PageHeader } from '../components/ui';
+import { FiltersButton } from '../components/ReportFilters';
+import { Chevron, EmptyState, ErrorNotice, fmtDateTime, fmtNum, PageHeader, SortOrder, SortTh, todayStamp } from '../components/ui';
 
-const PAGE = 100;
+const PAGE = 50;
 
 /** Activity filter options: [action prefix, friendly name]. The API matches actions by prefix. */
 const ACTIVITY_GROUPS: [string, [string, string][]][] = [
@@ -65,8 +66,8 @@ const VERBS: Record<string, string> = {
   'conflict.create': 'raised a sync conflict on {x}',
   'conflict.resolve': 'resolved a sync conflict on {x}',
   'device.revoke': 'revoked a device',
-  'export.csv': 'exported trees as CSV',
-  'export.xlsx': 'exported trees as Excel',
+  'export.csv': 'exported a CSV file',
+  'export.xlsx': 'exported an Excel file',
   'auth.login': 'signed in',
 };
 
@@ -186,172 +187,220 @@ function Details({ l }: { l: any }) {
 }
 
 // ------------------------------------------------------------------ entries
-function EntryList({ rows, open, onToggle }: { rows: any[]; open: string | null; onToggle: (key: string) => void }) {
+const entityTypeLabel = (t: string) => (t ? t.charAt(0).toUpperCase() + t.slice(1).replace(/_/g, ' ') : '');
+
+function EntryTable({ rows, open, onToggle, th }: { rows: any[]; open: string | null; onToggle: (key: string) => void; th: (column: string, label: string, className?: string) => ReactNode }) {
   return (
-    <ul className="audit-list">
-      {rows.map((l) => {
-        const key = String(l.id);
-        const meta = [l.project_name, l.actor_role && ROLE_LABEL[l.actor_role], friendlyAction(l.action)].filter(Boolean);
-        return (
-          <li key={key}>
-            <div className="audit-row">
-              <div>
-                <Sentence l={l} />
-                <div className="muted">{meta.join(' · ')}</div>
-              </div>
-              <span className="muted nowrap" title={fmtDateTime(l.created_at)}>{fmtWhen(l.created_at)}</span>
-              <button className="link" aria-expanded={open === key} onClick={() => onToggle(key)}>
-                {open === key ? 'Hide' : 'Details'}
-              </button>
-            </div>
-            {open === key && (
-              <div className="details">
-                <Details l={l} />
-              </div>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+    <table>
+      <thead>
+        <tr>
+          <th className="expander" />
+          {th('time', 'Time')}
+          {th('user', 'Person')}
+          {th('action', 'Action')}
+          {th('entity', 'Entity', 'hide-sm')}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((l) => {
+          const key = String(l.id);
+          const isOpen = open === key;
+          return (
+            <Fragment key={key}>
+              <tr className="clickable" onClick={() => onToggle(key)}>
+                <td className="expander">
+                  <button type="button" className="link" aria-expanded={isOpen} aria-label={isOpen ? 'Hide details' : 'Show details'} onClick={(e) => (e.stopPropagation(), onToggle(key))}>
+                    <Chevron open={isOpen} />
+                  </button>
+                </td>
+                <td className="nowrap" title={fmtDateTime(l.created_at)}>{fmtWhen(l.created_at)}</td>
+                <td>
+                  {l.actor_name ?? 'System'}
+                  {l.actor_role && <div className="muted">{ROLE_LABEL[l.actor_role] ?? l.actor_role}</div>}
+                </td>
+                <td>
+                  {friendlyAction(l.action)}
+                  <div className="muted show-sm">{entityTypeLabel(l.entity_type)}{l.entity_label ? ` · ${l.entity_label}` : ''}</div>
+                </td>
+                <td className="hide-sm">
+                  {l.entity_label ? <span onClick={(e) => e.stopPropagation()}><EntityLabel l={l} /></span> : <span className="muted">—</span>}
+                  <div className="muted">{entityTypeLabel(l.entity_type)}{l.project_name ? ` · ${l.project_name}` : ''}</div>
+                </td>
+              </tr>
+              {isOpen && (
+                <tr className="details-row">
+                  <td />
+                  <td colSpan={4}>
+                    <p style={{ margin: '0 0 10px' }}><Sentence l={l} /></p>
+                    <Details l={l} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 
 // ------------------------------------------------------------------ page
-const RECENT = 10;
+const FILTER_KEYS = ['actor', 'action', 'entity', 'project', 'from', 'to'];
+const SORTS = ['time', 'user', 'action', 'entity'];
 
 export function AuditPage() {
   const [params, setParams] = useSearchParams();
   const get = (k: string) => params.get(k) ?? '';
-  const set = (k: string, v: string) => {
+  const update = (changes: Record<string, string>) => {
     const next = new URLSearchParams(params);
-    if (v) next.set(k, v);
-    else next.delete(k);
+    Object.entries(changes).forEach(([k, v]) => (v ? next.set(k, v) : next.delete(k)));
+    // Any change other than paging starts again from the first page.
+    if (!('offset' in changes)) next.delete('offset');
+    next.delete('full'); // older links opened the full log with ?full=1
     setParams(next, { replace: true });
   };
+  const set = (k: string, v: string) => update({ [k]: v });
+  const [q, setQ] = useState(get('q'));
+  // Keep the search box in step with the URL (back/forward, "Clear all").
+  useEffect(() => setQ(get('q')), [params.get('q')]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const toggle = (key: string) => setOpen((o) => (o === key ? null : key));
-  const filter = { actor_id: get('actor'), action: get('action'), project_id: get('project'), from: get('from'), to: get('to') };
-  const filtered = Object.values(filter).some(Boolean);
-  // The full log (filters and paging) opens from "See full log", or directly from a filtered link such as /audit?actor=<id>.
-  const full = filtered || get('full') === '1';
-  const users = useQuery({ queryKey: ['users'], queryFn: () => api.get<any[]>('/users') });
-  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects'), enabled: full });
-  const recent = useQuery({ queryKey: ['audit', 'recent'], queryFn: () => api.get<any[]>(`/audit-logs${qs({ limit: RECENT })}`), enabled: !full });
-  const logs = useInfiniteQuery({
-    queryKey: ['audit', filter],
-    initialPageParam: undefined as string | number | undefined,
-    queryFn: ({ pageParam }) => api.get<any[]>(`/audit-logs${qs({ ...filter, before_id: pageParam, limit: PAGE })}`),
-    getNextPageParam: (last) => (last.length === PAGE ? last[last.length - 1].id : undefined),
-    enabled: full,
-  });
-  const rows = full ? logs.data?.pages.flat() ?? [] : recent.data ?? [];
-  const actor = users.data?.find((u) => u.id === get('actor'));
-  const showFull = () => set('full', '1');
-  const showRecent = () => setParams(new URLSearchParams(), { replace: true });
-  const clearFilters = () => {
-    const next = new URLSearchParams({ full: '1' });
-    setParams(next, { replace: true });
+  const sort = SORTS.includes(get('sort')) ? get('sort') : 'time';
+  const order: SortOrder = get('order') === 'asc' || get('order') === 'desc' ? (get('order') as SortOrder) : sort === 'time' ? 'desc' : 'asc';
+  const offset = Number(get('offset') || 0);
+  const filter = {
+    q: get('q'), actor_id: get('actor'), action: get('action'), entity_type: get('entity'), project_id: get('project'), from: get('from'), to: get('to'),
+    sort, order,
   };
-
-  const exportCsv = () =>
-    downloadCsv(
-      `audit-log-${new Date().toISOString().slice(0, 10)}.csv`,
-      ['Time', 'Person', 'Role', 'Activity', 'Action', 'Entity type', 'Entity', 'Entity ID', 'Tree ID', 'Project', 'Device ID', 'Operation ID', 'Changed fields'],
-      rows.map((l) => [
-        new Date(l.created_at).toISOString(),
-        l.actor_name ?? 'System',
-        ROLE_LABEL[l.actor_role] ?? l.actor_role ?? '',
-        friendlyAction(l.action),
-        l.action,
-        l.entity_type,
-        l.entity_label ?? '',
-        l.entity_id ?? '',
-        l.tree_id ?? '',
-        l.project_name ?? '',
-        l.metadata?.device_id ?? '',
-        l.metadata?.operation_id ?? '',
-        changes(l).map((c) => c.field).join('; '),
-      ]),
-    );
-
-  if (!full) {
-    return (
-      <div>
-        <PageHeader title="Audit log" actions={<button onClick={showFull}>Search the full log</button>} />
-        <ErrorNotice error={recent.error} />
-        <div className={`card flush ${recent.isFetching && recent.data ? 'refetching' : ''}`}>
-          {rows.length > 0 && <EntryList rows={rows} open={open} onToggle={toggle} />}
-          {rows.length === 0 && !recent.isLoading && <EmptyState title="No entries yet" />}
-          {recent.isLoading && <div className="empty">Loading…</div>}
-        </div>
-
-      </div>
-    );
-  }
+  const users = useQuery({ queryKey: ['users'], queryFn: () => api.get<any[]>('/users') });
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
+  const facets = useQuery({ queryKey: ['audit-facets'], queryFn: () => api.get<{ entity_types: string[]; actions: string[] }>('/audit-logs/facets') });
+  const logs = useQuery({ queryKey: ['audit', filter, offset], queryFn: () => api.get(`/audit-logs/search${qs({ ...filter, limit: PAGE, offset })}`) });
+  const rows: any[] = logs.data?.items ?? [];
+  const total: number = logs.data?.total ?? 0;
+  const actor = users.data?.find((u) => u.id === get('actor'));
+  const filterCount = FILTER_KEYS.filter((k) => get(k)).length;
+  const searching = filterCount > 0 || !!get('q');
+  const clearAll = () => setParams(new URLSearchParams(), { replace: true });
+  // Actions the activity groups do not cover (e.g. new ones), so every action in the log can be chosen.
+  const grouped = ACTIVITY_GROUPS.flatMap(([, opts]) => opts.map(([k]) => k));
+  const otherActions = (facets.data?.actions ?? []).filter((a) => !grouped.some((k) => a.startsWith(k)));
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<unknown>(null);
+  const exportXlsx = async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      await api.download(`/audit-logs.xlsx${qs(filter)}`, `audit-log-${todayStamp()}.xlsx`);
+    } catch (e) {
+      setExportError(e);
+    } finally {
+      setExporting(false);
+    }
+  };
+  const onSort = (column: string, dir: SortOrder) => update({ sort: column === 'time' ? '' : column, order: dir });
+  const th = (column: string, label: string, className?: string) => (
+    <SortTh key={column} label={label} column={column} sort={sort} order={order} onSort={onSort} className={className} initial={column === 'time' ? 'desc' : 'asc'} />
+  );
 
   return (
     <div>
       <PageHeader
-        crumbs={<button className="link" onClick={showRecent}>← Recent activity</button>}
         title={actor ? actor.full_name : 'Audit log'}
-        actions={<button onClick={exportCsv} disabled={rows.length === 0}>Export CSV{rows.length ? ` (${rows.length})` : ''}</button>}
+        crumbs={actor ? <button className="link" onClick={() => set('actor', '')}>← Everyone</button> : undefined}
+        actions={
+          <>
+            {logs.data && <span className="pill">{fmtNum(total)}</span>}
+            <button onClick={exportXlsx} disabled={exporting || total === 0}>{exporting ? 'Exporting…' : 'Export to Excel'}</button>
+          </>
+        }
       />
-      <div className="filters">
-        <label className="field" style={{ minWidth: 140 }}>
-          From
-          <input type="date" value={get('from')} max={get('to') || undefined} onChange={(e) => set('from', e.target.value)} />
-        </label>
-        <label className="field" style={{ minWidth: 140 }}>
-          To
-          <input type="date" value={get('to')} min={get('from') || undefined} onChange={(e) => set('to', e.target.value)} />
-        </label>
-        <label className="field">
-          Person
-          <select value={get('actor')} onChange={(e) => set('actor', e.target.value)}>
-            <option value="">Everyone</option>
-            {users.data?.map((u) => (
-              <option key={u.id} value={u.id}>{u.full_name}{u.active ? '' : ' (inactive)'}</option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          Activity
-          <select value={get('action')} onChange={(e) => set('action', e.target.value)}>
-            <option value="">All activity</option>
-            {ACTIVITY_GROUPS.map(([group, opts]) => (
-              <optgroup key={group} label={group}>
-                {opts.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-              </optgroup>
-            ))}
-          </select>
-        </label>
-        {get('project') && (
-          <label className="field">
-            Project
-            <select value={get('project')} onChange={(e) => set('project', e.target.value)}>
-              <option value="">All projects</option>
-              {projects.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          </label>
-        )}
-        {filtered && <button type="button" className="link" style={{ marginBottom: 8 }} onClick={clearFilters}>Clear filters</button>}
+      <div className="toolbar">
+        <form className="search" role="search" onSubmit={(e) => (e.preventDefault(), set('q', q.trim()))}>
+          <input
+            type="search"
+            aria-label="Search the audit log"
+            placeholder="Search person, action, entity or details"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onBlur={() => q.trim() !== get('q') && set('q', q.trim())}
+          />
+        </form>
+        <FiltersButton count={filterCount} open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} />
       </div>
-      <ErrorNotice error={logs.error} />
-      <div className={`card flush ${logs.isFetching && !logs.isFetchingNextPage ? 'refetching' : ''}`}>
-        {rows.length > 0 && <EntryList rows={rows} open={open} onToggle={toggle} />}
-        {rows.length === 0 && !logs.isLoading && (
-          <EmptyState title={filtered ? 'No entries match these filters' : 'No entries yet'}>{filtered ? 'Try a wider date range or another activity type.' : undefined}</EmptyState>
+      {filtersOpen && (
+        <section className="card filter-panel" aria-label="Filters">
+          <div className="filters" style={{ marginBottom: 0 }}>
+            <label className="field">
+              Person
+              <select value={get('actor')} onChange={(e) => set('actor', e.target.value)}>
+                <option value="">Everyone</option>
+                {users.data?.map((u) => (
+                  <option key={u.id} value={u.id}>{u.full_name}{u.active ? '' : ' (inactive)'}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              Action
+              <select value={get('action')} onChange={(e) => set('action', e.target.value)}>
+                <option value="">All activity</option>
+                {ACTIVITY_GROUPS.map(([group, opts]) => (
+                  <optgroup key={group} label={group}>
+                    {opts.map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                  </optgroup>
+                ))}
+                {otherActions.length > 0 && (
+                  <optgroup label="Other">
+                    {otherActions.map((a) => <option key={a} value={a}>{friendlyAction(a)}</option>)}
+                  </optgroup>
+                )}
+              </select>
+            </label>
+            <label className="field">
+              Entity
+              <select value={get('entity')} onChange={(e) => set('entity', e.target.value)}>
+                <option value="">All entities</option>
+                {(facets.data?.entity_types ?? []).map((t) => <option key={t} value={t}>{entityTypeLabel(t)}</option>)}
+              </select>
+            </label>
+            <label className="field">
+              Project
+              <select value={get('project')} onChange={(e) => set('project', e.target.value)}>
+                <option value="">All projects</option>
+                {projects.data?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </label>
+            <label className="field">
+              From
+              <input type="date" value={get('from')} max={get('to') || undefined} onChange={(e) => set('from', e.target.value)} />
+            </label>
+            <label className="field">
+              To
+              <input type="date" value={get('to')} min={get('from') || undefined} onChange={(e) => set('to', e.target.value)} />
+            </label>
+          </div>
+          <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+            <button type="button" onClick={clearAll} disabled={!searching}>Clear all</button>
+            <button type="button" className="primary" onClick={() => setFiltersOpen(false)}>Done</button>
+          </div>
+        </section>
+      )}
+      <ErrorNotice error={logs.error ?? exportError} />
+      <div className={`card table-wrap tall ${logs.isFetching && logs.data ? 'refetching' : ''}`}>
+        {rows.length > 0 && <EntryTable rows={rows} open={open} onToggle={toggle} th={th} />}
+        {logs.data && rows.length === 0 && (
+          <EmptyState title={searching ? 'No entries match' : 'No entries yet'}>{searching ? 'Try other words, a wider date range or fewer filters.' : undefined}</EmptyState>
         )}
         {logs.isLoading && <div className="empty">Loading…</div>}
       </div>
-      <div className="row" style={{ marginTop: 12 }}>
-        {logs.hasNextPage && (
-          <button onClick={() => logs.fetchNextPage()} disabled={logs.isFetchingNextPage}>
-            {logs.isFetchingNextPage ? 'Loading…' : 'Load older'}
-          </button>
-        )}
-        {rows.length > 0 && <span className="muted">{rows.length} entries loaded{logs.hasNextPage ? '' : ' (all)'}</span>}
-      </div>
+      {total > PAGE && (
+        <div className="pager">
+          <button disabled={offset === 0} onClick={() => update({ offset: offset - PAGE > 0 ? String(offset - PAGE) : '' })}>Previous</button>
+          <span className="muted">{fmtNum(offset + 1)}–{fmtNum(Math.min(offset + PAGE, total))} of {fmtNum(total)}</span>
+          <button disabled={offset + PAGE >= total} onClick={() => update({ offset: String(offset + PAGE) })}>Next</button>
+        </div>
+      )}
     </div>
   );
 }

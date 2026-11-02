@@ -140,7 +140,8 @@ export class UsersController {
   @Get('assignments')
   async assignments(@Query('user_id') userId?: string, @Query('project_id') projectId?: string) {
     const { rows } = await this.db.query(
-      `SELECT a.*, u.full_name AS user_name, u.role AS user_role, p.name AS project_name, s.name AS sector_name, ss.name AS sub_sector_name
+      `SELECT a.*, u.full_name AS user_name, u.role AS user_role, p.name AS project_name, s.name AS sector_name, s.short_code AS sector_code,
+              ss.name AS sub_sector_name, ss.short_code AS sub_sector_code
          FROM user_project_assignments a
          JOIN users u ON u.id = a.user_id JOIN projects p ON p.id = a.project_id
          LEFT JOIN sectors s ON s.id = a.sector_id LEFT JOIN sub_sectors ss ON ss.id = a.sub_sector_id
@@ -253,43 +254,5 @@ export class UsersController {
       await this.audit.record({ actorId: actor.id, action: 'device.revoke', entityType: 'device', entityId: id, after: row }, tx);
       return row;
     });
-  }
-
-  @Get('audit-logs')
-  async auditLogs(
-    @Query('entity_type') entityType?: string,
-    @Query('entity_id') entityId?: string,
-    @Query('project_id') projectId?: string,
-    @Query('actor_id') actorId?: string,
-    @Query('action') action?: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('limit') limit = '100',
-    @Query('before_id') beforeId?: string,
-  ) {
-    const uuid = (v?: string) => (v && /^[0-9a-f-]{36}$/i.test(v) ? v : null);
-    const day = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
-    // entity_label names the record in words (tree ID, project, user) so the log reads without lookups.
-    const { rows } = await this.db.query(
-      `SELECT l.*, u.full_name AS actor_name, u.role AS actor_role, p.name AS project_name,
-              COALESCE(t.physical_tree_id, ot.physical_tree_id, pe.name, ue.full_name, l.after ->> 'name', l.after ->> 'label',
-                       l.after ->> 'year_label', l.before ->> 'name') AS entity_label,
-              COALESCE(t.id, ot.id) AS tree_id
-         FROM audit_logs l
-         LEFT JOIN users u ON u.id = l.actor_id
-         LEFT JOIN projects p ON p.id = l.project_id
-         LEFT JOIN trees t ON l.entity_type = 'tree' AND t.id::text = l.entity_id
-         LEFT JOIN tree_observations o ON l.entity_type = 'observation' AND o.id::text = l.entity_id
-         LEFT JOIN trees ot ON ot.id = o.tree_id
-         LEFT JOIN projects pe ON l.entity_type = 'project' AND pe.id::text = l.entity_id
-         LEFT JOIN users ue ON l.entity_type = 'user' AND ue.id::text = l.entity_id
-        WHERE ($1::text IS NULL OR l.entity_type = $1) AND ($2::text IS NULL OR l.entity_id = $2)
-          AND ($3::uuid IS NULL OR l.project_id = $3) AND ($5::bigint IS NULL OR l.id < $5)
-          AND ($6::uuid IS NULL OR l.actor_id = $6) AND ($7::text IS NULL OR l.action LIKE $7 || '%')
-          AND ($8::date IS NULL OR l.created_at >= $8::date) AND ($9::date IS NULL OR l.created_at < $9::date + 1)
-        ORDER BY l.id DESC LIMIT $4`,
-      [entityType || null, entityId || null, uuid(projectId), Math.min(Number(limit) || 100, 500), beforeId || null, uuid(actorId), action || null, day(from), day(to)],
-    );
-    return rows;
   }
 }

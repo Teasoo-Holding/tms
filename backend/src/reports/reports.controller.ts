@@ -48,6 +48,20 @@ export const FieldActivityQuery = z.object({
 
 const MAX_ACTIVITY_DAYS = 366;
 
+/** Visit export columns (CSV and Excel). */
+const VISIT_COLUMNS = ['observed_at', 'visit_type', 'physical_tree_id', 'project', 'planting_year', 'sector', 'sub_sector', 'species', 'status', 'height_cm', 'height_method',
+  'remarks', 'custom_fields', 'recorded_by', 'recorded_at', 'synced_at', 'photos', 'is_initial', 'is_amendment', 'superseded', 'amendment_reason', 'id', 'tree_id'];
+/** Field-activity export columns: one row per field session. */
+const FIELD_ACTIVITY_COLUMNS = ['date', 'user_name', 'first_at', 'last_at', 'project_name', 'planting_year', 'sectors', 'sub_sectors', 'vendors',
+  'trees_registered', 'visits', 'corrections', 'photos', 'field_session_id', 'user_id', 'project_id', 'time_zone'];
+
+async function sendWorkbook(res: Response, wb: ExcelJS.Workbook, filename: string) {
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  await wb.xlsx.write(res);
+  res.end();
+}
+
 function fieldActivityFilter(query: unknown) {
   const q = parse(FieldActivityQuery, query);
   let tz: string;
@@ -98,16 +112,36 @@ export class ReportsController {
   @Get('field-activity.csv')
   async fieldActivityCsv(@CurrentUser() user: AuthUser, @Query() query: unknown, @Res() res: Response) {
     const f = fieldActivityFilter(query);
-    const report = await this.reports.fieldActivity(user, f);
-    const rows = report.days.flatMap((d) => d.sessions.map((s: any) => ({ date: d.date, user_name: d.user_name, user_id: d.user_id, ...s })));
+    const rows = await this.fieldActivityRows(user, f);
     await this.audit.record({ actorId: user.id, action: 'export.csv', entityType: 'report', projectId: f.project_id, metadata: { rows: rows.length, kind: 'field-activity' } });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="field-activity-${f.from}-to-${f.to}.csv"`);
-    const header = ['date', 'user_name', 'first_at', 'last_at', 'project_name', 'planting_year', 'sectors', 'sub_sectors', 'vendors',
-      'trees_registered', 'visits', 'corrections', 'photos', 'field_session_id', 'user_id', 'project_id'];
-    res.write('\uFEFF' + [...header, 'time_zone'].join(',') + '\n');
-    for (const r of rows) res.write([...header.map((h) => csvCell(Array.isArray(r[h]) ? r[h].join(' ') : r[h])), csvCell(f.tz)].join(',') + '\n');
+    res.write('\uFEFF' + FIELD_ACTIVITY_COLUMNS.join(',') + '\n');
+    for (const r of rows) res.write(FIELD_ACTIVITY_COLUMNS.map((h) => csvCell(r[h])).join(',') + '\n');
     res.end();
+  }
+
+  /** The same rows as the CSV (one per field session), as an Excel sheet. */
+  @Roles('ADMIN', 'EXECUTIVE')
+  @Get('field-activity.xlsx')
+  async fieldActivityXlsx(@CurrentUser() user: AuthUser, @Query() query: unknown, @Res() res: Response) {
+    const f = fieldActivityFilter(query);
+    const rows = await this.fieldActivityRows(user, f);
+    await this.audit.record({ actorId: user.id, action: 'export.xlsx', entityType: 'report', projectId: f.project_id, metadata: { rows: rows.length, kind: 'field-activity' } });
+    const wb = new ExcelJS.Workbook();
+    wb.created = new Date();
+    addSheet(wb, 'Field activity', rows);
+    await sendWorkbook(res, wb, `field-activity-${f.from}-to-${f.to}.xlsx`);
+  }
+
+  private async fieldActivityRows(user: AuthUser, f: ReturnType<typeof fieldActivityFilter>) {
+    const report = await this.reports.fieldActivity(user, f);
+    return report.days.flatMap((d) =>
+      d.sessions.map((s: any) => {
+        const r: any = { date: d.date, user_name: d.user_name, user_id: d.user_id, ...s, time_zone: f.tz };
+        return Object.fromEntries(FIELD_ACTIVITY_COLUMNS.map((k) => [k, Array.isArray(r[k]) ? r[k].join(' ') : r[k]]));
+      }),
+    );
   }
 
   @Get('visits')
@@ -123,11 +157,21 @@ export class ReportsController {
     await this.audit.record({ actorId: user.id, action: 'export.csv', entityType: 'report', projectId: f.project_id, metadata: { rows: items.length, kind: 'visits' } });
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="visits-${new Date().toISOString().slice(0, 10)}.csv"`);
-    const header = ['observed_at', 'visit_type', 'physical_tree_id', 'project', 'planting_year', 'sector', 'sub_sector', 'species', 'status', 'height_cm', 'height_method',
-      'remarks', 'custom_fields', 'recorded_by', 'recorded_at', 'synced_at', 'photos', 'is_initial', 'is_amendment', 'superseded', 'amendment_reason', 'id', 'tree_id'];
-    res.write('\uFEFF' + header.join(',') + '\n');
-    for (const r of items) res.write(header.map((h) => csvCell(h === 'custom_fields' ? JSON.stringify(r[h] ?? {}) : r[h])).join(',') + '\n');
+    res.write('\uFEFF' + VISIT_COLUMNS.join(',') + '\n');
+    for (const r of items) res.write(VISIT_COLUMNS.map((h) => csvCell(h === 'custom_fields' ? JSON.stringify(r[h] ?? {}) : r[h])).join(',') + '\n');
     res.end();
+  }
+
+  /** The visits table (with its filters) as an Excel sheet: the same columns as the CSV. */
+  @Get('visits.xlsx')
+  async visitsXlsx(@CurrentUser() user: AuthUser, @Query() query: unknown, @Res() res: Response) {
+    const f = parse(VisitFilter, query);
+    const { items } = await this.reports.visitRows(user, f, 1_000_000, 0);
+    await this.audit.record({ actorId: user.id, action: 'export.xlsx', entityType: 'report', projectId: f.project_id, metadata: { rows: items.length, kind: 'visits' } });
+    const wb = new ExcelJS.Workbook();
+    wb.created = new Date();
+    addSheet(wb, 'Visits', items.map((r: any) => Object.fromEntries(VISIT_COLUMNS.map((h) => [h, r[h]]))));
+    await sendWorkbook(res, wb, `visits-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
   @Get('trees.csv')
@@ -160,7 +204,7 @@ export class ReportsController {
     addSheet(wb, 'By status', summary.by_status);
     addSheet(wb, 'By sector', summary.sector_share);
     addSheet(wb, 'Trees', trees);
-    addSheet(wb, 'Visits', visits.items);
+    addSheet(wb, 'Visits', visits.items.map(({ status_terminal: _t, ...r }: any) => r));
     for (const [name, rows] of Object.entries(config)) addSheet(wb, name, rows);
     await this.audit.record({ actorId: user.id, action: 'export.xlsx', entityType: 'report', projectId: f.project_id, metadata: { kind: 'all', trees: trees.length, visits: visits.items.length } });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

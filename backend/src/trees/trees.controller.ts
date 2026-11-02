@@ -20,7 +20,21 @@ const TreeQuery = pagination.extend({
   vendor_id: z.string().uuid().optional(),
   record_state: z.enum(['ACTIVE', 'CONFLICT', 'REJECTED']).optional(),
   q: z.string().max(100).optional(),
+  sort: z.enum(['tree_id', 'planting_year', 'area', 'species', 'status', 'last_observed']).default('tree_id'),
+  order: z.enum(['asc', 'desc']).default('asc'),
 });
+
+/** Codes such as S2 and S10 sort by their number: the letters first, then the trailing digits as a number. */
+const natural = (col: string) => [`regexp_replace(${col}, '[0-9]+$', '')`, `NULLIF(substring(${col} from '[0-9]+$'), '')::bigint`];
+/** Columns the tree list can be sorted by (whitelist: the request names a key, never SQL). */
+const TREE_SORTS: Record<z.infer<typeof TreeQuery>['sort'], string[]> = {
+  tree_id: ['t.physical_tree_id'],
+  planting_year: ['py.year_label'],
+  area: [...natural('s.short_code'), ...natural('ss.short_code')],
+  species: ['COALESCE(sp.common_name, sp.scientific_name)'],
+  status: ['st.sort_order', 'st.name'],
+  last_observed: ['t.last_observed_at'],
+};
 
 const CorrectionBody = z.object({ serial_input: z.string().max(32), reason: z.string().trim().min(5).max(1000) });
 
@@ -36,7 +50,7 @@ export const TREE_LIST_SQL = `
          t.planting_year_id, py.year_label, t.sector_id, s.name AS sector_name, s.short_code AS sector_code,
          t.sub_sector_id, ss.name AS sub_sector_name, ss.short_code AS sub_sector_code,
          t.species_id, sp.scientific_name AS species_name, sp.common_name AS species_common_name,
-         t.current_status_id, st.code AS status_code, st.name AS status_name, t.last_observed_at,
+         t.current_status_id, st.code AS status_code, st.name AS status_name, st.is_terminal AS status_terminal, t.last_observed_at,
          t.vendor_id, v.name AS vendor_name, t.replaces_tree_id, rt.physical_tree_id AS replaces_physical_id,
          t.planted_on, t.notes, t.custom_fields, t.record_state, t.revision, t.created_at, t.updated_at, t.synced_at,
          t.created_by, u.full_name AS created_by_name
@@ -77,8 +91,11 @@ export class TreesController {
     params.push(...scope.params);
     where.push(scope.sql);
     const whereSql = where.join(' AND ');
+    // Empty values (trees never observed) come last either way; the tree ID then the id keep paging stable.
+    const dir = f.order === 'desc' ? 'DESC' : 'ASC';
+    const orderBy = [...TREE_SORTS[f.sort].map((c) => `${c} ${dir} NULLS LAST`), `t.physical_tree_id ${f.sort === 'tree_id' ? dir : 'ASC'}`, 't.id'].join(', ');
     const [rows, count] = await Promise.all([
-      this.db.query(`${TREE_LIST_SQL} WHERE ${whereSql} ORDER BY t.physical_tree_id LIMIT ${f.limit} OFFSET ${f.offset}`, params),
+      this.db.query(`${TREE_LIST_SQL} WHERE ${whereSql} ORDER BY ${orderBy} LIMIT ${f.limit} OFFSET ${f.offset}`, params),
       this.db.query(`SELECT count(*) AS total FROM trees t WHERE ${whereSql}`, params),
     ]);
     return { items: rows.rows, total: count.rows[0].total, limit: f.limit, offset: f.offset };
@@ -91,7 +108,7 @@ export class TreesController {
     await this.access.assertArea(user, tree.project_id, tree.sector_id, tree.sub_sector_id);
     const [observations, media, lineage, idHistory, snapshot] = await Promise.all([
       this.db.query(
-        `SELECT o.*, o.height_cm::float8 AS height_cm, s.code AS status_code, s.name AS status_name, u.full_name AS recorded_by_name,
+        `SELECT o.*, o.height_cm::float8 AS height_cm, s.code AS status_code, s.name AS status_name, s.is_terminal AS status_terminal, u.full_name AS recorded_by_name,
                 EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id) AS superseded
            FROM tree_observations o JOIN tree_statuses s ON s.id = o.observed_status_id JOIN users u ON u.id = o.recorded_by
           WHERE o.tree_id = $1 ORDER BY o.observed_at DESC, o.recorded_at DESC`,
@@ -144,7 +161,8 @@ export class TreesController {
          SELECT id, 0 AS depth FROM trees WHERE id = $1
          UNION ALL SELECT t.id, down.depth + 1 FROM trees t JOIN down ON t.replaces_tree_id = down.id WHERE t.record_state = 'ACTIVE'
        ), chain AS (SELECT id, depth FROM up UNION SELECT id, depth FROM down)
-       SELECT c.depth AS generation, t.id, t.physical_tree_id, t.record_state, py.year_label, st.name AS status_name, t.created_at
+       SELECT c.depth AS generation, t.id, t.physical_tree_id, t.record_state, py.year_label, st.name AS status_name, st.code AS status_code,
+              st.is_terminal AS status_terminal, t.created_at
          FROM chain c JOIN trees t ON t.id = c.id JOIN planting_years py ON py.id = t.planting_year_id
          LEFT JOIN tree_statuses st ON st.id = t.current_status_id
         ORDER BY c.depth`,
