@@ -46,6 +46,28 @@ jobs:
         with:
           node-version: 20
 
+      # Says which secret is wrong when Vercel can't find the project. Prints names and yes/no only, never the IDs or token
+      # (this repository's logs are public).
+      - name: Check Vercel access
+        if: steps.config.outputs.ready == 'true'
+        run: |
+          api() { curl -s -o /tmp/body -w '%{http_code}' -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com$1"; }
+          [ "$(api /v2/user)" = 200 ] || { echo "::error::VERCEL_TOKEN is not valid (expired or mistyped). Create a new token under Account Settings → Tokens."; exit 1; }
+          echo "Token belongs to: $(jq -r '.user.username' /tmp/body)"
+          api /v2/teams > /dev/null
+          echo "Teams this token can see: $(jq -r '[.teams[]?.name] | join(", ") | if . == "" then "none" else . end' /tmp/body)"
+          case "$VERCEL_ORG_ID" in team_*) scope="?teamId=$VERCEL_ORG_ID" ;; *) scope="" ;; esac
+          if [ "$(api "/v9/projects/$VERCEL_PROJECT_ID$scope")" = 200 ]; then
+            echo "Project found: $(jq -r '.name' /tmp/body) (root directory: $(jq -r '.rootDirectory // "repository root"' /tmp/body))"
+            exit 0
+          fi
+          if [ -n "$scope" ] && [ "$(api "/v9/projects/$VERCEL_PROJECT_ID")" = 200 ]; then
+            echo "::error::The project is under your personal Vercel account, not the team in VERCEL_ORG_ID. Set VERCEL_ORG_ID to your account ID (Account Settings → General → Vercel ID)."
+          else
+            echo "::error::Vercel can't find VERCEL_PROJECT_ID with this token in VERCEL_ORG_ID. Check the project ID (project Settings → General, prj_…), the team ID (Team Settings → General, team_…), and that the token's scope includes that team."
+          fi
+          exit 1
+
       - name: Build and deploy to production
         if: steps.config.outputs.ready == 'true'
         run: |
