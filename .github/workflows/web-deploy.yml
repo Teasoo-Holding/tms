@@ -52,8 +52,12 @@ jobs:
         if: steps.config.outputs.ready == 'true'
         run: |
           api() { curl -s -o /tmp/body -w '%{http_code}' -H "Authorization: Bearer $VERCEL_TOKEN" "https://api.vercel.com$1"; }
-          [ "$(api /v2/user)" = 200 ] || { echo "::error::VERCEL_TOKEN is not valid (expired or mistyped). Create a new token under Account Settings → Tokens."; exit 1; }
-          echo "Token belongs to: $(jq -r '.user.username' /tmp/body)"
+          code=$(api /v2/user)
+          case "$code" in
+            200) echo "Token belongs to: $(jq -r '.user.username' /tmp/body)" ;;
+            401) echo "::error::Vercel rejected VERCEL_TOKEN (HTTP 401: expired, deleted or mistyped). Create a new token under Account Settings → Tokens and paste it again with no spaces or line breaks."; exit 1 ;;
+            *) echo "Token can't read the account (HTTP $code), e.g. a team-only token; checking the project instead." ;;
+          esac
           api /v2/teams > /dev/null
           echo "Teams this token can see: $(jq -r '[.teams[]?.name] | join(", ") | if . == "" then "none" else . end' /tmp/body)"
           case "$VERCEL_ORG_ID" in team_*) scope="?teamId=$VERCEL_ORG_ID" ;; *) scope="" ;; esac
