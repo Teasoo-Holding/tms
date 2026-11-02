@@ -1,6 +1,7 @@
 import maplibregl, { GeoJSONSource } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { sectorLabel, subSectorLabel } from '../areaLabels';
 import { StatTile } from '../charts/charts';
 import { BLANK_STYLE, STYLE_URL } from './AreaMap';
 import { DotArea, DotCounts, dotFeatures, DotState, treesPerDot } from './densityDots';
@@ -46,7 +47,8 @@ const OUTLINE = '#1f3d2b';
 const fmtRate = (v: number | null) => (v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 1 }));
 const fmtHa = (v: number | null) => (v == null ? 'No outline' : v.toLocaleString(undefined, { maximumFractionDigits: 2 }));
 const fmtShare = (v: number | null) => (v == null ? '—' : `${Math.round(v * 100)}%`);
-const areaLabel = (a: DensityArea) => `${a.short_code} · ${a.name}`;
+/** "S1 · North" for a sector, "S1/SS1 · Riverside" for a sub-sector (see areaLabels). */
+const areaLabel = (a: DensityArea, parent?: DensityArea) => (parent ? subSectorLabel(parent.short_code, a.short_code, a.name) : sectorLabel(a));
 const countsOf = (a: DensityStats): DotCounts => ({ alive: a.alive_trees, dead: a.dead_trees, unknown: a.unknown_trees });
 
 /** What the map draws: area outlines, tree dots, how many trees a dot stands for and how many trees could not be drawn. */
@@ -159,12 +161,12 @@ export function DensityLegend({ perDot }: { perDot: number }) {
 }
 
 function DensityTable({ sectors }: { sectors: DensityArea[] }) {
-  const row = (a: DensityArea, sub: boolean) => (
+  const row = (a: DensityArea, parent?: DensityArea) => (
     <tr key={a.id} style={a.active ? undefined : { opacity: 0.65 }}>
-      <td style={sub ? { paddingLeft: 28 } : { fontWeight: 600 }}>
-        {areaLabel(a)}
+      <td style={parent ? { paddingLeft: 28 } : { fontWeight: 600 }}>
+        {areaLabel(a, parent)}
         {!a.active && <span className="pill" style={{ marginLeft: 6 }}>Inactive</span>}
-        {!sub && a.year_label === null && <span className="muted"> (older setup)</span>}
+        {!parent && a.year_label === null && <span className="muted"> (older setup)</span>}
       </td>
       <td className="num">{fmtHa(a.area_hectares)}</td>
       <td className="num">{fmtNum(a.registered_trees)}</td>
@@ -187,8 +189,8 @@ function DensityTable({ sectors }: { sectors: DensityArea[] }) {
       <tbody>
         {sectors.map((s) => (
           <Fragment key={s.id}>
-            {row(s, false)}
-            {(s.sub_sectors ?? []).map((ss) => row(ss, true))}
+            {row(s)}
+            {(s.sub_sectors ?? []).map((ss) => row(ss, s))}
           </Fragment>
         ))}
       </tbody>
@@ -199,7 +201,7 @@ function DensityTable({ sectors }: { sectors: DensityArea[] }) {
 /** Popup text of an area, kept as feature properties. */
 function popupProps(a: DensityArea, parent?: DensityArea) {
   return {
-    title: parent ? `${parent.short_code}/${a.short_code} · ${a.name}` : areaLabel(a),
+    title: areaLabel(a, parent),
     hectares: fmtHa(a.area_hectares),
     trees: fmtNum(a.registered_trees),
     density: fmtRate(a.trees_per_hectare),

@@ -92,11 +92,11 @@ export function FieldActivityPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<unknown>(null);
-  const exportCsv = async () => {
+  const exportXlsx = async () => {
     setExporting(true);
     setExportError(null);
     try {
-      await api.download(`/reports/field-activity.csv${qs({ project_id: projectId, from, to, tz: TZ, user_id: userId })}`, `field-activity-${from}-to-${to}.csv`);
+      await api.download(`/reports/field-activity.xlsx${qs({ project_id: projectId, from, to, tz: TZ, user_id: userId })}`, `field-activity-${from}-to-${to}.xlsx`);
     } catch (e) {
       setExportError(e);
     } finally {
@@ -130,7 +130,7 @@ export function FieldActivityPage() {
       <PageHeader
         title="Field activity"
         subtitle={`What officers recorded each day, by field session. Days and times in ${TZ}.`}
-        actions={<button onClick={exportCsv} disabled={exporting}>{exporting ? 'Exporting…' : 'Export CSV'}</button>}
+        actions={<button onClick={exportXlsx} disabled={exporting}>{exporting ? 'Exporting…' : 'Export to Excel'}</button>}
       />
 
       <section className="card filter-panel" aria-label="Filters">

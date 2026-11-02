@@ -5,7 +5,8 @@ import { api } from '../api/client';
 import { useIsAdmin } from '../auth';
 import { ChartEmpty, LineChart, SERIES } from '../charts/charts';
 import { fmtHeight, LatestPhoto, Lightbox, newestFirst, Thumbs } from '../components/Photos';
-import { CardHeader, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RecordStatePill, RowMenu, StatusPill } from '../components/ui';
+import { areaName, sectorLabel, subSectorLabel } from '../areaLabels';
+import { CardHeader, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RecordStatePill, RowMenu, StatusBadge } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 import { currentScheme, previewId, Scheme } from '../idscheme';
 import type { CustomField } from './ProjectDetail';
@@ -60,7 +61,7 @@ export function TreeDetailPage() {
           </>
         }
       >
-        <StatusPill code={t.status_code} name={t.status_name} />
+        <StatusBadge code={t.status_code} name={t.status_name} terminal={t.status_terminal} />
         <RecordStatePill state={t.record_state} />
       </PageHeader>
 
@@ -70,7 +71,11 @@ export function TreeDetailPage() {
         <section className="card">
           <dl className="kv">
             <dt>Planting year</dt><dd>{t.year_label}</dd>
-            <dt>Area</dt><dd>{t.sector_code} · {t.sector_name} / {t.sub_sector_code} · {t.sub_sector_name}</dd>
+            <dt>Area</dt>
+            <dd>
+              {subSectorLabel(t.sector_code, t.sub_sector_code, t.sub_sector_name)}
+              {areaName(t.sector_code, t.sector_name) && <span className="muted"> · sector {areaName(t.sector_code, t.sector_name)}</span>}
+            </dd>
             <dt>Species</dt><dd>{t.species_name}{t.species_common_name && ` (${t.species_common_name})`}</dd>
             {t.vendor_name && (<><dt>Vendor</dt><dd>{t.vendor_name}</dd></>)}
             <dt>Planted on</dt><dd>{fmtDate(t.planted_on)}</dd>
@@ -117,7 +122,7 @@ export function TreeDetailPage() {
                 <li key={l.id}>
                   <div>
                     {l.id === t.id ? <strong className="mono">{l.physical_tree_id}</strong> : <Link className="mono" to={`/trees/${l.id}`}>{l.physical_tree_id}</Link>}{' '}
-                    <span className="muted">· planting year {l.year_label} · {l.status_name ?? 'not observed'}</span>
+                    <span className="muted">· planting year {l.year_label} ·</span> <StatusBadge code={l.status_code} name={l.status_name} terminal={l.status_terminal} />
                   </div>
                   <div className="muted">{l.generation < 0 ? 'Original (replaced)' : l.generation === 0 ? 'This tree' : `Replacement generation ${l.generation}`}</div>
                 </li>
@@ -166,7 +171,7 @@ export function TreeDetailPage() {
             return (
               <li key={o.id} className={o.superseded ? 'superseded' : ''}>
                 <div className="row">
-                  <StatusPill code={o.status_code} name={o.status_name} />
+                  <StatusBadge code={o.status_code} name={o.status_name} terminal={o.status_terminal} />
                   <strong>{fmtDateTime(o.observed_at)}</strong>
                   {o.is_amendment && <span className="pill warning">Correction</span>}
                   {o.superseded && <span className="pill">Superseded by a correction</span>}
@@ -411,8 +416,8 @@ function ReplacementForm({ tree, onClose }: { tree: any; onClose: () => void }) 
           <>
             <div className="form-grid">
               {select('Planting year', yearId, (x) => set('planting_year_id', x), years.map((y) => [y.id, `${y.year_label}${y.active ? '' : ' (closed)'}`]), 'Choose a year')}
-              {select('Sector', sectorId, (x) => set('sector_id', x), sectors.map((s) => [s.id, `${s.short_code} · ${s.name}`]), 'Choose a sector')}
-              {select('Sub-sector', subSectorId, (x) => set('sub_sector_id', x), subSectors.map((s) => [s.id, `${s.short_code} · ${s.name}`]), sectorId ? 'Choose a sub-sector' : 'Choose a sector first')}
+              {select('Sector', sectorId, (x) => set('sector_id', x), sectors.map((s) => [s.id, sectorLabel(s)]), 'Choose a sector')}
+              {select('Sub-sector', subSectorId, (x) => set('sub_sector_id', x), subSectors.map((s) => [s.id, subSectorLabel(sector?.short_code, s.short_code, s.name)]), sectorId ? 'Choose a sub-sector' : 'Choose a sector first')}
               {select('Species', speciesId, (x) => set('species_id', x), speciesOptions.map((s) => [s.id, s.common_name ? `${s.common_name} (${s.scientific_name})` : s.scientific_name]), 'Choose a species')}
               {select('Vendor', vendorId, (x) => set('vendor_id', x), vendorLinks.map((l) => [l.vendor_id, l.vendor_short_code ? `${l.vendor_name} (${l.vendor_short_code})` : l.vendor_name]), 'No vendor', 'optional; who planted it')}
               {select('Observed status', statusId, (x) => set('status_id', x), statusOptions.map((s) => [s.id, s.name]), 'Choose a status')}

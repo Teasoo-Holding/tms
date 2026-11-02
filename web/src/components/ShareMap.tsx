@@ -1,6 +1,7 @@
 import maplibregl, { GeoJSONSource } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef, useState } from 'react';
+import { sectorLabel, subSectorLabel } from '../areaLabels';
 import { BLANK_STYLE, STYLE_URL } from './AreaMap';
 
 /** One sub-sector row from the summary's area_coverage. */
@@ -34,9 +35,8 @@ function toGeoJson(areas: ShareArea[], boundaries: Map<string, GeoJSON.Polygon>)
     const share = deadShare(a);
     const props = {
       id: a.id,
-      name: a.name,
-      code: a.short_code,
-      sector: `${a.sector_code} · ${a.sector_name}`,
+      label: subSectorLabel(a.sector_code, a.short_code, a.name),
+      sector: sectorLabel({ short_code: a.sector_code, name: a.sector_name }),
       trees: a.registered_trees,
       alive: a.alive_trees,
       dead: a.dead_trees,
@@ -67,7 +67,7 @@ function popupNode(p: any) {
   node.style.lineHeight = '1.5';
   node.style.color = '#0b0b0b';
   const title = document.createElement('strong');
-  title.textContent = `${p.code} · ${p.name}`;
+  title.textContent = p.label;
   node.appendChild(title);
   const share = Number(p.share);
   const lines = [

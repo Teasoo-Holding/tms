@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, apiUrl, publicGet, qs } from '../api/client';
+import { sectorLabel } from '../areaLabels';
 import { ChartCard, Donut, HBarChart, Legend, LineChart, SERIES, StackedBars, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
 import { DensityReport, DensityView } from '../components/DensityMap';
@@ -104,7 +105,6 @@ export function SharePage() {
     { key: 'unknown_trees', label: 'Not yet visited', color: 'var(--border-strong)' },
   ];
   const lifeSectors = sectorShare.filter((r: any) => r.registered_trees > 0);
-  const sectorLabel = (r: any) => `${r.short_code} · ${r.name}`;
   const lifeValue = (c: string, k: string) => lifeSectors.find((r: any) => sectorLabel(r) === c)?.[k] ?? 0;
   const aliveShare = (r: any) => (r.alive_trees + r.dead_trees ? `${Math.round((r.alive_trees / (r.alive_trees + r.dead_trees)) * 100)}%` : '—');
   const dates = [p.start_date && fmtDate(p.start_date), p.end_date && fmtDate(p.end_date)].filter(Boolean).join(' – ');
@@ -124,9 +124,8 @@ export function SharePage() {
         </div>
         <span className="spacer" />
         <div className="page-actions no-print" role="group" aria-label="Download the report">
+          {/* One workbook holds the summary, every tree and every visit, so there are no separate CSV downloads. */}
           <a className="btn primary" href={download('report.xlsx')}>Download Excel</a>
-          <a className="btn" href={download('trees.csv')}>Trees CSV</a>
-          <a className="btn" href={download('visits.csv')}>Visits CSV</a>
           <button onClick={() => window.print()}>Print / Save as PDF</button>
         </div>
       </div>
@@ -151,7 +150,7 @@ export function SharePage() {
             Sector
             <select value={get('sector_id')} onChange={(e) => set('sector_id', e.target.value)} disabled={yearAreas.length === 0}>
               <option value="">All sectors</option>
-              {yearAreas.map((a) => <option key={a.id} value={a.id}>{a.short_code} · {a.name}</option>)}
+              {yearAreas.map((a) => <option key={a.id} value={a.id}>{sectorLabel(a)}</option>)}
             </select>
           </label>
           <label className="field">
@@ -228,8 +227,8 @@ export function SharePage() {
           </section>
         )}
 
-        <ChartCard title="Trees by sector" empty={(s.by_sector ?? []).length === 0 && 'No trees yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [`${r.short_code} · ${r.name}`, fmtNum(r.count)])} />}>
-          <HBarChart data={s.by_sector.map((r: any) => ({ label: `${r.short_code} · ${r.name}`, value: r.count }))} />
+        <ChartCard title="Trees by sector" empty={(s.by_sector ?? []).length === 0 && 'No trees yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [sectorLabel(r), fmtNum(r.count)])} />}>
+          <HBarChart data={s.by_sector.map((r: any) => ({ label: sectorLabel(r), value: r.count }))} />
         </ChartCard>
 
         <p className="muted" style={{ margin: 0 }}>

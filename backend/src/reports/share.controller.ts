@@ -179,7 +179,7 @@ export class ShareController {
     const projectId = await this.resolve(token);
     const f = { ...parse(VisitFilter, query), project_id: projectId };
     const { items } = await this.reports.visitRows(SHARE_READER, f, 100_000, 0);
-    const rows = items.map(({ recorded_by: _r, ...r }: any) => r);
+    const rows = items.map(({ recorded_by: _r, status_terminal: _t, ...r }: any) => r);
     await this.audit.record({ actorId: null, action: 'share_link.export', entityType: 'report', projectId, metadata: { kind: 'visits.csv', rows: rows.length } });
     this.send(res, 'text/csv; charset=utf-8', 'visits.csv', toCsv(rows));
   }
@@ -200,7 +200,7 @@ export class ShareController {
     addSheet(wb, 'By status', summary.by_status);
     addSheet(wb, 'By sector', summary.sector_share);
     addSheet(wb, 'Trees', trees.map(({ registered_by: _r, ...r }: any) => r));
-    addSheet(wb, 'Visits', visits.items.map(({ recorded_by: _r, ...r }: any) => r));
+    addSheet(wb, 'Visits', visits.items.map(({ recorded_by: _r, status_terminal: _t, ...r }: any) => r));
     await this.audit.record({ actorId: null, action: 'share_link.export', entityType: 'report', projectId, metadata: { kind: 'report.xlsx' } });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="report-${new Date().toISOString().slice(0, 10)}.xlsx"`);

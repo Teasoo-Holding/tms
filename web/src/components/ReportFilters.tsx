@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
+import { sectorLabel, subSectorLabel } from '../areaLabels';
 
 /** Filter keys shared by the dashboard summary, its exports and the visits table. */
 export const REPORT_FILTER_KEYS = ['project_id', 'planting_year_id', 'vendor_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'from', 'to', 'overdue_days'] as const;
@@ -94,7 +95,8 @@ export function ReportFilters({ f, showOverdue = false, dateNote, children, onCl
   const statuses = useQuery({ queryKey: ['tree-statuses'], queryFn: () => api.get<any[]>('/tree-statuses') });
   // A year's survey, plus older areas not tied to a year (which serve every year).
   const sectors = (areas.data ?? []).filter((s) => !yearId || s.planting_year_id === yearId || s.planting_year_id == null);
-  const subSectors: any[] = sectors.find((s) => s.id === sectorId)?.sub_sectors ?? [];
+  const sector = sectors.find((s) => s.id === sectorId);
+  const subSectors: any[] = sector?.sub_sectors ?? [];
   const vendorOptions = new Map<string, string>();
   if (projectId) {
     (project.data?.planting_year_vendors ?? [])
@@ -135,8 +137,8 @@ export function ReportFilters({ f, showOverdue = false, dateNote, children, onCl
         {select('project_id', 'Project', (projects.data ?? []).map((p) => [p.id, p.name]), 'All my projects')}
         {select('planting_year_id', 'Planting year', (project.data?.planting_years ?? []).map((y: any) => [y.id, y.year_label]), 'All years', !projectId)}
         {select('vendor_id', 'Vendor', [...vendorOptions.entries()], 'All vendors')}
-        {select('sector_id', 'Sector', sectors.map((s) => [s.id, `${s.short_code} · ${s.name}${yearId && s.planting_year_id == null ? ' (older setup)' : ''}`]), 'All sectors', !projectId)}
-        {select('sub_sector_id', 'Sub-sector', subSectors.map((s) => [s.id, `${s.short_code} · ${s.name}`]), 'All sub-sectors', !sectorId)}
+        {select('sector_id', 'Sector', sectors.map((s) => [s.id, `${sectorLabel(s)}${yearId && s.planting_year_id == null ? ' (older setup)' : ''}`]), 'All sectors', !projectId)}
+        {select('sub_sector_id', 'Sub-sector', subSectors.map((s) => [s.id, subSectorLabel(sector?.short_code, s.short_code, s.name)]), 'All sub-sectors', !sectorId)}
         {select('species_id', 'Species', (species.data ?? []).map((s) => [s.id, s.common_name ?? s.scientific_name]), 'All species')}
         {select('status_id', 'Current status', (statuses.data ?? []).map((s) => [s.id, s.active === false ? `${s.name} (old)` : s.name]), 'Any status')}
         <label className="field">

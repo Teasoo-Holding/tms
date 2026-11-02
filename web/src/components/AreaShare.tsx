@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { sectorLabel, subSectorLabel } from '../areaLabels';
 import { Legend, StackedBars } from '../charts/charts';
 import { deadShare, ShareArea, ShareLegend, ShareMap } from './ShareMap';
 import { fmtNum, SimpleTable } from './ui';
@@ -21,7 +22,6 @@ export function AreaShareView({ rows, sectors, boundaries }: { rows: ShareArea[]
   const isLocated = (r: ShareArea) => (r.latitude != null && r.longitude != null) || boundaries.has(r.id);
   const located = rows.some(isLocated);
   const unlocated = rows.filter((r) => !isLocated(r)).length;
-  const sectorLabel = (r: any) => `${r.short_code} · ${r.name}`;
   return (
     <section className="card chart">
       <div className="chart-head">
@@ -46,7 +46,7 @@ export function AreaShareView({ rows, sectors, boundaries }: { rows: ShareArea[]
               <SimpleTable
                 head={['Sub-sector', 'Trees', 'Alive', 'Dead', 'Not observed', '% dead']}
                 rows={rows.map((r) => [
-                  `${r.sector_code}/${r.short_code} · ${r.name}`,
+                  subSectorLabel(r.sector_code, r.short_code, r.name),
                   fmtNum(r.registered_trees),
                   fmtNum(r.alive_trees),
                   fmtNum(r.dead_trees),

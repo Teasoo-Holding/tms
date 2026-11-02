@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { api, qs } from '../api/client';
+import { sectorLabel, subSectorLabel } from '../areaLabels';
 import { useIsAdmin } from '../auth';
 import { ChartCard, Donut, GroupedColumns, HBarChart, Legend, LineChart, LineSeries, SERIES, StackedBars, StackedColumns, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
@@ -95,7 +96,7 @@ export function DashboardPage() {
     const value = (group: string, code: string) => rows.find((r) => r.group_name === group && r.code === code)?.count ?? 0;
     return { categories: groups.map(([, name]) => name), series, value };
   };
-  const bySectorMix = statusMix(s?.status_by_sector);
+  const bySectorMix = statusMix((s?.status_by_sector ?? []).map((r: any) => ({ ...r, group_name: sectorLabel({ short_code: r.group_code, name: r.group_name }) })));
   const bySpeciesMix = statusMix(s?.status_by_species);
   const mixTable = (mix: ReturnType<typeof statusMix>, label: string) => (
     <SimpleTable head={[label, ...mix.series.map((x) => x.label)]} rows={mix.categories.map((c) => [c, ...mix.series.map((x) => fmtNum(mix.value(c, x.key)))])} />
@@ -110,17 +111,16 @@ export function DashboardPage() {
         actions={
           <>
             <FiltersButton count={f.count} open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} />
-            <button className="primary no-print" disabled={exporting} onClick={() => download(`/reports/export.xlsx${exportFilter}`, `tms-export-${todayStamp()}.xlsx`)}>
-              {exporting ? 'Preparing…' : 'Export all (Excel)'}
+            {/* One Excel action: administrators get every sheet (configuration, trees, visits), others the trees workbook. */}
+            <button
+              className="primary no-print"
+              disabled={exporting}
+              onClick={() => (isAdmin ? download(`/reports/export.xlsx${exportFilter}`, `tms-export-${todayStamp()}.xlsx`) : download(`/reports/trees.xlsx${filter}`, `trees-${todayStamp()}.xlsx`))}
+            >
+              {exporting ? 'Preparing…' : 'Export to Excel'}
             </button>
             <button className="no-print" onClick={() => window.print()}>Print report</button>
-            <RowMenu
-              label="More exports"
-              items={[
-                { label: 'Trees (CSV)', onClick: () => download(`/reports/trees.csv${filter}`, 'trees.csv') },
-                { label: 'Trees (Excel)', onClick: () => download(`/reports/trees.xlsx${filter}`, 'trees.xlsx') },
-              ]}
-            />
+            {isAdmin && <RowMenu label="More exports" items={[{ label: 'Trees only (Excel)', onClick: () => download(`/reports/trees.xlsx${filter}`, `trees-${todayStamp()}.xlsx`) }]} />}
           </>
         }
       />
@@ -227,8 +227,8 @@ export function DashboardPage() {
                 >
                   <StackedBars categories={bySpeciesMix.categories} series={bySpeciesMix.series} values={bySpeciesMix.value} normalize />
                 </ChartCard>
-                <ChartCard title="Trees by sector" empty={s.by_sector.length === 0 && 'No trees yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [`${r.short_code} · ${r.name}`, fmtNum(r.count)])} />}>
-                  <HBarChart data={s.by_sector.map((r: any) => ({ label: `${r.short_code} · ${r.name}`, value: r.count }))} />
+                <ChartCard title="Trees by sector" empty={s.by_sector.length === 0 && 'No trees yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [sectorLabel(r), fmtNum(r.count)])} />}>
+                  <HBarChart data={s.by_sector.map((r: any) => ({ label: sectorLabel(r), value: r.count }))} />
                 </ChartCard>
               </div>
 
@@ -263,7 +263,7 @@ export function DashboardPage() {
                     head={['Sub-sector', 'Hectares', 'Trees', 'Trees / ha']}
                     numeric={[1, 2, 3]}
                     rows={coverage.map((r: any) => [
-                      `${r.sector_code}/${r.short_code} · ${r.name}`,
+                      subSectorLabel(r.sector_code, r.short_code, r.name),
                       r.area_hectares ?? '—',
                       fmtNum(r.registered_trees),
                       r.area_hectares ? (r.registered_trees / r.area_hectares).toFixed(1) : '—',

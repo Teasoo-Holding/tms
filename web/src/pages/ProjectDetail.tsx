@@ -3,6 +3,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError, qs } from '../api/client';
 import { useIsAdmin } from '../auth';
+import { sectorLabel, subSectorLabel } from '../areaLabels';
 import { AreaMap, hasLocation, MapArea } from '../components/AreaMap';
 import { areaHectares, AreaSketch, boundaryCorners, LonLat, orderCorners } from '../components/AreaSketch';
 import { ShareLinksModal } from '../components/ShareLinks';
@@ -1252,7 +1253,7 @@ function AssignmentsTab({ projectId, year }: { projectId: string; year?: Plantin
               {assignments.data.map((a) => (
                 <tr key={a.id}>
                   <td>{a.user_name}<div className="muted">{a.user_role === 'EXECUTIVE' ? 'Client / sponsor' : a.user_role.replace('_', ' ').toLowerCase()}</div></td>
-                  <td>{a.sub_sector_name ? `${a.sector_name} / ${a.sub_sector_name}` : a.sector_name ?? 'Whole project'}</td>
+                  <td>{a.sub_sector_id ? subSectorLabel(a.sector_code, a.sub_sector_code, a.sub_sector_name) : a.sector_id ? sectorLabel({ short_code: a.sector_code, name: a.sector_name }) : 'Whole project'}</td>
                   <td className="actions">
                     <RowMenu items={[{ label: 'Remove access', danger: true, onClick: () => confirm(`Remove ${a.user_name}'s access?`) && revoke.mutate(a.id) }]} />
                   </td>
@@ -1278,13 +1279,13 @@ function AssignmentsTab({ projectId, year }: { projectId: string; year?: Plantin
           <Field label="Sector" hint={year ? `optional; ${year.year_label} survey` : 'optional'}>
             <select value={f.values.sector_id} onChange={(e) => f.setValues({ ...f.values, sector_id: e.target.value, sub_sector_id: '' })}>
               <option value="">Whole project</option>
-              {sectors.map((s) => <option key={s.id} value={s.id}>{s.short_code} · {s.name}{s.planting_year_id == null ? ' (older setup)' : ''}</option>)}
+              {sectors.map((s) => <option key={s.id} value={s.id}>{sectorLabel(s)}{s.planting_year_id == null ? ' (older setup)' : ''}</option>)}
             </select>
           </Field>
           <Field label="Sub-sector" hint="optional">
             <select {...f.bind('sub_sector_id')} disabled={!f.values.sector_id}>
               <option value="">Whole sector</option>
-              {subSectors.map((ss: any) => <option key={ss.id} value={ss.id}>{ss.short_code} · {ss.name}</option>)}
+              {subSectors.map((ss: any) => <option key={ss.id} value={ss.id}>{subSectorLabel(sectors.find((s) => s.id === f.values.sector_id)?.short_code, ss.short_code, ss.name)}</option>)}
             </select>
           </Field>
         </div>
