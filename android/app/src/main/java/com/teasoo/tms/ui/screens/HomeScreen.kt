@@ -98,13 +98,19 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
         ) {
             session.onlineSignInReason?.let { reason -> OnlineSignInBanner(reason, session.user.loginName, vm) }
             vm.update.collectAsStateWithLifecycle().value?.let { u ->
-                val context = LocalContext.current
+                val progress by vm.updateProgress.collectAsStateWithLifecycle()
+                val message by vm.updateMessage.collectAsStateWithLifecycle()
                 Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.large, modifier = Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Version ${u.version} is available.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                        TextButton(onClick = {
-                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(u.downloadUrl)))
-                        }) { Text("Download") }
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Version ${u.version} is available", style = MaterialTheme.typography.titleSmall)
+                                Text("Your saved records are kept.", style = MaterialTheme.typography.bodySmall)
+                            }
+                            Button(onClick = vm::installUpdate, enabled = progress == null) { Text(if (progress == null) "Update now" else "Downloading…") }
+                        }
+                        progress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+                        message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     }
                 }
             }

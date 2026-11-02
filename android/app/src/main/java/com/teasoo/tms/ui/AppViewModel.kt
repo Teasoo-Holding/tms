@@ -47,6 +47,44 @@ class AppViewModel @Inject constructor(
 ) : AndroidViewModel(app) {
     /** A newer app version, when one is published (checked once per app start, when online). */
     val update = MutableStateFlow<com.teasoo.tms.data.repo.AppUpdate?>(null)
+    /** Download progress (0..1) while an update is being fetched; null otherwise. */
+    val updateProgress = MutableStateFlow<Float?>(null)
+    val updateMessage = MutableStateFlow<String?>(null)
+
+    /**
+     * Downloads the new version and opens Android's install screen. Apps installed outside Google Play need the
+     * person's one-time permission to install updates, and Android always asks them to confirm; records stay on the device.
+     */
+    fun installUpdate() {
+        val u = update.value ?: return
+        if (updateProgress.value != null) return
+        val pm = app.packageManager
+        if (!pm.canRequestPackageInstalls()) {
+            updateMessage.value = "Allow TMS Field to install updates (turn on “Allow from this source”), then tap Update now again."
+            app.startActivity(
+                android.content.Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:${app.packageName}"))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            return
+        }
+        updateMessage.value = null
+        updateProgress.value = 0f
+        viewModelScope.launch {
+            try {
+                val file = updates.download(u, java.io.File(app.cacheDir, "updates")) { updateProgress.value = it }
+                val uri = androidx.core.content.FileProvider.getUriForFile(app, "${app.packageName}.updates", file)
+                app.startActivity(
+                    android.content.Intent(android.content.Intent.ACTION_VIEW)
+                        .setDataAndType(uri, "application/vnd.android.package-archive")
+                        .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } catch (e: Throwable) {
+                updateMessage.value = "The update could not be downloaded. Check the connection and try again."
+            } finally {
+                updateProgress.value = null
+            }
+        }
+    }
 
     val sessionState = session.state.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 

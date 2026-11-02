@@ -13,7 +13,10 @@ import javax.inject.Named
 import javax.inject.Singleton
 
 /** A newer app version than the one installed, with the link to download it. */
-data class AppUpdate(val version: String, val downloadUrl: String)
+data class AppUpdate(val version: String, val downloadUrl: String) {
+    /** This exact version's file, so a release published meanwhile can't swap in under the same name. */
+    val versionedUrl get() = "https://github.com/${BuildConfig.RELEASES_REPO}/releases/download/android-v$version/tms-field-$version.apk"
+}
 
 /**
  * Checks the latest published Android release (the same one the landing page offers). Silent when offline or when
@@ -34,6 +37,37 @@ class UpdateChecker @Inject constructor(@Named("upload") private val client: OkH
                 } else null
             }
         }.getOrNull()
+    }
+
+    /**
+     * Downloads the update into the app's cache (shared with the installer only through the FileProvider), reporting
+     * progress from 0 to 1. Returns the file, or throws when the download fails.
+     */
+    suspend fun download(update: AppUpdate, dir: java.io.File, onProgress: (Float) -> Unit): java.io.File = withContext(Dispatchers.IO) {
+        dir.mkdirs()
+        dir.listFiles()?.forEach { it.delete() } // only the newest download is kept
+        val target = java.io.File(dir, "tms-field-${update.version}.apk")
+        val part = java.io.File(dir, target.name + ".part")
+        client.newCall(Request.Builder().url(update.versionedUrl).build()).execute().use { res ->
+            if (!res.isSuccessful) throw java.io.IOException("Download failed (${res.code})")
+            val body = res.body ?: throw java.io.IOException("Empty download")
+            val total = body.contentLength().takeIf { it > 0 }
+            body.byteStream().use { input ->
+                part.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    var done = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        done += n
+                        total?.let { onProgress((done.toFloat() / it).coerceIn(0f, 1f)) }
+                    }
+                }
+            }
+        }
+        if (!part.renameTo(target)) throw java.io.IOException("Could not save the update")
+        target
     }
 
     companion object {

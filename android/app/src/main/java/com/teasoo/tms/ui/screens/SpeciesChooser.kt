@@ -116,9 +116,10 @@ private fun SpeciesCard(
             .combinedClickable(onClick = onClick, onLongClick = onGallery),
     ) {
         Column {
-            Box(Modifier.fillMaxWidth().aspectRatio(4f / 3f), contentAlignment = Alignment.Center) {
+            // Square, on a neutral background, with the whole photo fitted inside: nothing of the plant is cut off.
+            Box(Modifier.fillMaxWidth().aspectRatio(1f).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
                 val img = image
-                if (img != null) Image(img, contentDescription = s.title(), contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                if (img != null) Image(img, contentDescription = s.title(), contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
                 else Icon(Icons.Default.Park, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(48.dp))
                 if (selected) Surface(shape = androidx.compose.foundation.shape.CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.align(Alignment.TopStart).padding(6.dp)) {
                     Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(4.dp).size(24.dp))

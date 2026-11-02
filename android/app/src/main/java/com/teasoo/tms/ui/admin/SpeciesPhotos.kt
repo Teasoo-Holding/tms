@@ -163,7 +163,7 @@ private fun PhotoTile(img: SpeciesImageDto, vm: SpeciesPhotosViewModel, onOpen: 
     val bitmap by produceState<ImageBitmap?>(null, img.id) { value = vm.bitmap(img, full = false) }
     Box(Modifier.size(150.dp).clip(MaterialTheme.shapes.medium).clickable(onClick = onOpen)) {
         Surface(color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxSize()) {
-            bitmap?.let { Image(it, contentDescription = img.caption, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+            bitmap?.let { Image(it, contentDescription = img.caption, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()) }
         }
         FilledTonalIconButton(onClick = onDelete, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)) { Icon(Icons.Default.Delete, "Delete photo") }
     }
