@@ -145,10 +145,28 @@ export class MediaService {
     );
     if (!media) throw notFound('Photo');
     await this.access.assertArea(user, media.project_id, media.sector_id, media.sub_sector_id);
+    return this.signedUrl(media, size);
+  }
+
+  /**
+   * The same for a client share link: only photos of the link's project, of trees in the registry (no account, so
+   * there is no area check; the link covers the whole project).
+   */
+  async projectViewUrl(projectId: string, mediaId: string, size: 'thumb' | 'full' = 'full') {
+    const media = await this.db.one(
+      this.db,
+      `SELECT m.* FROM tree_media m JOIN trees t ON t.id = m.tree_id WHERE m.id = $1 AND t.project_id = $2 AND t.record_state = 'ACTIVE'`,
+      [mediaId, projectId],
+    );
+    if (!media) throw notFound('Photo');
+    return this.signedUrl(media, size);
+  }
+
+  private async signedUrl(media: any, size: 'thumb' | 'full') {
     if (media.upload_state !== 'VERIFIED') throw new AppError(409, 'MEDIA_NOT_AVAILABLE', 'This photo has not finished uploading.');
     if (size === 'thumb') {
       if (!media.thumb_key) await this.makeThumbnail(media).catch(() => undefined);
-      const fresh = await this.db.one(this.db, 'SELECT thumb_key FROM tree_media WHERE id = $1', [mediaId]);
+      const fresh = await this.db.one(this.db, 'SELECT thumb_key FROM tree_media WHERE id = $1', [media.id]);
       if (fresh?.thumb_key) return { url: await this.storage.createDownloadUrl(fresh.thumb_key), expires_in: 300, size: 'thumb' };
     }
     return { url: await this.storage.createDownloadUrl(media.object_key), expires_in: 300, size: 'full' };

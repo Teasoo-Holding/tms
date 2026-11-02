@@ -7,9 +7,11 @@ import { z } from 'zod';
 import { AuthUser, CurrentUser, Public, Roles } from '../common/auth.decorators';
 import { AuditService } from '../common/audit.service';
 import { AppError, notFound } from '../common/errors';
-import { parse } from '../common/validation';
+import { pagination, parse } from '../common/validation';
 import { config } from '../config';
 import { Db } from '../database/db.service';
+import { MediaService } from '../media/media.service';
+import { TREE_SORTS, TreeQuery } from '../trees/trees.controller';
 import { DensityFilter, Filter, VisitFilter } from './reports.controller';
 import { ReportsService } from './reports.service';
 import { addSheet, toCsv } from './workbook';
@@ -47,6 +49,38 @@ const withPath = ({ token_encrypted, ...l }: any) => {
   return { ...l, path: token ? `/share/${token}` : null };
 };
 const CreateLink = z.object({ label: z.string().trim().max(120).nullish(), expires_in_days: z.number().int().min(1).max(3650).nullish() });
+/** The client's tree list: filters, tree ID search and the sorts of the portal's tree list. */
+const ShareTreeQuery = pagination.extend({
+  planting_year_id: z.string().uuid().optional(),
+  sector_id: z.string().uuid().optional(),
+  sub_sector_id: z.string().uuid().optional(),
+  species_id: z.string().uuid().optional(),
+  status_id: z.string().uuid().optional(),
+  vendor_id: z.string().uuid().optional(),
+  q: z.string().max(100).optional(),
+  sort: TreeQuery.shape.sort,
+  order: TreeQuery.shape.order,
+});
+
+/**
+ * Tree columns a client may see. Only these are selected: never who registered, visited or photographed a tree
+ * (no user ids, names, emails or devices), so nothing about data collectors can leak through a share link.
+ */
+const SHARE_TREE_SQL = `
+  SELECT t.id, t.physical_tree_id, t.planting_year_id, py.year_label, t.sector_id, s.short_code AS sector_code, s.name AS sector_name,
+         t.sub_sector_id, ss.short_code AS sub_sector_code, ss.name AS sub_sector_name,
+         t.species_id, sp.scientific_name AS species_name, sp.common_name AS species_common_name,
+         st.code AS status_code, st.name AS status_name, st.is_terminal AS status_terminal, t.planted_on, t.last_observed_at,
+         v.name AS vendor_name, v.short_code AS vendor_short_code,
+         (SELECT count(*) FROM tree_media m WHERE m.tree_id = t.id AND m.upload_state = 'VERIFIED')::int AS photos
+    FROM trees t
+    JOIN planting_years py ON py.id = t.planting_year_id
+    JOIN sectors s ON s.id = t.sector_id
+    JOIN sub_sectors ss ON ss.id = t.sub_sector_id
+    JOIN tree_species sp ON sp.id = t.species_id
+    LEFT JOIN tree_statuses st ON st.id = t.current_status_id
+    LEFT JOIN vendors v ON v.id = t.vendor_id`;
+
 /** Reports run as an unrestricted reader, always pinned to the link's project. */
 const SHARE_READER: AuthUser = { id: '00000000-0000-0000-0000-000000000000', role: 'ADMIN' };
 
@@ -56,7 +90,7 @@ const SHARE_READER: AuthUser = { id: '00000000-0000-0000-0000-000000000000', rol
  */
 @Controller()
 export class ShareController {
-  constructor(private readonly db: Db, private readonly reports: ReportsService, private readonly audit: AuditService) {}
+  constructor(private readonly db: Db, private readonly reports: ReportsService, private readonly audit: AuditService, private readonly media: MediaService) {}
 
   // ---------------------------------------------------------------- administration
   @Roles('ADMIN')
@@ -127,7 +161,7 @@ export class ShareController {
   async view(@Param('token') token: string, @Query() query: unknown) {
     const projectId = await this.resolve(token);
     const f = { ...parse(Filter, query), project_id: projectId };
-    const [project, years, vendors, areas, summary] = await Promise.all([
+    const [project, years, vendors, areas, statuses, species, summary] = await Promise.all([
       this.db.one(this.db, 'SELECT id, name, short_code, location, status, start_date, end_date, description FROM projects WHERE id = $1', [projectId]),
       this.db.query('SELECT id, year_label, active FROM planting_years WHERE project_id = $1 ORDER BY year_label', [projectId]),
       this.db.query(
@@ -145,11 +179,23 @@ export class ShareController {
           WHERE s.project_id = $1 AND s.active GROUP BY s.id ORDER BY s.short_code`,
         [projectId],
       ),
+      // Filter options for the tree list: statuses in use (or active) and the project's species.
+      this.db.query(
+        `SELECT id, code, name, is_terminal FROM tree_statuses
+          WHERE active OR id IN (SELECT current_status_id FROM trees WHERE project_id = $1) ORDER BY sort_order, name`,
+        [projectId],
+      ),
+      this.db.query(
+        `SELECT sp.id, sp.scientific_name, sp.common_name FROM tree_species sp
+          WHERE sp.id IN (SELECT species_id FROM trees WHERE project_id = $1 AND record_state = 'ACTIVE')
+          ORDER BY COALESCE(sp.common_name, sp.scientific_name)`,
+        [projectId],
+      ),
       this.reports.summary(SHARE_READER, f),
     ]);
     // Clients see results, not staff: field officers' names are left out.
     const { officer_activity: _officers, ...shared } = summary as any;
-    return { project, planting_years: years.rows, vendors: vendors.rows, areas: areas.rows, summary: shared };
+    return { project, planting_years: years.rows, vendors: vendors.rows, areas: areas.rows, statuses: statuses.rows, species: species.rows, summary: shared };
   }
 
   /** The tree-density map for the link's project (planting_year_id optional). */
@@ -160,6 +206,77 @@ export class ShareController {
     const projectId = await this.resolve(token);
     const f = parse(DensityFilter.omit({ project_id: true }), query);
     return this.reports.density(SHARE_READER, projectId, f.planting_year_id);
+  }
+
+  /** The project's trees (registry records only), filtered, searched, sorted and paginated like the portal's tree list. */
+  @Public()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get('share/:token/trees')
+  async trees(@Param('token') token: string, @Query() query: unknown) {
+    const projectId = await this.resolve(token);
+    const f = parse(ShareTreeQuery, query);
+    const params: unknown[] = [projectId];
+    const where = [`t.project_id = $1`, `t.record_state = 'ACTIVE'`];
+    const eq = (sql: string, v?: string) => {
+      if (!v) return;
+      params.push(v);
+      where.push(sql.replace('?', `$${params.length}`));
+    };
+    eq('t.planting_year_id = ?', f.planting_year_id);
+    eq('t.sector_id = ?', f.sector_id);
+    eq('t.sub_sector_id = ?', f.sub_sector_id);
+    eq('t.species_id = ?', f.species_id);
+    eq('t.current_status_id = ?', f.status_id);
+    eq('t.vendor_id = ?', f.vendor_id);
+    if (f.q) eq(`t.physical_tree_id_normalized LIKE '%' || ? || '%'`, f.q.replace(/\s+/g, '').toUpperCase());
+    const whereSql = where.join(' AND ');
+    const dir = f.order === 'desc' ? 'DESC' : 'ASC';
+    const orderBy = [...TREE_SORTS[f.sort].map((c) => `${c} ${dir} NULLS LAST`), `t.physical_tree_id ${f.sort === 'tree_id' ? dir : 'ASC'}`, 't.id'].join(', ');
+    const [rows, count] = await Promise.all([
+      this.db.query(`${SHARE_TREE_SQL} WHERE ${whereSql} ORDER BY ${orderBy} LIMIT ${f.limit} OFFSET ${f.offset}`, params),
+      this.db.query(`SELECT count(*)::int AS total FROM trees t WHERE ${whereSql}`, params),
+    ]);
+    return { items: rows.rows, total: count.rows[0].total, limit: f.limit, offset: f.offset };
+  }
+
+  /**
+   * One tree with its visit history (corrected records replace the ones they correct) and photos. Visits carry the
+   * date, status, height and remarks only: never who recorded them.
+   */
+  @Public()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get('share/:token/trees/:id')
+  async tree(@Param('token') token: string, @Param('id', ParseUUIDPipe) id: string) {
+    const projectId = await this.resolve(token);
+    const tree = await this.db.one(this.db, `${SHARE_TREE_SQL} WHERE t.id = $1 AND t.project_id = $2 AND t.record_state = 'ACTIVE'`, [id, projectId]);
+    if (!tree) throw notFound('Tree');
+    const [observations, media] = await Promise.all([
+      this.db.query(
+        `SELECT o.id, o.observed_at, o.visit_type, o.is_initial, o.is_amendment, o.height_cm::float8 AS height_cm, o.remarks,
+                st.code AS status_code, st.name AS status_name, st.is_terminal AS status_terminal
+           FROM tree_observations o JOIN tree_statuses st ON st.id = o.observed_status_id
+          WHERE o.tree_id = $1 AND NOT EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id)
+          ORDER BY o.observed_at DESC, o.recorded_at DESC`,
+        [id],
+      ),
+      // A photo of a corrected visit belongs to the correction that replaced it.
+      this.db.query(
+        `SELECT m.id, COALESCE((SELECT a.id FROM tree_observations a WHERE a.amends_observation_id = m.observation_id ORDER BY a.recorded_at DESC LIMIT 1),
+                               m.observation_id) AS observation_id, m.upload_state, m.captured_at
+           FROM tree_media m WHERE m.tree_id = $1 AND m.upload_state = 'VERIFIED' ORDER BY m.captured_at DESC`,
+        [id],
+      ),
+    ]);
+    return { ...tree, observations: observations.rows, media: media.rows };
+  }
+
+  /** A signed URL (5 minutes) for one photo of the link's project: size=thumb (≈320 px) for lists, else the full photo. */
+  @Public()
+  @Throttle({ default: { limit: 300, ttl: 60_000 } })
+  @Get('share/:token/media/:id')
+  async photo(@Param('token') token: string, @Param('id', ParseUUIDPipe) id: string, @Query('size') size?: string) {
+    const projectId = await this.resolve(token);
+    return this.media.projectViewUrl(projectId, id, size === 'thumb' ? 'thumb' : 'full');
   }
 
   @Public()
