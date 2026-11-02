@@ -10,7 +10,6 @@ import { AuditPage } from './pages/Audit';
 import { ClientLinksPage } from './pages/ClientLinks';
 import { ConflictsPage } from './pages/Conflicts';
 import { DashboardPage } from './pages/Dashboard';
-import { DensityPage } from './pages/Density';
 import { FieldActivityPage } from './pages/FieldActivity';
 import { LandingPage } from './pages/Landing';
 import { LoginPage } from './pages/Login';
@@ -63,7 +62,8 @@ function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<DashboardPage />} />
-        <Route path="density" element={<DensityPage />} />
+        {/* The density map now lives on client reports, once areas have GPS outlines. */}
+        <Route path="density" element={<Navigate to="/" replace />} />
         <Route path="trees" element={<TreesPage />} />
         <Route path="trees/:id" element={<TreeDetailPage />} />
         <Route path="visits" element={<VisitsPage />} />

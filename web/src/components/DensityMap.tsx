@@ -96,6 +96,11 @@ function buildDotMap(sectors: DensityArea[]): DotMap {
  * large projects), coloured by its latest observation, plus totals, a legend and the figures in a table.
  * Trees have no GPS positions, so the dots are scattered inside their area and their positions are illustrative.
  */
+/** Whether any area in the report has a GPS outline, i.e. whether there is a map to draw at all. */
+export function hasOutlines(report: DensityReport) {
+  return report.sectors.some((s) => s.boundary || (s.sub_sectors ?? []).some((ss) => ss.boundary));
+}
+
 export function DensityView({ report }: { report: DensityReport }) {
   const [mapFailed, setMapFailed] = useState(false);
   const dotMap = useMemo(() => buildDotMap(report.sectors), [report]);

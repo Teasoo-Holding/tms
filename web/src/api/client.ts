@@ -106,13 +106,15 @@ async function send(url: string, init: RequestInit): Promise<Response> {
   } catch (err) {
     const origin = window.location.origin;
     const crossOrigin = !!API_ORIGIN && !url.startsWith(origin);
-    const message =
-      `The portal cannot reach the TMS server at ${describeBase()}. ` +
-      (crossOrigin
-        ? `The usual fix is either (a) setting CORS_ORIGINS on the backend to include this site's origin, ${origin}, or ` +
-          `(b) leaving VITE_API_BASE empty when building the portal so it uses the same-origin /api proxy.`
-        : `Check that the server is running and that the /api proxy is configured for this site (${origin}).`);
-    throw new ApiError(0, 'NETWORK_ERROR', message, undefined, { cause: String(err) });
+    // Technical details go to the browser console for whoever maintains the site, never on screen.
+    console.error(
+      `TMS server unreachable at ${describeBase()}. ` +
+        (crossOrigin
+          ? `Allow ${origin} in the backend's CORS_ORIGINS, or build the portal with VITE_API_BASE empty to use the /api proxy.`
+          : `Check that the server is running and that the /api proxy is configured for ${origin}.`),
+      err,
+    );
+    throw new ApiError(0, 'NETWORK_ERROR', 'Can’t reach the TMS server. Check your internet connection and try again.', undefined, { cause: String(err) });
   }
 }
 
@@ -129,14 +131,21 @@ async function raw(method: string, path: string, body: unknown, authed: boolean,
     data = text ? JSON.parse(text) : null;
   } catch {
     // A non-JSON body (e.g. an HTML page from a misconfigured proxy) is reported as a failed request below.
-    if (res.ok) throw new ApiError(res.status, 'BAD_RESPONSE', `The server at ${describeBase()} returned an unexpected response. Check VITE_API_BASE and the /api proxy.`);
+    if (res.ok) {
+      console.error(`Unexpected (non-JSON) response from ${describeBase()}${path}. Check VITE_API_BASE and the /api proxy.`);
+      throw new ApiError(res.status, 'BAD_RESPONSE', 'The TMS server sent an unexpected response. Try again in a moment; if it keeps happening, tell your administrator.');
+    }
   }
   // An expired access token is refreshed once; a wrong password re-entered for confirmation is not a session problem.
   if (res.status === 401 && authed && retry && session && data?.code !== 'PASSWORD_INCORRECT') {
     if (await refresh()) return raw(method, path, body, authed, false);
   }
   if (!res.ok) {
-    throw new ApiError(res.status, data?.code ?? 'ERROR', data?.message ?? `Request failed (${res.status})`, data?.details, data);
+    throw new ApiError(
+      res.status, data?.code ?? 'ERROR',
+      data?.message ?? `The TMS server couldn’t complete this request (error ${res.status}). Try again; if it keeps happening, tell your administrator.`,
+      data?.details, data,
+    );
   }
   return data;
 }
