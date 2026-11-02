@@ -81,7 +81,8 @@ jobs:
         if: steps.config.outputs.ready == 'true'
         run: |
           export VERCEL_ORG_ID="${VERCEL_OWNER_ID:-$VERCEL_ORG_ID}"
-          npm install --global vercel@39.3.0
+          # The CLI talks to Vercel's live API, so it is kept current rather than pinned to an old release.
+          npm install --global vercel@latest
           vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
           vercel build --prod --token="$VERCEL_TOKEN"
           url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
