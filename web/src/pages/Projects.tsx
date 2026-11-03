@@ -86,10 +86,11 @@ export function ProjectForm({ project, onClose, onSaved }: { project?: any; onCl
     end_date: project?.end_date ?? '',
     status: project?.status ?? 'DRAFT',
     physical_id_uniqueness: project?.physical_id_uniqueness ?? '',
+    maintenance_interval_days: String(project?.maintenance_interval_days ?? 90),
   });
   const save = useMutation({
     mutationFn: () => {
-      const body = clean(f.values);
+      const body = { ...clean(f.values), maintenance_interval_days: Number(f.values.maintenance_interval_days) };
       if (project) {
         const { physical_id_uniqueness: _ignored, ...rest } = body;
         return api.patch(`/projects/${project.id}`, rest);
@@ -117,6 +118,9 @@ export function ProjectForm({ project, onClose, onSaved }: { project?: any; onCl
           <Field label="Location"><input {...f.bind('location')} /></Field>
           <Field label="Start date"><input type="date" {...f.bind('start_date')} /></Field>
           <Field label="End date"><input type="date" {...f.bind('end_date')} /></Field>
+          <Field label="Maintenance every (days)" hint="7–730; trees are due this long after their last maintenance visit, or their planting">
+            <input type="number" required min={7} max={730} step={1} inputMode="numeric" {...f.bind('maintenance_interval_days')} />
+          </Field>
         </div>
         <Field label="Description"><textarea {...f.bind('description')} /></Field>
         {!project ? (

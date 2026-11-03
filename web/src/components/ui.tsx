@@ -164,6 +164,48 @@ export function RecordStatePill({ state }: { state: string }) {
   return <span className={`pill ${state === 'CONFLICT' ? 'warning' : 'critical'}`}>{state === 'CONFLICT' ? 'In conflict' : 'Rejected'}</span>;
 }
 
+// ------------------------------------------------------------------ visit types and maintenance
+/** Why a visit was made. Visits recorded without a type are monitoring visits (VISIT). */
+export const VISIT_TYPES: [string, string][] = [
+  ['VISIT', 'Monitoring'],
+  ['MAINTENANCE', 'Maintenance'],
+  ['FIRST_INSTANCE', 'First data collection'],
+  ['PLANTING', 'At planting'],
+];
+const VISIT_TYPE_LABEL = new Map(VISIT_TYPES);
+
+/** First data collection and planting (older app versions), registration (a tree's first visit), maintenance or monitoring. */
+export function visitTypeLabel(v: { visit_type?: string | null; is_initial?: boolean | null }) {
+  if (v.visit_type === 'FIRST_INSTANCE' || v.visit_type === 'PLANTING') return VISIT_TYPE_LABEL.get(v.visit_type)!;
+  if (v.is_initial) return 'Registration';
+  return v.visit_type === 'MAINTENANCE' ? 'Maintenance' : 'Monitoring';
+}
+
+export function VisitTypeTag({ visit }: { visit: { visit_type?: string | null; is_initial?: boolean | null } }) {
+  const label = visitTypeLabel(visit);
+  return <span className={`pill visit-type${label === 'Maintenance' ? ' maintenance' : ''}`} title="Visit type">{label}</span>;
+}
+
+/** A calendar day (YYYY-MM-DD) as "12 Oct 2026" in the reader's locale, without a time-zone shift. */
+export const fmtDay = (d?: string | null) => (d ? new Date(`${d.slice(0, 10)}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+
+export interface Maintenance {
+  last_at: string | null;
+  proposed_on: string;
+  status: 'none' | 'overdue' | 'due_soon' | 'scheduled';
+}
+
+/** The next maintenance date, coloured when overdue (red) or due within 14 days (amber); a dash for dead trees. */
+export function MaintenanceDue({ m }: { m?: Maintenance | null }) {
+  if (!m || m.status === 'none') return <span className="muted">—</span>;
+  if (m.status === 'scheduled') return <>{fmtDay(m.proposed_on)}</>;
+  return (
+    <span className={`pill ${m.status === 'overdue' ? 'critical' : 'warning'}`} title={m.status === 'overdue' ? 'Maintenance overdue' : 'Maintenance due soon'}>
+      {m.status === 'overdue' ? 'Overdue' : 'Due'} {fmtDay(m.proposed_on)}
+    </span>
+  );
+}
+
 export function ActivePill({ active }: { active: boolean }) {
   return <span className={`pill ${active ? 'good' : ''}`}>{active ? 'Active' : 'Inactive'}</span>;
 }

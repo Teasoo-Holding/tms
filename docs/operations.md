@@ -6,7 +6,7 @@
 |---|---|---|
 | API (`backend/`) | Managed container/app runtime, ≥2 instances behind HTTPS | Environment variables in `backend/.env.example`, secrets from the managed secrets service |
 | Database | Managed PostgreSQL 16 with PostGIS 3, private networking, PITR | `DATABASE_URL` |
-| Photos | Private S3-compatible bucket, versioning on, no public access | `STORAGE_DRIVER=s3`, `S3_*` |
+| Photos | Private S3-compatible bucket (Cloudflare R2), no public access | `STORAGE_DRIVER=s3`, `S3_*`; `LEGACY_S3_*` only while moving stores |
 | Web (`web/`) | Static hosting/CDN or the provided nginx image | `VITE_API_BASE`, `VITE_MAP_STYLE_URL` at build time |
 | Android (`android/`) | Signed release build via MDM or Play | `-PtmsApiBaseUrl=https://…/ -PtmsMapStyleUrl=…` |
 
@@ -63,6 +63,64 @@ restarts it on the migrated database.
 
 Vercel (project → Settings → Git): production branch `master`; root directory `web`. `web/vercel.json`
 proxies `/api` to the API and serves every other path (including `/download`) from the single-page app.
+
+## Photo storage on Cloudflare R2
+
+Photos (tree photos, their thumbnails and species reference images) live in one private S3-compatible bucket. The
+API hands out short-lived signed URLs: phones upload straight to the bucket with a signed PUT, and the portal and
+phones show photos through signed GETs. Nothing in the bucket is public.
+
+| Variable | Value for R2 |
+|---|---|
+| `STORAGE_DRIVER` | `s3` |
+| `S3_ENDPOINT` | `https://<account_id>.r2.cloudflarestorage.com` |
+| `S3_REGION` | `auto` |
+| `S3_BUCKET` | the bucket name, e.g. `tms-photos` |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | the R2 API token's keys (secrets) |
+| `S3_FORCE_PATH_STYLE` | optional; `true` or `false` (R2 accepts both) |
+
+`LEGACY_S3_BUCKET` (with `LEGACY_S3_ENDPOINT`, `LEGACY_S3_REGION`, `LEGACY_S3_ACCESS_KEY_ID`,
+`LEGACY_S3_SECRET_ACCESS_KEY`, `LEGACY_S3_FORCE_PATH_STYLE`) names the store photos were in before. While it is set,
+any photo not found in the new bucket is read and signed from the old one, so existing photos keep working until they
+are copied. Unset `LEGACY_S3_*` values fall back to Neon's own variables (`AWS_ENDPOINT_URL_S3`, `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_REGION`) with path-style addressing, so for the Neon bucket `LEGACY_S3_BUCKET=tree-image`
+is usually enough. New uploads and thumbnails always go to the new bucket.
+
+### Moving from Neon Object Storage to R2 (one time)
+
+1. **Create the bucket.** Cloudflare dashboard → R2 Object Storage → Create bucket. Name it (e.g. `tms-photos`),
+   location Automatic, default storage class. Leave public access off: no custom domain and no `r2.dev` URL. No CORS
+   rule is needed (phones upload outside a browser; the portal shows photos with plain `<img>` tags).
+2. **Note the endpoint.** On the R2 overview page, copy the Account ID. The endpoint is
+   `https://<account_id>.r2.cloudflarestorage.com` (without the bucket name).
+3. **Create an API token.** R2 → Manage R2 API tokens (API → Manage API tokens) → Create API token (an Account API
+   token): permission **Object Read & Write**, applied to **this bucket only**, no expiry (or your rotation period).
+   Copy the **Access Key ID** and **Secret Access Key**; the secret is shown once. Keep them in the password manager,
+   never in the repository.
+4. **Set the variables on Render** (API service → Environment): `STORAGE_DRIVER=s3`,
+   `S3_ENDPOINT=https://<account_id>.r2.cloudflarestorage.com`, `S3_REGION=auto`, `S3_BUCKET=<bucket>`,
+   `S3_ACCESS_KEY_ID=<access key id>`, `S3_SECRET_ACCESS_KEY=<secret>`, and `LEGACY_S3_BUCKET=tree-image`. Keep the
+   Neon variables (`AWS_ENDPOINT_URL_S3`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`) for now: the old
+   bucket is read with them. If they are not on the service, also set `LEGACY_S3_ENDPOINT`, `LEGACY_S3_REGION`,
+   `LEGACY_S3_ACCESS_KEY_ID` and `LEGACY_S3_SECRET_ACCESS_KEY` from the Neon console. Remove `S3_PUBLIC_ENDPOINT` if set.
+5. **Deploy** (saving the variables redeploys). Check: a photo taken on a phone syncs and shows in the portal (it is now
+   in R2), and older photos still show (read from Neon).
+6. **Copy the existing photos.** From a Render shell on the API service (or from `backend/` on a computer with the same
+   variables and `DATABASE_URL_UNPOOLED`):
+   - `node dist/media/copy-objects.js --dry-run` (locally: `npm run storage:copy -- --dry-run`) counts what will be
+     copied without writing anything;
+   - `node dist/media/copy-objects.js` (locally: `npm run storage:copy`) copies every object the database refers to:
+     each tree photo and its thumbnail, and each species image. It prints progress every 50 objects and a summary.
+   It is idempotent: objects already in R2 are skipped, so run it again after an interruption. "Missing" objects are
+   photos that never finished uploading (also missing before the move); "failed" ones are listed and make the command
+   exit with an error: run it again.
+7. **Run the copy once more** at least 10 minutes after the deploy (upload links issued before it may still have
+   written to Neon), until it reports `0 copied`. Spot-check a few older trees' photos in the portal.
+8. **Remove the fallback.** Delete `LEGACY_S3_*` from Render (and the Neon `AWS_*` variables once nothing else uses
+   them) and let it redeploy. Keep the Neon bucket for a few weeks as a backup, then delete it.
+
+R2 has no object versioning: for the backup policy below, copy the bucket regularly to a second bucket or provider
+(for example with `rclone sync`), with credentials separate from the API's.
 
 ## Sessions
 
@@ -125,7 +183,12 @@ A database backup does **not** include photographs. Both must be backed up and r
   pick it up on their next sync. Heights are always stored in centimetres.
 - New planting year: on the project's **Areas** tab, *Quick setup* creates numbered sectors (S1, S2, …)
   with sub-sectors (SS1, SS2, …) in one step; rename them or add GPS later. Running it again with a
-  larger number adds the missing ones.
+  larger number adds the missing ones. A sector added on its own (portal or phone) comes with four sub-sectors
+  SS1–SS4 unless the form asks for another number (0 for none).
+- **Maintenance**: each project's *Maintenance every (days)* setting (project → Edit, 7–730, default 90) sets when
+  trees are due: that many days after their last maintenance visit (visit type *Maintenance*), else after planting.
+  The dashboard counts trees overdue and due within 14 days; the Trees list filters and sorts by it; phones get the
+  interval on their next sync.
 - Exports (CSV/Excel) are audited and include sub-sector reference coordinates, never tree coordinates.
 
 ## Web portal on Vercel

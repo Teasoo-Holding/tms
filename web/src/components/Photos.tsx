@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { SHOW_HEIGHT } from '../features';
 import { fmtDateTime } from './ui';
@@ -88,6 +88,127 @@ function Thumb({ media, onOpen }: { media: any; onOpen: () => void }) {
 type Pt = [number, number];
 const isPt = (v: unknown): v is Pt => Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === 'number' && Number.isFinite(n));
 
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 6;
+const STEP = 1.5;
+interface View { s: number; x: number; y: number }
+const FIT: View = { s: 1, x: 0, y: 0 };
+
+/**
+ * Zoom and pan for the photo viewer: buttons, the mouse wheel, pinch, drag to pan, and double-click or double-tap to
+ * toggle. The frame (photo plus any measurement overlay) is centred in the stage and scaled about its centre; it is
+ * kept covering the stage, so the photo never slides out of view.
+ */
+function useZoom(reset: unknown) {
+  const stageRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<View>(FIT);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  useEffect(() => setView(FIT), [reset]);
+
+  const clamp = useCallback((v: View): View => {
+    const s = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.s));
+    const frame = frameRef.current;
+    const stage = stageRef.current;
+    if (!frame || !stage || s === 1) return { s, x: 0, y: 0 };
+    const maxX = Math.max(0, (frame.offsetWidth * s - stage.clientWidth) / 2);
+    const maxY = Math.max(0, (frame.offsetHeight * s - stage.clientHeight) / 2);
+    return { s, x: Math.min(maxX, Math.max(-maxX, v.x)), y: Math.min(maxY, Math.max(-maxY, v.y)) };
+  }, []);
+  /** A screen point as an offset from the stage's centre (the frame's untransformed centre). */
+  const offset = (clientX?: number, clientY?: number) => {
+    const r = stageRef.current?.getBoundingClientRect();
+    if (!r || clientX == null || clientY == null) return { x: 0, y: 0 };
+    return { x: clientX - (r.left + r.width / 2), y: clientY - (r.top + r.height / 2) };
+  };
+  /** Scales [from] to [s], keeping the photo point under [at] (an offset from the centre) where it is. */
+  const scaled = (from: View, s: number, at: { x: number; y: number }): View => {
+    const k = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, s)) / from.s;
+    return { s: from.s * k, x: at.x - k * (at.x - from.x), y: at.y - k * (at.y - from.y) };
+  };
+  const zoomBy = useCallback(
+    (factor: number, clientX?: number, clientY?: number) => setView(clamp(scaled(viewRef.current, viewRef.current.s * factor, offset(clientX, clientY)))),
+    [clamp],
+  );
+  const fit = useCallback(() => setView(FIT), []);
+  const toggle = (clientX?: number, clientY?: number) => (viewRef.current.s > 1 ? fit() : zoomBy(2.5, clientX, clientY));
+
+  // Wheel zoom needs a non-passive listener to stop the page from scrolling.
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (!frameRef.current) return;
+      zoomBy(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)), e.clientX, e.clientY);
+    };
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    return () => stage.removeEventListener('wheel', onWheel);
+  }, [zoomBy]);
+
+  // One pointer pans (when zoomed in); two pinch. A quick second tap toggles the zoom on touch screens.
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const gesture = useRef<{ view: View; x: number; y: number; dist: number } | null>(null);
+  const moved = useRef(false);
+  const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
+  const lastPointerType = useRef('mouse');
+  const start = () => {
+    const pts = [...pointers.current.values()];
+    const mid = pts.length > 1 ? { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 } : pts[0];
+    gesture.current = mid ? { view: viewRef.current, x: mid.x, y: mid.y, dist: pts.length > 1 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : 0 } : null;
+  };
+  const handlers = {
+    onPointerDown: (e: ReactPointerEvent) => {
+      lastPointerType.current = e.pointerType;
+      if (e.button !== 0) return;
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.current.size === 1) moved.current = false;
+      start();
+    },
+    onPointerMove: (e: ReactPointerEvent) => {
+      if (!pointers.current.has(e.pointerId) || !gesture.current) return;
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const g = gesture.current;
+      const pts = [...pointers.current.values()];
+      if (pts.length > 1 && g.dist > 0) {
+        moved.current = true;
+        const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        const v = scaled(g.view, (g.view.s * dist) / g.dist, offset(g.x, g.y));
+        setView(clamp({ ...v, x: v.x + mid.x - g.x, y: v.y + mid.y - g.y }));
+      } else if (pts.length === 1) {
+        const dx = e.clientX - g.x;
+        const dy = e.clientY - g.y;
+        if (Math.abs(dx) + Math.abs(dy) > 4) moved.current = true;
+        if (g.view.s > 1) setView(clamp({ ...g.view, x: g.view.x + dx, y: g.view.y + dy }));
+      }
+    },
+    onPointerUp: (e: ReactPointerEvent) => {
+      const wasOnly = pointers.current.size === 1;
+      pointers.current.delete(e.pointerId);
+      start();
+      if (e.pointerType !== 'touch' || !wasOnly || moved.current) return;
+      const tap = { t: Date.now(), x: e.clientX, y: e.clientY };
+      const last = lastTap.current;
+      if (last && tap.t - last.t < 300 && Math.hypot(tap.x - last.x, tap.y - last.y) < 30) {
+        lastTap.current = null;
+        toggle(tap.x, tap.y);
+      } else {
+        lastTap.current = tap;
+      }
+    },
+    onPointerCancel: (e: ReactPointerEvent) => {
+      pointers.current.delete(e.pointerId);
+      start();
+    },
+    // Double-click with a mouse; touch screens use the double tap above (some browsers also send dblclick).
+    onDoubleClick: (e: ReactMouseEvent) => lastPointerType.current !== 'touch' && toggle(e.clientX, e.clientY),
+  };
+  return { stageRef, frameRef, view, zoomBy, fit, handlers, moved };
+}
+
 export function Lightbox({ media, index: initial, observation, onClose }: { media: any[]; index: number; observation?: any; onClose: () => void }) {
   const [index, setIndex] = useState(initial);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -96,16 +217,22 @@ export function Lightbox({ media, index: initial, observation, onClose }: { medi
   // The thumbnail is usually cached already: show it while the full-size photo loads.
   const source = useContext(PhotoSourceContext);
   const thumb = useQueryClient().getQueryData<{ url: string }>(urlKey(source, m.id, 'thumb'));
+  const zoom = useZoom(`${index}:${size?.w}x${size?.h}`);
+  const { zoomBy, fit } = zoom;
+  const zoomed = zoom.view.s > 1;
   const go = useCallback((d: number) => (setSize(null), setIndex((i) => (i + d + media.length) % media.length)), [media.length]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
-      if (e.key === 'ArrowRight' && media.length > 1) go(1);
-      if (e.key === 'ArrowLeft' && media.length > 1) go(-1);
+      else if (e.key === 'ArrowRight' && media.length > 1) go(1);
+      else if (e.key === 'ArrowLeft' && media.length > 1) go(-1);
+      else if (e.key === '+' || e.key === '=') zoomBy(STEP);
+      else if (e.key === '-' || e.key === '_') zoomBy(1 / STEP);
+      else if (e.key === '0') fit();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, go, media.length]);
+  }, [onClose, go, media.length, zoomBy, fit]);
 
   // Height measured on a photo: overlay its markers on the photo it was measured on
   // (or the observation's only/first photo when the measurement does not name one).
@@ -113,29 +240,43 @@ export function Lightbox({ media, index: initial, observation, onClose }: { medi
   const pts = hm?.points ?? {};
   const appliesHere = hm && (hm.media_id ? hm.media_id === m.id : index === 0);
   const overlay = appliesHere && isPt(pts.ref_top) && isPt(pts.ref_bottom) && isPt(pts.tree_top) && isPt(pts.tree_base);
+  const frameStyle = { transform: `translate(${zoom.view.x}px, ${zoom.view.y}px) scale(${zoom.view.s})` };
+  const canZoom = m.upload_state === 'VERIFIED' && !!url.data;
+  // Where the last press started: a click that started beside the photo closes the viewer.
+  const pressedBackdrop = useRef(false);
 
   return (
-    <div className="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      {m.upload_state !== 'VERIFIED' ? (
-        <div className="lightbox-caption">This photo is still uploading.</div>
-      ) : !url.data ? (
-        thumb && !url.isError ? (
-          <div className="lightbox-frame">
-            <img src={thumb.url} alt="" className="lightbox-preview" />
-          </div>
+    <div className="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer">
+      <div
+        ref={zoom.stageRef}
+        className={`lightbox-stage${zoomed ? ' zoomed' : ''}`}
+        {...zoom.handlers}
+        onPointerDownCapture={(e) => (pressedBackdrop.current = e.target === e.currentTarget)}
+        // Not after a drag or a pinch, and not while zoomed in (a stray tap would lose the place).
+        onClick={() => pressedBackdrop.current && !zoomed && !zoom.moved.current && onClose()}
+      >
+        {m.upload_state !== 'VERIFIED' ? (
+          <div className="lightbox-caption">This photo is still uploading.</div>
+        ) : !url.data ? (
+          thumb && !url.isError ? (
+            <div className="lightbox-frame">
+              <img src={thumb.url} alt="" className="lightbox-preview" />
+            </div>
+          ) : (
+            <div className="lightbox-caption">{url.isError ? 'The photo could not be loaded.' : 'Loading photo…'}</div>
+          )
         ) : (
-          <div className="lightbox-caption">{url.isError ? 'The photo could not be loaded.' : 'Loading photo…'}</div>
-        )
-      ) : (
-        <div className="lightbox-frame">
-          <img
-            src={url.data.url}
-            alt={`Tree photo captured ${fmtDateTime(m.captured_at)}`}
-            onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-          />
-          {overlay && size && <MeasurementOverlay w={size.w} h={size.h} points={pts} />}
-        </div>
-      )}
+          <div ref={zoom.frameRef} className="lightbox-frame" style={frameStyle}>
+            <img
+              src={url.data.url}
+              alt={`Tree photo captured ${fmtDateTime(m.captured_at)}`}
+              draggable={false}
+              onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+            />
+            {overlay && size && <MeasurementOverlay w={size.w} h={size.h} points={pts} />}
+          </div>
+        )}
+      </div>
       <div className="lightbox-caption">
         {media.length > 1 && <button onClick={() => go(-1)} aria-label="Previous photo">‹ Prev</button>}
         <span>
@@ -149,7 +290,15 @@ export function Lightbox({ media, index: initial, observation, onClose }: { medi
           </span>
         )}
         {media.length > 1 && <button onClick={() => go(1)} aria-label="Next photo">Next ›</button>}
-        <button onClick={onClose}>Close</button>
+        {canZoom && (
+          <span className="lightbox-zoom" role="group" aria-label="Zoom">
+            <button onClick={() => zoomBy(1 / STEP)} disabled={!zoomed} aria-label="Zoom out" title="Zoom out (−)">−</button>
+            <span className="lightbox-zoom-level" aria-live="polite">{Math.round(zoom.view.s * 100)}%</span>
+            <button onClick={() => zoomBy(STEP)} disabled={zoom.view.s >= MAX_ZOOM} aria-label="Zoom in" title="Zoom in (+)">+</button>
+            <button onClick={fit} disabled={!zoomed} aria-label="Fit the photo to the screen" title="Fit (0)">Fit</button>
+          </span>
+        )}
+        <button onClick={onClose} aria-label="Close the photo viewer" title="Close (Esc)">Close</button>
       </div>
     </div>
   );

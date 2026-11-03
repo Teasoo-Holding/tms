@@ -26,8 +26,11 @@ const AreaFields = {
   active: z.boolean().default(true),
 };
 const AreaBody = z.object(AreaFields);
-/** Sectors are surveyed for one planting year. */
-const SectorBody = z.object({ ...AreaFields, planting_year_id: z.string().uuid() });
+/**
+ * Sectors are surveyed for one planting year. A new sector comes with sub-sectors "Sub-sector 1".."Sub-sector n"
+ * (SS1..SSn, no location): 4 unless `sub_sectors` says otherwise (0 for none).
+ */
+const SectorBody = z.object({ ...AreaFields, planting_year_id: z.string().uuid(), sub_sectors: z.number().int().min(0).max(26).default(4) });
 const AreaPatch = AreaBody.partial();
 type AreaInput = z.infer<typeof AreaBody>;
 
@@ -159,10 +162,16 @@ export class GeographyController {
   @Roles('ADMIN')
   @Post('projects/:id/sectors')
   async createSector(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) projectId: string, @Body() body: unknown) {
-    const b = parse(SectorBody, body);
+    const { sub_sectors: subSectorCount, ...b } = parse(SectorBody, body);
+    // One transaction: the sector and its sub-sectors are created together or not at all.
     return this.db.tx(async (tx) => {
       if (!(await this.db.one(tx, 'SELECT id FROM projects WHERE id = $1', [projectId]))) throw notFound('Project');
-      return this.insertSector(tx, user, projectId, b, b.planting_year_id);
+      const sector = await this.insertSector(tx, user, projectId, b, b.planting_year_id);
+      const subSectors = [];
+      for (let k = 1; k <= subSectorCount; k++) {
+        subSectors.push(await this.insertSubSector(tx, user, sector!.id, { name: `Sub-sector ${k}`, short_code: `SS${k}`, active: true }));
+      }
+      return { ...sector, sub_sectors: subSectors };
     });
   }
 

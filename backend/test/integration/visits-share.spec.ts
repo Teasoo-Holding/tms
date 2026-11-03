@@ -173,6 +173,17 @@ describe('client link: trees, photos and areas', () => {
     expect(view.species.map((s: any) => s.id)).toEqual([f.speciesId]);
   });
 
+  it('gives the previous and next tree of the client’s list, with its filters and sort', async () => {
+    const list = (await pub(`/share/${token}/trees?sort=tree_id&order=desc`).expect(200)).body.items.map((t: any) => t.id);
+    expect((await pub(`/share/${token}/trees/${list[1]}/neighbours?sort=tree_id&order=desc`).expect(200)).body)
+      .toEqual({ previous_id: list[0], next_id: list[2], position: 2, total: 5 });
+    expect((await pub(`/share/${token}/trees/${trees.e}/neighbours?sub_sector_id=${f.subB}`).expect(200)).body)
+      .toEqual({ previous_id: null, next_id: null, position: 1, total: 1 });
+    // Another project's tree is never in the list.
+    expect((await pub(`/share/${token}/trees/${other.tree}/neighbours`).expect(200)).body).toMatchObject({ position: null, previous_id: null, next_id: null });
+    await pub(`/share/${token}/trees/${trees.a}/neighbours?sort=maintenance`).expect(400);
+  });
+
   it('shows a tree with its visits and photos, only within the link’s project', async () => {
     const t = (await pub(`/share/${token}/trees/${trees.a}`).expect(200)).body;
     expect(t.observations.map((o: any) => o.status_code)).toEqual(['DEAD', 'ALIVE']);

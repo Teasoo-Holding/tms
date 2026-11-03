@@ -167,3 +167,58 @@ describe('generating sectors and sub-sectors', () => {
     expect((await admin.get('/admin/settings').expect(200)).body).toEqual({ height_unit: 'm' });
   });
 });
+
+describe('a new sector comes with its sub-sectors', () => {
+  let yearId: string;
+  beforeAll(async () => {
+    yearId = (await admin.post(`/projects/${projectId}/planting-years`, { year_label: '2050' }).expect(201)).body.id;
+  });
+  const codes = (rows: any[]) => rows.map((ss: any) => [ss.short_code, ss.name]);
+  const subSectorsOf = async (sectorId: string) =>
+    (await admin.get(`/projects/${projectId}/areas?planting_year_id=${yearId}`).expect(200)).body.find((s: any) => s.id === sectorId)?.sub_sectors ?? [];
+
+  it('creates Sub-sector 1–4 (SS1–SS4) by default, as the phones and web call it', async () => {
+    const res = (await admin.post(`/projects/${projectId}/sectors`, { planting_year_id: yearId, name: 'North', short_code: 'N1' }).expect(201)).body;
+    const four = [['SS1', 'Sub-sector 1'], ['SS2', 'Sub-sector 2'], ['SS3', 'Sub-sector 3'], ['SS4', 'Sub-sector 4']];
+    expect(codes(res.sub_sectors)).toEqual(four);
+    expect(res.sub_sectors[0]).toMatchObject({ sector_id: res.id, project_id: projectId, active: true, boundary: null, reference_latitude: null });
+    expect(codes(await subSectorsOf(res.id))).toEqual(four);
+  });
+
+  it('creates as many as asked, or none', async () => {
+    const two = (await admin.post(`/projects/${projectId}/sectors`, { planting_year_id: yearId, name: 'East', short_code: 'E1', sub_sectors: 2 }).expect(201)).body;
+    expect(codes(two.sub_sectors)).toEqual([['SS1', 'Sub-sector 1'], ['SS2', 'Sub-sector 2']]);
+    const none = (await admin.post(`/projects/${projectId}/sectors`, { planting_year_id: yearId, name: 'West', short_code: 'W1', sub_sectors: 0 }).expect(201)).body;
+    expect(none.sub_sectors).toEqual([]);
+    expect(await subSectorsOf(none.id)).toEqual([]);
+    await admin.post(`/projects/${projectId}/sectors`, { planting_year_id: yearId, name: 'Too many', short_code: 'X1', sub_sectors: 27 }).expect(400);
+    await admin.post(`/projects/${projectId}/sectors`, { planting_year_id: yearId, name: 'Negative', short_code: 'X2', sub_sectors: -1 }).expect(400);
+  });
+
+  it('creates nothing when a sub-sector cannot be created', async () => {
+    // Make the third sub-sector fail inside the transaction.
+    await sql(`CREATE FUNCTION fail_third_sub_sector() RETURNS trigger LANGUAGE plpgsql AS $$
+               BEGIN IF NEW.short_code = 'SS3' THEN RAISE EXCEPTION 'test failure'; END IF; RETURN NEW; END $$`);
+    await sql(`CREATE TRIGGER fail_third_sub_sector BEFORE INSERT ON sub_sectors FOR EACH ROW EXECUTE FUNCTION fail_third_sub_sector()`);
+    try {
+      await admin.post(`/projects/${projectId}/sectors`, { planting_year_id: yearId, name: 'South', short_code: 'Z1' }).expect(500);
+    } finally {
+      await sql('DROP TRIGGER fail_third_sub_sector ON sub_sectors');
+      await sql('DROP FUNCTION fail_third_sub_sector()');
+    }
+    expect(await sql(`SELECT id FROM sectors WHERE short_code = 'Z1'`)).toEqual([]);
+    expect(await sql(`SELECT id FROM audit_logs WHERE action = 'sector.create' AND after ->> 'short_code' = 'Z1'`)).toEqual([]);
+    // The same request works once nothing is in the way.
+    const ok = (await admin.post(`/projects/${projectId}/sectors`, { planting_year_id: yearId, name: 'South', short_code: 'Z1' }).expect(201)).body;
+    expect(ok.sub_sectors).toHaveLength(4);
+  });
+
+  it('leaves existing sectors alone', async () => {
+    const before = await sql(`SELECT s.short_code, count(ss.id)::int AS n FROM sectors s LEFT JOIN sub_sectors ss ON ss.sector_id = s.id
+                               WHERE s.planting_year_id IS DISTINCT FROM $1 GROUP BY s.short_code ORDER BY 1`, [yearId]);
+    await admin.post(`/projects/${projectId}/sectors`, { planting_year_id: yearId, name: 'Centre', short_code: 'C1' }).expect(201);
+    const after = await sql(`SELECT s.short_code, count(ss.id)::int AS n FROM sectors s LEFT JOIN sub_sectors ss ON ss.sector_id = s.id
+                              WHERE s.planting_year_id IS DISTINCT FROM $1 GROUP BY s.short_code ORDER BY 1`, [yearId]);
+    expect(after).toEqual(before);
+  });
+});

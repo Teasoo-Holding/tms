@@ -19,9 +19,10 @@ beforeAll(async () => {
   app = await bootApp();
   f = await loadFixtures();
   admin = await new Session(app, 'admin@tms.local').login();
-  // 2025 has its own survey: sector S02 with sub-sector SS1. The seeded S01 (SS01, SS02) is not tied to a year.
-  sector25 = (await admin.post(`/projects/${f.projectId}/sectors`, { planting_year_id: f.year2025, name: 'South', short_code: 'S02' }).expect(201)).body.id;
-  sub25 = (await admin.post(`/sectors/${sector25}/sub-sectors`, { name: 'Sub-sector 1', short_code: 'SS1' }).expect(201)).body.id;
+  // 2025 has its own survey: sector S02 with sub-sector SS1 (created with it). The seeded S01 (SS01, SS02) is not tied to a year.
+  const south = (await admin.post(`/projects/${f.projectId}/sectors`, { planting_year_id: f.year2025, name: 'South', short_code: 'S02', sub_sectors: 1 }).expect(201)).body;
+  sector25 = south.id;
+  sub25 = south.sub_sectors[0].id;
   const in2025 = { planting_year_id: f.year2025, sector_id: sector25, sub_sector_id: sub25, id_component_values: { PROJECT_CODE: 'T4L', PLANTING_YEAR: '2025' } };
   const payloads = {
     a: treePayload(f, '101'),
@@ -102,6 +103,24 @@ describe('tree list sorting', () => {
     await admin.get('/trees?sort=created_by').expect(400);
     await admin.get('/trees?sort=t.id;DROP TABLE trees').expect(400);
     await admin.get('/trees?sort=tree_id&order=sideways').expect(400);
+  });
+});
+
+describe('previous and next tree', () => {
+  const neighbours = (id: string, query: string) => admin.get(`/trees/${id}/neighbours?${query}`).expect(200).then((r) => r.body);
+
+  it('follows the list’s filters and sort, with the position and total', async () => {
+    const list = (await trees('sort=tree_id&order=desc')).items.map((t: any) => t.id);
+    expect(await neighbours(list[2], 'sort=tree_id&order=desc')).toEqual({ previous_id: list[1], next_id: list[3], position: 3, total: 5 });
+    expect(await neighbours(list[0], 'sort=tree_id&order=desc')).toEqual({ previous_id: null, next_id: list[1], position: 1, total: 5 });
+    expect(await neighbours(list[4], 'sort=tree_id&order=desc&limit=2&offset=2')).toEqual({ previous_id: list[3], next_id: null, position: 5, total: 5 });
+    const in2025 = (await trees(`sector_id=${sector25}&sort=status`)).items.map((t: any) => t.id);
+    expect(await neighbours(in2025[0], `sector_id=${sector25}&sort=status`)).toEqual({ previous_id: null, next_id: in2025[1], position: 1, total: 2 });
+  });
+
+  it('has no position for a tree outside the list', async () => {
+    expect(await neighbours(ids.a, `sector_id=${sector25}`)).toEqual({ previous_id: null, next_id: null, position: null, total: 2 });
+    await admin.get(`/trees/${ids.a}/neighbours?sort=nonsense`).expect(400);
   });
 });
 

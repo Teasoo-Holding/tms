@@ -139,7 +139,7 @@ components:
             status_id: { type: string, format: uuid }
             observed_at: { type: string, format: date-time, description: Stamped by the device. }
             remarks: { type: [string, 'null'] }
-            visit_type: { enum: [VISIT, FIRST_INSTANCE, PLANTING, MAINTENANCE, null], default: VISIT, description: Optional; omitted or null means VISIT. }
+            visit_type: { enum: [VISIT, FIRST_INSTANCE, PLANTING, MAINTENANCE, null], default: VISIT, description: 'Optional; omitted or null means VISIT. VISIT is a monitoring visit and MAINTENANCE a maintenance visit (it resets the tree''s maintenance due date); FIRST_INSTANCE (first data collection) and PLANTING (at planting) come from older apps.' }
             field_session_id: { type: [string, 'null'], format: uuid, description: Optional; one per field session on the phone, for the field-activity report. }
     DensityStats:
       type: object
@@ -191,7 +191,7 @@ components:
         remarks: { type: [string, 'null'] }
         amends_observation_id: { type: [string, 'null'], format: uuid, description: Set for audited corrections; the original is kept and marked superseded. }
         amendment_reason: { type: [string, 'null'] }
-        visit_type: { enum: [VISIT, FIRST_INSTANCE, PLANTING, MAINTENANCE, null], default: VISIT, description: Optional; omitted or null means VISIT. }
+        visit_type: { enum: [VISIT, FIRST_INSTANCE, PLANTING, MAINTENANCE, null], default: VISIT, description: 'Optional; omitted or null means VISIT. VISIT is a monitoring visit and MAINTENANCE a maintenance visit (it resets the tree''s maintenance due date); FIRST_INSTANCE (first data collection) and PLANTING (at planting) come from older apps.' }
         field_session_id: { type: [string, 'null'], format: uuid, description: Optional; one per field session on the phone, for the field-activity report. }
     OperationResult:
       type: object
@@ -340,10 +340,14 @@ paths:
     get: { summary: Projects visible to the caller, responses: { '200': { description: Projects } } }
     post:
       summary: Create project (admin). physical_id_uniqueness (GLOBAL or PROJECT) must be chosen explicitly and is fixed.
+      description: >-
+        Optional maintenance_interval_days (integer 7–730, default 90): a tree's next maintenance is due this many days after its latest
+        maintenance visit, else its planting date, else its registration date. Every project object (here, GET /projects, /projects/{id},
+        bootstrap projects and project changes) carries maintenance_interval_days.
       responses: { '201': { description: Project }, '400': { $ref: '#/components/responses/Error' } }
   /projects/{id}:
     get: { summary: Project with planting years and ID scheme versions, responses: { '200': { description: Project } } }
-    patch: { summary: Update project (admin). Short-code changes affect future IDs only., responses: { '200': { description: Project } } }
+    patch: { summary: 'Update project (admin), including maintenance_interval_days (7–730). Short-code changes affect future IDs only.', responses: { '200': { description: Project } } }
   /projects/{id}/planting-years:
     post: { summary: Create planting year or cohort (admin), responses: { '201': { description: Planting year } } }
   /planting-years/{id}:
@@ -402,9 +406,13 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
   /projects/{id}/sectors:
     post:
-      summary: Create sector (admin)
+      summary: Create sector (admin), with its sub-sectors
+      description: >-
+        Body: an Area plus planting_year_id and optional sub_sectors (integer 0–26, default 4). The sector is created with sub-sectors
+        "Sub-sector 1".."Sub-sector n" (SS1..SSn, no location) in the same transaction: all or nothing. 0 creates none. Existing sectors are
+        not changed.
       requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/Area' } } } }
-      responses: { '201': { description: Sector } }
+      responses: { '201': { description: 'Sector, with sub_sectors: the sub-sectors created' }, '400': { $ref: '#/components/responses/Error' } }
   /sectors/{id}:
     patch: { summary: Update sector (admin), responses: { '200': { description: Sector } } }
   /sectors/{id}/sub-sectors:
@@ -492,10 +500,19 @@ paths:
         - { name: status_id, in: query, schema: { type: string } }
         - { name: vendor_id, in: query, schema: { type: string } }
         - { name: record_state, in: query, schema: { enum: [ACTIVE, CONFLICT, REJECTED] } }
+        - { name: maintenance, in: query, description: 'Trees whose maintenance is overdue, or due within 14 days (today included)', schema: { enum: [overdue, due_soon] } }
         - { name: q, in: query, description: Physical ID substring (normalised), schema: { type: string } }
+        - { name: sort, in: query, schema: { enum: [tree_id, planting_year, area, species, status, last_observed, maintenance], default: tree_id }, description: maintenance sorts by maintenance.proposed_on }
+        - { name: order, in: query, schema: { enum: [asc, desc], default: asc } }
         - { name: limit, in: query, schema: { type: integer } }
         - { name: offset, in: query, schema: { type: integer } }
-      responses: { '200': { description: '{ items, total, limit, offset }' } }
+      responses:
+        '200':
+          description: >-
+            { items, total, limit, offset }. Each tree carries maintenance_interval_days (its project's) and
+            maintenance: { last_at (latest maintenance visit not replaced by a correction, or null), proposed_on (YYYY-MM-DD: last_at's date,
+            else planted_on, else the registration date, plus the interval), status: none (not an active record, or a terminal status such as
+            dead) | overdue (proposed_on before today) | due_soon (within the next 14 days) | scheduled }. Dates are UTC days.
     post:
       summary: Register tree (same rules as a sync create)
       requestBody: { content: { application/json: { schema: { $ref: '#/components/schemas/CreateTree' } } } }
@@ -505,7 +522,7 @@ paths:
         '409': { description: Conflict (the record is preserved for review) }
         '422': { description: Rejected }
   /trees/{id}:
-    get: { summary: Tree with observations, media, replacement lineage and ID history, responses: { '200': { description: Tree } } }
+    get: { summary: 'Tree with observations (each with visit_type), media, replacement lineage, ID history and maintenance (as in /trees)', responses: { '200': { description: Tree } } }
     patch:
       summary: Update permitted metadata with base_revision
       requestBody:
@@ -518,6 +535,24 @@ paths:
                 base_revision: { type: integer }
                 changes: { type: object, properties: { species_id: { type: string }, vendor_id: { type: [string, 'null'] }, planted_on: { type: [string, 'null'] }, notes: { type: [string, 'null'] } } }
       responses: { '200': { description: Accepted }, '409': { description: REVISION_MISMATCH } }
+  /trees/{id}/neighbours:
+    get:
+      summary: The previous and next tree of the tree list with the same filters and sort (Previous / Next on a tree's page)
+      description: Takes the /trees query parameters (limit and offset are ignored). position and the neighbours are null when the tree is not in that list.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: '{ previous_id, next_id, position (1-based), total }'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  previous_id: { type: [string, 'null'] }
+                  next_id: { type: [string, 'null'] }
+                  position: { type: [integer, 'null'] }
+                  total: { type: integer }
   /trees/{id}/media:
     get:
       summary: The tree's photos, newest first (view each with /media/{id}/view-url?size=thumb or full)
@@ -652,7 +687,11 @@ paths:
         - { name: project_id, in: query, schema: { type: string } }
         - { name: planting_year_id, in: query, schema: { type: string } }
         - { name: overdue_days, in: query, schema: { type: integer, default: 90 } }
-      responses: { '200': { description: Summary including last_server_sync_at and data completeness } }
+      responses:
+        '200':
+          description: >-
+            Summary including last_server_sync_at, data completeness and maintenance: { overdue_trees, due_soon_trees, due_soon_days (14) }
+            (trees in the filters whose maintenance is overdue or due soon; see /trees)
   /reports/density:
     get:
       summary: Tree density by sector and sub-sector, with outlines, for the density map (admin and executive)
@@ -777,7 +816,7 @@ paths:
       responses: { '200': { description: 'Project view, plus statuses [{ id, code, name, is_terminal }] and species [{ id, scientific_name, common_name }] for the tree filters' }, '404': { description: LINK_INVALID } }
   /share/{token}/trees:
     get:
-      summary: The link's project's trees (registry only), filtered, searched and sorted like /trees (no sign-in)
+      summary: The link's project's trees (registry only), filtered, searched and sorted like /trees (no sign-in; no maintenance filter or sort)
       description: >-
         Filters planting_year_id, sector_id, sub_sector_id, species_id, status_id, vendor_id, q (tree ID); sort tree_id | planting_year | area | species |
         status | last_observed, order asc | desc, limit (default 50, max 500), offset. Only client-safe columns are returned: never who registered,
@@ -801,6 +840,12 @@ paths:
         upload_state, captured_at }] (verified photos only; a corrected visit's photos belong to its correction). No collector data.
       security: []
       responses: { '200': { description: Tree }, '404': { description: 'LINK_INVALID, or NOT_FOUND when the tree is not in the link''s project' } }
+  /share/{token}/trees/{id}/neighbours:
+    get:
+      summary: The previous and next tree of the client's tree list with the same filters and sort (no sign-in)
+      description: Takes the /share/{token}/trees query parameters (limit and offset are ignored); as /trees/{id}/neighbours.
+      security: []
+      responses: { '200': { description: '{ previous_id, next_id, position, total }' }, '404': { description: LINK_INVALID } }
   /share/{token}/media/{id}:
     get:
       summary: Signed URL (5 minutes) for a photo of the link's project; size=thumb for the ≈320 px copy (no sign-in)
@@ -809,9 +854,14 @@ paths:
         - { name: size, in: query, schema: { enum: [thumb, full] } }
       responses: { '200': { description: '{ url, expires_in, size }' }, '404': { description: 'LINK_INVALID, or NOT_FOUND outside the link''s project' }, '409': { description: MEDIA_NOT_AVAILABLE } }
   /reports/trees.csv:
-    get: { summary: CSV export (formula-injection safe; audited), responses: { '200': { description: CSV } } }
+    get: { summary: 'CSV export (formula-injection safe; audited). Columns include last_maintenance_at, next_maintenance_on and maintenance_status.', responses: { '200': { description: CSV } } }
   /reports/trees.xlsx:
-    get: { summary: Excel export (audited), responses: { '200': { description: XLSX } } }
+    get: { summary: 'Trees workbook (About, Trees, By status; audited): the dashboard''s Excel export for executives', responses: { '200': { description: XLSX } } }
+  /reports/export.xlsx:
+    get:
+      summary: 'Everything in one workbook (admin; audited): About (generation time, last sync, notes), Summary, By status, By sector, Trees, Visits and the configuration sheets'
+      description: The dashboard's Excel export for administrators; takes the visits filters.
+      responses: { '200': { description: XLSX }, '403': { description: Not an administrator } }
   /health:
     get: { summary: Liveness and database check, security: [], responses: { '200': { description: OK } } }
   /health/metrics:
