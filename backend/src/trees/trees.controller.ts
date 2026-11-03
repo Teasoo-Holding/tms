@@ -6,9 +6,13 @@ import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
 import { notFound } from '../common/errors';
 import { pagination, parse } from '../common/validation';
 import { Db } from '../database/db.service';
+import { MAINTENANCE_COLUMNS, MAINTENANCE_JOIN, MAINTENANCE_PROPOSED_SQL, MAINTENANCE_STATUS_SQL, withMaintenance } from '../domain/maintenance';
 import { OperationResult } from './operation-result';
 import { runOperation } from './operation-runner';
 import { CreateTreePayload, ObservationPayload, TreesService, UpdateTreePayload } from './trees.service';
+
+/** Sorts every tree list offers (the client share link's too). */
+export const TREE_SORT_KEYS = ['tree_id', 'planting_year', 'area', 'species', 'status', 'last_observed'] as const;
 
 export const TreeQuery = pagination.extend({
   project_id: z.string().uuid().optional(),
@@ -19,22 +23,45 @@ export const TreeQuery = pagination.extend({
   status_id: z.string().uuid().optional(),
   vendor_id: z.string().uuid().optional(),
   record_state: z.enum(['ACTIVE', 'CONFLICT', 'REJECTED']).optional(),
+  /** Trees whose maintenance is overdue, or due within the next 14 days. */
+  maintenance: z.enum(['overdue', 'due_soon']).optional(),
   q: z.string().max(100).optional(),
-  sort: z.enum(['tree_id', 'planting_year', 'area', 'species', 'status', 'last_observed']).default('tree_id'),
+  sort: z.enum([...TREE_SORT_KEYS, 'maintenance']).default('tree_id'),
   order: z.enum(['asc', 'desc']).default('asc'),
 });
+type TreeFilter = z.infer<typeof TreeQuery>;
 
 /** Codes such as S2 and S10 sort by their number: the letters first, then the trailing digits as a number. */
 const natural = (col: string) => [`regexp_replace(${col}, '[0-9]+$', '')`, `NULLIF(substring(${col} from '[0-9]+$'), '')::bigint`];
 /** Columns the tree list can be sorted by (whitelist: the request names a key, never SQL). */
-export const TREE_SORTS: Record<z.infer<typeof TreeQuery>['sort'], string[]> = {
+export const TREE_SORTS: Record<TreeFilter['sort'], string[]> = {
   tree_id: ['t.physical_tree_id'],
   planting_year: ['py.year_label'],
   area: [...natural('s.short_code'), ...natural('ss.short_code')],
   species: ['COALESCE(sp.common_name, sp.scientific_name)'],
   status: ['st.sort_order', 'st.name'],
   last_observed: ['t.last_observed_at'],
+  maintenance: [MAINTENANCE_PROPOSED_SQL],
 };
+
+/** ORDER BY for a tree list. Empty values (trees never observed) come last either way; the tree ID then the id keep paging stable. */
+export function treeOrderBy(sort: TreeFilter['sort'], order: 'asc' | 'desc') {
+  const dir = order === 'desc' ? 'DESC' : 'ASC';
+  return [...TREE_SORTS[sort].map((c) => `${c} ${dir} NULLS LAST`), `t.physical_tree_id ${sort === 'tree_id' ? dir : 'ASC'}`, 't.id'].join(', ');
+}
+
+/**
+ * The trees just before and after [idParam] in a list (its FROM and WHERE, and its ORDER BY), the tree's 1-based
+ * position and the list's size: for "Previous" and "Next" on a tree's page. Position and neighbours are null when the
+ * tree is not in the list (e.g. its status changed since the list was opened).
+ */
+export function neighboursSql(fromWhere: string, orderBy: string, idParam: string) {
+  return `WITH ordered AS (SELECT t.id, row_number() OVER (ORDER BY ${orderBy}) AS pos ${fromWhere})
+    SELECT (SELECT count(*) FROM ordered)::int AS total, c.pos::int AS position,
+           (SELECT o.id FROM ordered o WHERE o.pos = c.pos - 1) AS previous_id,
+           (SELECT o.id FROM ordered o WHERE o.pos = c.pos + 1) AS next_id
+      FROM (SELECT 1) one LEFT JOIN ordered c ON c.id = ${idParam}`;
+}
 
 const CorrectionBody = z.object({ serial_input: z.string().max(32), reason: z.string().trim().min(5).max(1000) });
 
@@ -45,15 +72,8 @@ const HTTP_STATUS: Record<OperationResult['status'], number> = {
   REJECTED: HttpStatus.UNPROCESSABLE_ENTITY,
 };
 
-export const TREE_LIST_SQL = `
-  SELECT t.id, t.physical_tree_id, t.serial_number, t.id_scheme_version, t.project_id, p.name AS project_name,
-         t.planting_year_id, py.year_label, t.sector_id, s.name AS sector_name, s.short_code AS sector_code,
-         t.sub_sector_id, ss.name AS sub_sector_name, ss.short_code AS sub_sector_code,
-         t.species_id, sp.scientific_name AS species_name, sp.common_name AS species_common_name,
-         t.current_status_id, st.code AS status_code, st.name AS status_name, st.is_terminal AS status_terminal, t.last_observed_at,
-         t.vendor_id, v.name AS vendor_name, t.replaces_tree_id, rt.physical_tree_id AS replaces_physical_id,
-         t.planted_on, t.notes, t.custom_fields, t.record_state, t.revision, t.created_at, t.updated_at, t.synced_at,
-         t.created_by, u.full_name AS created_by_name
+/** The tree list's joins; projects (p) and the current status (st) also serve the maintenance columns. */
+const TREE_FROM = `
     FROM trees t
     JOIN projects p ON p.id = t.project_id
     JOIN planting_years py ON py.id = t.planting_year_id
@@ -63,15 +83,27 @@ export const TREE_LIST_SQL = `
     LEFT JOIN tree_statuses st ON st.id = t.current_status_id
     LEFT JOIN vendors v ON v.id = t.vendor_id
     LEFT JOIN trees rt ON rt.id = t.replaces_tree_id
-    JOIN users u ON u.id = t.created_by`;
+    JOIN users u ON u.id = t.created_by
+    ${MAINTENANCE_JOIN}`;
+
+export const TREE_LIST_SQL = `
+  SELECT t.id, t.physical_tree_id, t.serial_number, t.id_scheme_version, t.project_id, p.name AS project_name,
+         t.planting_year_id, py.year_label, t.sector_id, s.name AS sector_name, s.short_code AS sector_code,
+         t.sub_sector_id, ss.name AS sub_sector_name, ss.short_code AS sub_sector_code,
+         t.species_id, sp.scientific_name AS species_name, sp.common_name AS species_common_name,
+         t.current_status_id, st.code AS status_code, st.name AS status_name, st.is_terminal AS status_terminal, t.last_observed_at,
+         t.vendor_id, v.name AS vendor_name, t.replaces_tree_id, rt.physical_tree_id AS replaces_physical_id,
+         t.planted_on, t.notes, t.custom_fields, t.record_state, t.revision, t.created_at, t.updated_at, t.synced_at,
+         t.created_by, u.full_name AS created_by_name, p.maintenance_interval_days,
+         ${MAINTENANCE_COLUMNS}
+  ${TREE_FROM}`;
 
 @Controller('trees')
 export class TreesController {
   constructor(private readonly db: Db, private readonly trees: TreesService, private readonly access: AccessService) {}
 
-  @Get()
-  async list(@CurrentUser() user: AuthUser, @Query() query: unknown) {
-    const f = parse(TreeQuery, query);
+  /** WHERE clause and parameters of the tree list (filters, search and the user's areas). */
+  private async listWhere(user: AuthUser, f: TreeFilter) {
     const params: unknown[] = [];
     const where: string[] = [];
     const add = (sql: string, value: unknown) => {
@@ -86,19 +118,34 @@ export class TreesController {
     if (f.status_id) add('t.current_status_id = ?', f.status_id);
     if (f.vendor_id) add('t.vendor_id = ?', f.vendor_id);
     add('t.record_state = ?', f.record_state ?? 'ACTIVE');
+    if (f.maintenance) add(`${MAINTENANCE_STATUS_SQL} = ?`, f.maintenance);
     if (f.q) add(`t.physical_tree_id_normalized LIKE '%' || ? || '%'`, f.q.replace(/\s+/g, '').toUpperCase());
     const scope = this.access.treeFilter(await this.access.grants(user), 't', params.length + 1);
     params.push(...scope.params);
     where.push(scope.sql);
-    const whereSql = where.join(' AND ');
-    // Empty values (trees never observed) come last either way; the tree ID then the id keep paging stable.
-    const dir = f.order === 'desc' ? 'DESC' : 'ASC';
-    const orderBy = [...TREE_SORTS[f.sort].map((c) => `${c} ${dir} NULLS LAST`), `t.physical_tree_id ${f.sort === 'tree_id' ? dir : 'ASC'}`, 't.id'].join(', ');
+    return { whereSql: where.join(' AND '), params };
+  }
+
+  @Get()
+  async list(@CurrentUser() user: AuthUser, @Query() query: unknown) {
+    const f = parse(TreeQuery, query);
+    const { whereSql, params } = await this.listWhere(user, f);
+    // The maintenance filter needs the joins; the plain count does not.
+    const countFrom = f.maintenance ? TREE_FROM : 'FROM trees t';
     const [rows, count] = await Promise.all([
-      this.db.query(`${TREE_LIST_SQL} WHERE ${whereSql} ORDER BY ${orderBy} LIMIT ${f.limit} OFFSET ${f.offset}`, params),
-      this.db.query(`SELECT count(*) AS total FROM trees t WHERE ${whereSql}`, params),
+      this.db.query(`${TREE_LIST_SQL} WHERE ${whereSql} ORDER BY ${treeOrderBy(f.sort, f.order)} LIMIT ${f.limit} OFFSET ${f.offset}`, params),
+      this.db.query(`SELECT count(*) AS total ${countFrom} WHERE ${whereSql}`, params),
     ]);
-    return { items: rows.rows, total: count.rows[0].total, limit: f.limit, offset: f.offset };
+    return { items: rows.rows.map(withMaintenance), total: count.rows[0].total, limit: f.limit, offset: f.offset };
+  }
+
+  /** The previous and next tree of the tree list with the same filters and sort (limit and offset are ignored). */
+  @Get(':id/neighbours')
+  async neighbours(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Query() query: unknown) {
+    const f = parse(TreeQuery, query);
+    const { whereSql, params } = await this.listWhere(user, f);
+    params.push(id);
+    return this.db.one(this.db, neighboursSql(`${TREE_FROM} WHERE ${whereSql}`, treeOrderBy(f.sort, f.order), `$${params.length}`), params);
   }
 
   @Get(':id')
@@ -128,7 +175,7 @@ export class TreesController {
       this.db.one(this.db, 'SELECT id_components_snapshot FROM trees WHERE id = $1', [id]),
     ]);
     return {
-      ...tree,
+      ...withMaintenance(tree),
       id_components_snapshot: snapshot!.id_components_snapshot,
       observations: observations.rows,
       media: media.rows,

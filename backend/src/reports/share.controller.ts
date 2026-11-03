@@ -11,7 +11,7 @@ import { pagination, parse } from '../common/validation';
 import { config } from '../config';
 import { Db } from '../database/db.service';
 import { MediaService } from '../media/media.service';
-import { TREE_SORTS, TreeQuery } from '../trees/trees.controller';
+import { neighboursSql, TREE_SORT_KEYS, treeOrderBy, TreeQuery } from '../trees/trees.controller';
 import { DensityFilter, Filter, VisitFilter } from './reports.controller';
 import { ReportsService } from './reports.service';
 import { addSheet, toCsv } from './workbook';
@@ -58,9 +58,19 @@ const ShareTreeQuery = pagination.extend({
   status_id: z.string().uuid().optional(),
   vendor_id: z.string().uuid().optional(),
   q: z.string().max(100).optional(),
-  sort: TreeQuery.shape.sort,
+  sort: z.enum(TREE_SORT_KEYS).default('tree_id'),
   order: TreeQuery.shape.order,
 });
+
+/** Joins of the client's tree list. */
+const SHARE_TREE_FROM = `
+    FROM trees t
+    JOIN planting_years py ON py.id = t.planting_year_id
+    JOIN sectors s ON s.id = t.sector_id
+    JOIN sub_sectors ss ON ss.id = t.sub_sector_id
+    JOIN tree_species sp ON sp.id = t.species_id
+    LEFT JOIN tree_statuses st ON st.id = t.current_status_id
+    LEFT JOIN vendors v ON v.id = t.vendor_id`;
 
 /**
  * Tree columns a client may see. Only these are selected: never who registered, visited or photographed a tree
@@ -73,13 +83,7 @@ const SHARE_TREE_SQL = `
          st.code AS status_code, st.name AS status_name, st.is_terminal AS status_terminal, t.planted_on, t.last_observed_at,
          v.name AS vendor_name, v.short_code AS vendor_short_code,
          (SELECT count(*) FROM tree_media m WHERE m.tree_id = t.id AND m.upload_state = 'VERIFIED')::int AS photos
-    FROM trees t
-    JOIN planting_years py ON py.id = t.planting_year_id
-    JOIN sectors s ON s.id = t.sector_id
-    JOIN sub_sectors ss ON ss.id = t.sub_sector_id
-    JOIN tree_species sp ON sp.id = t.species_id
-    LEFT JOIN tree_statuses st ON st.id = t.current_status_id
-    LEFT JOIN vendors v ON v.id = t.vendor_id`;
+  ${SHARE_TREE_FROM}`;
 
 /** Reports run as an unrestricted reader, always pinned to the link's project. */
 const SHARE_READER: AuthUser = { id: '00000000-0000-0000-0000-000000000000', role: 'ADMIN' };
@@ -211,12 +215,8 @@ export class ShareController {
   }
 
   /** The project's trees (registry records only), filtered, searched, sorted and paginated like the portal's tree list. */
-  @Public()
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
-  @Get('share/:token/trees')
-  async trees(@Param('token') token: string, @Query() query: unknown) {
-    const projectId = await this.resolve(token);
-    const f = parse(ShareTreeQuery, query);
+  /** WHERE clause and parameters of the client's tree list: the link's registry trees, filtered and searched. */
+  private shareTreeWhere(projectId: string, f: z.infer<typeof ShareTreeQuery>) {
     const params: unknown[] = [projectId];
     const where = [`t.project_id = $1`, `t.record_state = 'ACTIVE'`];
     const eq = (sql: string, v?: string) => {
@@ -231,14 +231,34 @@ export class ShareController {
     eq('t.current_status_id = ?', f.status_id);
     eq('t.vendor_id = ?', f.vendor_id);
     if (f.q) eq(`t.physical_tree_id_normalized LIKE '%' || ? || '%'`, f.q.replace(/\s+/g, '').toUpperCase());
-    const whereSql = where.join(' AND ');
-    const dir = f.order === 'desc' ? 'DESC' : 'ASC';
-    const orderBy = [...TREE_SORTS[f.sort].map((c) => `${c} ${dir} NULLS LAST`), `t.physical_tree_id ${f.sort === 'tree_id' ? dir : 'ASC'}`, 't.id'].join(', ');
+    return { whereSql: where.join(' AND '), params };
+  }
+
+  /** The project's trees (registry records only), filtered, searched, sorted and paginated like the portal's tree list. */
+  @Public()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get('share/:token/trees')
+  async trees(@Param('token') token: string, @Query() query: unknown) {
+    const projectId = await this.resolve(token);
+    const f = parse(ShareTreeQuery, query);
+    const { whereSql, params } = this.shareTreeWhere(projectId, f);
     const [rows, count] = await Promise.all([
-      this.db.query(`${SHARE_TREE_SQL} WHERE ${whereSql} ORDER BY ${orderBy} LIMIT ${f.limit} OFFSET ${f.offset}`, params),
+      this.db.query(`${SHARE_TREE_SQL} WHERE ${whereSql} ORDER BY ${treeOrderBy(f.sort, f.order)} LIMIT ${f.limit} OFFSET ${f.offset}`, params),
       this.db.query(`SELECT count(*)::int AS total FROM trees t WHERE ${whereSql}`, params),
     ]);
     return { items: rows.rows, total: count.rows[0].total, limit: f.limit, offset: f.offset };
+  }
+
+  /** The previous and next tree of the client's tree list with the same filters and sort: { previous_id, next_id, position, total }. */
+  @Public()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get('share/:token/trees/:id/neighbours')
+  async treeNeighbours(@Param('token') token: string, @Param('id', ParseUUIDPipe) id: string, @Query() query: unknown) {
+    const projectId = await this.resolve(token);
+    const f = parse(ShareTreeQuery, query);
+    const { whereSql, params } = this.shareTreeWhere(projectId, f);
+    params.push(id);
+    return this.db.one(this.db, neighboursSql(`${SHARE_TREE_FROM} WHERE ${whereSql}`, treeOrderBy(f.sort, f.order), `$${params.length}`), params);
   }
 
   /**

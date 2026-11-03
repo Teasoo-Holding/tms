@@ -241,7 +241,10 @@ export class ReportsController {
     res.end();
   }
 
-  /** Everything in one workbook (respecting the filters): configuration, trees, visits and the summary. */
+  /**
+   * Everything in one workbook (respecting the filters): notes, the summary, trees, visits and configuration. The
+   * dashboard's only Excel action for administrators; others get trees.xlsx.
+   */
   @Roles('ADMIN')
   @Get('export.xlsx')
   async exportAll(@CurrentUser() user: AuthUser, @Query() query: unknown, @Res() res: Response) {
@@ -254,7 +257,18 @@ export class ReportsController {
     ]);
     const wb = new ExcelJS.Workbook();
     wb.created = new Date();
-    addSheet(wb, 'Summary', [{ generated_at: summary.generated_at, last_server_sync_at: summary.last_server_sync_at, ...summary.totals }]);
+    // What the trees-only workbook had first: when it was made, the last sync and how to read the counts.
+    const info = wb.addWorksheet('About');
+    info.addRows([
+      ['Tree Management System export'],
+      ['Generated at', summary.generated_at],
+      ['Last server sync', summary.last_server_sync_at ?? 'never'],
+      ...summary.notes.map((n) => ['Note', n]),
+    ]);
+    info.getColumn(1).width = 18;
+    info.getColumn(2).width = 100;
+    addSheet(wb, 'Summary', [{ generated_at: summary.generated_at, last_server_sync_at: summary.last_server_sync_at, ...summary.totals,
+      maintenance_overdue_trees: summary.maintenance.overdue_trees, maintenance_due_soon_trees: summary.maintenance.due_soon_trees }]);
     addSheet(wb, 'By status', summary.by_status);
     addSheet(wb, 'By sector', summary.sector_share);
     addSheet(wb, 'Trees', trees);
