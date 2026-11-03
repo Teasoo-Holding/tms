@@ -5,10 +5,10 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 
 @Database(
-    version = 7,
+    version = 8,
     exportSchema = true,
     // Additive changes only; field records on the device are kept across upgrades.
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7)],
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4), AutoMigration(from = 4, to = 5), AutoMigration(from = 5, to = 6), AutoMigration(from = 6, to = 7), AutoMigration(from = 7, to = 8)],
     entities = [
         ProjectEntity::class, PlantingYearEntity::class, IdSchemeEntity::class, SectorEntity::class, SubSectorEntity::class,
         SpeciesEntity::class, StatusEntity::class, VendorEntity::class, AssignmentEntity::class, SerialAllocationEntity::class,

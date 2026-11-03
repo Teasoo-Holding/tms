@@ -37,7 +37,25 @@ data class TreeDetail(
     val status: StatusEntity?,
     val original: TreeEntity?,
     val replacement: TreeEntity?,
+    val maintenanceIntervalDays: Int = 90,
 )
+
+/** Where a tree stands on maintenance: due [proposedOn], counted from its last maintenance visit (or planting). */
+data class MaintenanceDue(val proposedOn: java.time.LocalDate, val lastMaintenance: java.time.LocalDate?) {
+    val overdue get() = proposedOn.isBefore(java.time.LocalDate.now())
+    val dueSoon get() = !overdue && !proposedOn.isAfter(java.time.LocalDate.now().plusDays(14))
+}
+
+/** Null for trees that need none (dead, or not an active record). */
+internal fun maintenanceDue(t: TreeEntity, status: StatusEntity?, observations: List<ObservationEntity>, intervalDays: Int): MaintenanceDue? {
+    if (t.recordState != "ACTIVE" || status?.isTerminal == true) return null
+    val zone = java.time.ZoneId.systemDefault()
+    fun day(iso: String?) = iso?.let { runCatching { java.time.Instant.parse(it).atZone(zone).toLocalDate() }.getOrNull() }
+    val superseded = observations.mapNotNull { it.amendsObservationId }.toSet()
+    val last = observations.filter { it.id !in superseded && it.visitType == "MAINTENANCE" }.mapNotNull { day(it.observedAt) }.maxOrNull()
+    val base = last ?: t.plantedOn?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() } ?: day(t.createdAt) ?: return null
+    return MaintenanceDue(base.plusDays(intervalDays.toLong()), last)
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -51,6 +69,7 @@ class TreeDetailViewModel @Inject constructor(db: TmsDatabase, session: SessionS
             tree = t, year = ref.year(t.plantingYearId), sector = ref.sector(t.sectorId), subSector = ref.subSector(t.subSectorId),
             species = ref.species().first().find { it.id == t.speciesId }, status = t.currentStatusId?.let { ref.status(it) },
             original = t.replacesTreeId?.let { db.trees().get(it) }, replacement = db.trees().replacementOf(t.id),
+            maintenanceIntervalDays = ref.project(t.projectId)?.maintenanceIntervalDays ?: 90,
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val observations = db.observations().forTree(id).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -87,6 +106,14 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
             TreePhoto(media, vm::photo)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { StatusChip(d.status?.code, d.status?.name); SyncBadge(t.syncState) }
             t.syncMessage?.let { Notice(it, MaterialTheme.colorScheme.errorContainer) }
+            maintenanceDue(t, d.status, observations, d.maintenanceIntervalDays)?.let { m ->
+                val date = java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy").format(m.proposedOn)
+                when {
+                    m.overdue -> Notice("Maintenance overdue since $date. Record a visit and choose Maintenance.", MaterialTheme.colorScheme.errorContainer)
+                    m.dueSoon -> Notice("Maintenance due on $date.", MaterialTheme.colorScheme.tertiaryContainer)
+                    else -> Text("Next maintenance: $date", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             ElevatedCard(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Field("Planting year", d.year?.yearLabel)
@@ -137,7 +164,11 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
                             StatusChip(s?.code, s?.name)
                             Text(formatInstant(o.observedAt), textDecoration = if (isSuperseded) TextDecoration.LineThrough else null)
                         }
-                        if (o.isInitial) Text("Registration", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            if (o.isInitial) "Registration" else VisitType.label(o.visitType),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (o.visitType == "MAINTENANCE" && !o.isInitial) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                        )
                         if (o.amendsObservationId != null) Text("Correction: ${o.amendmentReason}", style = MaterialTheme.typography.labelMedium)
                         if (isSuperseded) Text("Superseded by a correction", style = MaterialTheme.typography.labelMedium)
                         Text(

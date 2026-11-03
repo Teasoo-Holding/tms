@@ -54,6 +54,7 @@ data class TokenResponse(
 data class ProjectDto(
     val id: String, val name: String, @SerialName("short_code") val shortCode: String, val status: String,
     @SerialName("physical_id_uniqueness") val physicalIdUniqueness: String, val location: String? = null,
+    @SerialName("maintenance_interval_days") val maintenanceIntervalDays: Int = 90,
 )
 
 @Serializable

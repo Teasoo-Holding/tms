@@ -68,5 +68,8 @@ class MigrationTest {
         // Version 7: queued records remember who made them.
         val v7 = helper.runMigrationsAndValidate("migration-test", 7, true)
         v7.query("SELECT count(*) FROM outbox WHERE userId IS NOT NULL").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
+        v7.close()
+        // Version 8: each project's maintenance interval (90 days until the server says otherwise).
+        helper.runMigrationsAndValidate("migration-test", 8, true).close()
     }
 }

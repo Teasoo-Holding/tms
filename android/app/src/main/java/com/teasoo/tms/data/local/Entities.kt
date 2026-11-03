@@ -15,6 +15,8 @@ data class ProjectEntity(
     val status: String,
     val physicalIdUniqueness: String,
     val location: String?,
+    /** Days between maintenance visits; a tree is due this long after its last maintenance (or planting). */
+    @ColumnInfo(defaultValue = "90") val maintenanceIntervalDays: Int = 90,
 )
 
 @Entity(tableName = "planting_years", indices = [Index("projectId")])
@@ -236,13 +238,15 @@ data class ObservationEntity(
 
 /** Why a visit was made (the kind of data collection). */
 enum class VisitType(val code: String, val label: String) {
-    VISIT("VISIT", "Visit"),
+    VISIT("VISIT", "Monitoring"),
     FIRST_INSTANCE("FIRST_INSTANCE", "First data collection"),
     PLANTING("PLANTING", "At planting"),
     MAINTENANCE("MAINTENANCE", "Maintenance");
 
     companion object {
-        fun label(code: String?) = entries.find { it.code == code }?.label ?: "Visit"
+        fun label(code: String?) = entries.find { it.code == code }?.label ?: "Monitoring"
+        /** What an officer chooses for a follow-up visit; the others are older types kept for existing records. */
+        val forVisits = listOf(VISIT, MAINTENANCE)
     }
 }
 

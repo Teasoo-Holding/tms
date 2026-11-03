@@ -10,7 +10,7 @@ import kotlinx.serialization.json.JsonNull
 
 private fun JsonElement?.asText(): String? = if (this == null || this is JsonNull) null else toString()
 
-fun ProjectDto.toEntity() = ProjectEntity(id, name, shortCode, status, physicalIdUniqueness, location)
+fun ProjectDto.toEntity() = ProjectEntity(id, name, shortCode, status, physicalIdUniqueness, location, maintenanceIntervalDays)
 fun PlantingYearDto.toEntity() = PlantingYearEntity(id, projectId, yearLabel, active)
 fun IdSchemeDto.toEntity() = IdSchemeEntity(
     id = id, projectId = projectId, version = version,

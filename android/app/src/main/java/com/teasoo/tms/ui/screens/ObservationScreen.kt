@@ -46,8 +46,8 @@ class ObservationViewModel @Inject constructor(
     val amended = flow { emit(amends?.let { db.observations().get(it) }) }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val statuses = db.reference().statuses().map { l -> l.filter { it.active } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val statusId = MutableStateFlow<String?>(null)
-    /** Kept from the visit being corrected; new visits are plain visits (the type is no longer asked). */
-    private var visitType = "VISIT"
+    /** Monitoring (default) or Maintenance; a correction keeps the type of the visit it corrects. */
+    val visitType = MutableStateFlow("VISIT")
     /** Earlier photos of this tree, so the officer can check it is the right one. */
     val treeMedia = db.media().forTree(treeId).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val remarks = MutableStateFlow("")
@@ -80,7 +80,7 @@ class ObservationViewModel @Inject constructor(
         viewModelScope.launch {
             amended.filterNotNull().first().let { o ->
                 statusId.value = o.statusId
-                visitType = o.visitType
+                visitType.value = o.visitType
                 remarks.value = o.remarks.orEmpty()
                 height.value = o.heightCm?.let { HeightReading(it, o.heightMethod ?: "MANUAL", o.heightMeasurementJson) }
                 fieldValues.value = storedFieldText(o.customFieldsJson)
@@ -108,7 +108,7 @@ class ObservationViewModel @Inject constructor(
                 statusId = statusId.value ?: throw RegistrationException("Choose a status."),
                 // Stamped when saved and not editable; a correction keeps the time of the visit it corrects.
                 observedAt = amended.value?.observedAt?.let(java.time.Instant::parse) ?: java.time.Instant.now(),
-                visitType = visitType,
+                visitType = visitType.value,
                 remarks = remarks.value.ifBlank { null },
                 photos = photos.value,
                 userId = session.userId() ?: throw RegistrationException("Sign in again to save."),
@@ -170,6 +170,8 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
             areaWarning?.let { Notice(it, MaterialTheme.colorScheme.errorContainer) }
             if (amending) Notice("The original observation is kept and marked as superseded. Your correction is recorded with its reason.")
             StatusSelector(statuses, statusId, { vm.statusId.value = it }, label = "What do you see?")
+            val visitType by vm.visitType.collectAsStateWithLifecycle()
+            VisitTypeSelector(visitType) { vm.visitType.value = it }
             Text(
                 if (amending) "The correction keeps the date and time of the original visit." else "Date and time are recorded automatically when you save.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
