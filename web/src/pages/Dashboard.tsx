@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, qs } from '../api/client';
 import { sectorLabel, subSectorLabel } from '../areaLabels';
 import { useIsAdmin } from '../auth';
@@ -7,7 +8,7 @@ import { ChartCard, Donut, GroupedColumns, HBarChart, Legend, LineChart, LineSer
 import { AreaShareView } from '../components/AreaShare';
 import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
 import { ShareArea } from '../components/ShareMap';
-import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime, RowMenu, SimpleTable, todayStamp } from '../components/ui';
+import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime, SimpleTable, todayStamp } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 
 export { SimpleTable };
@@ -36,7 +37,9 @@ export function DashboardPage() {
   const filter = qs({ ...f.values, overdue_days: f.get('overdue_days') || 90 });
   const summary = useQuery({ queryKey: ['summary', filter], queryFn: () => api.get(`/reports/summary${filter}`) });
   const s = summary.data;
-  const exportFilter = qs(f.values);
+  // The tree list with the same tree filters, narrowed to trees due for maintenance.
+  const maintenanceLink = (status: string) =>
+    `/trees${qs({ ...Object.fromEntries(['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id'].map((k) => [k, f.get(k)])), maintenance: status })}`;
   const download = async (path: string, name: string) => {
     setExporting(true);
     setExportError(null);
@@ -111,16 +114,15 @@ export function DashboardPage() {
         actions={
           <>
             <FiltersButton count={f.count} open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} />
-            {/* One Excel action: administrators get every sheet (configuration, trees, visits), others the trees workbook. */}
+            {/* One Excel action: administrators get every sheet (notes, summary, trees, visits, configuration), others the trees workbook. */}
             <button
               className="primary no-print"
               disabled={exporting}
-              onClick={() => (isAdmin ? download(`/reports/export.xlsx${exportFilter}`, `tms-export-${todayStamp()}.xlsx`) : download(`/reports/trees.xlsx${filter}`, `trees-${todayStamp()}.xlsx`))}
+              onClick={() => (isAdmin ? download(`/reports/export.xlsx${filter}`, `tms-export-${todayStamp()}.xlsx`) : download(`/reports/trees.xlsx${filter}`, `trees-${todayStamp()}.xlsx`))}
             >
               {exporting ? 'Preparing…' : 'Export to Excel'}
             </button>
             <button className="no-print" onClick={() => window.print()}>Print report</button>
-            {isAdmin && <RowMenu label="More exports" items={[{ label: 'Trees only (Excel)', onClick: () => download(`/reports/trees.xlsx${filter}`, `trees-${todayStamp()}.xlsx`) }]} />}
           </>
         }
       />
@@ -137,6 +139,13 @@ export function DashboardPage() {
       {summary.isLoading && <div className="card empty">Loading…</div>}
       {s && (
         <div className={`stack ${summary.isFetching ? 'refetching' : ''}`}>
+          {s.maintenance && (s.maintenance.overdue_trees > 0 || s.maintenance.due_soon_trees > 0) && (
+            <div className={`notice ${s.maintenance.overdue_trees ? 'error' : 'warning'}`} role="status">
+              <strong>Maintenance:</strong>{' '}
+              <Link to={maintenanceLink('overdue')}>{fmtNum(s.maintenance.overdue_trees)} {s.maintenance.overdue_trees === 1 ? 'tree' : 'trees'} overdue for maintenance</Link>,{' '}
+              <Link to={maintenanceLink('due_soon')}>{fmtNum(s.maintenance.due_soon_trees)} due in the next {s.maintenance.due_soon_days} days</Link>.
+            </div>
+          )}
           <div className="grid stats">
             <StatTile label="Trees planted" value={fmtNum(s.totals.planting_events)} foot={s.totals.replacement_trees ? `incl. ${fmtNum(s.totals.replacement_trees)} replacements` : undefined} />
             <StatTile label="Dead or missing" value={fmtNum(s.totals.terminal_status_trees)} />

@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useIsAdmin } from '../auth';
 import { ChartEmpty, LineChart, SERIES } from '../charts/charts';
 import { fmtHeight, LatestPhoto, Lightbox, newestFirst, Thumbs } from '../components/Photos';
 import { areaName, sectorLabel, subSectorLabel } from '../areaLabels';
-import { CardHeader, ErrorNotice, Field, fmtDate, fmtDateTime, Modal, PageHeader, RecordStatePill, RowMenu, StatusBadge } from '../components/ui';
+import { listSearchAt, neighbourQuery, Neighbours, TreePager } from '../components/TreePager';
+import { CardHeader, ErrorNotice, Field, fmtDate, fmtDateTime, fmtDay, Modal, PageHeader, RecordStatePill, RowMenu, StatusBadge, VisitTypeTag } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 import { currentScheme, previewId, Scheme } from '../idscheme';
 import type { CustomField } from './ProjectDetail';
+import { TREE_LIST_KEYS } from './Trees';
 
 export function TreeDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -18,6 +20,12 @@ export function TreeDetailPage() {
   const [replacing, setReplacing] = useState(false);
   const [lightbox, setLightbox] = useState<{ media: any[]; index: number; observation?: any } | null>(null);
   const tree = useQuery({ queryKey: ['tree', id], queryFn: () => api.get(`/trees/${id}`) });
+  // The tree list this page was opened from (its search string), for Previous / Next and "Back to list".
+  const navigate = useNavigate();
+  const listSearch = (useLocation().state as { list?: string } | null)?.list ?? '';
+  const nq = neighbourQuery(listSearch, TREE_LIST_KEYS);
+  const neighbours = useQuery({ queryKey: ['tree-neighbours', id, nq], queryFn: () => api.get<Neighbours>(`/trees/${id}/neighbours${nq}`) });
+  const backTo = `/trees${listSearchAt(listSearch, neighbours.data?.position)}`;
   const t = tree.data;
   const defs = useQuery({
     queryKey: ['custom-fields', t?.project_id],
@@ -25,8 +33,10 @@ export function TreeDetailPage() {
     enabled: !!t?.project_id,
   });
   const statuses = useQuery({ queryKey: ['tree-statuses'], queryFn: () => api.get<any[]>('/tree-statuses'), enabled: isAdmin });
-  if (tree.error) return <ErrorNotice error={tree.error} />;
+  const pager = <TreePager data={neighbours.data} backTo={backTo} onGo={(next) => navigate(`/trees/${next}`, { state: { list: listSearch } })} />;
+  if (tree.error) return <div className="stack">{pager}<ErrorNotice error={tree.error} /></div>;
   if (!t) return null;
+  const maintenance = t.maintenance;
   const media: any[] = t.media ?? [];
   const observations: any[] = t.observations ?? [];
   const treeDefs = (defs.data ?? []).filter((d) => d.applies_to === 'TREE');
@@ -49,8 +59,9 @@ export function TreeDetailPage() {
   };
   return (
     <div className="stack">
+      {pager}
       <PageHeader
-        crumbs={<><Link to="/trees">Trees</Link> / {t.project_name}</>}
+        crumbs={<><Link to={backTo}>Trees</Link> / {t.project_name}</>}
         title={t.physical_tree_id}
         mono
         actions={
@@ -64,6 +75,17 @@ export function TreeDetailPage() {
         <StatusBadge code={t.status_code} name={t.status_name} terminal={t.status_terminal} />
         <RecordStatePill state={t.record_state} />
       </PageHeader>
+
+      {maintenance?.status === 'overdue' && (
+        <div className="notice error" role="status">
+          <strong>Maintenance overdue since {fmtDay(maintenance.proposed_on)}.</strong> {maintenance.last_at ? `Last maintenance visit ${fmtDate(maintenance.last_at)}.` : 'No maintenance visit recorded yet.'}
+        </div>
+      )}
+      {maintenance?.status === 'due_soon' && (
+        <div className="notice warning" role="status">
+          <strong>Maintenance due on {fmtDay(maintenance.proposed_on)}.</strong> {maintenance.last_at ? `Last maintenance visit ${fmtDate(maintenance.last_at)}.` : 'No maintenance visit recorded yet.'}
+        </div>
+      )}
 
       {latest && <LatestPhoto media={latest} onOpen={() => openPhoto(latest)} />}
 
@@ -79,6 +101,17 @@ export function TreeDetailPage() {
             <dt>Species</dt><dd>{t.species_name}{t.species_common_name && ` (${t.species_common_name})`}</dd>
             {t.vendor_name && (<><dt>Vendor</dt><dd>{t.vendor_name}</dd></>)}
             <dt>Planted on</dt><dd>{fmtDate(t.planted_on)}</dd>
+            {maintenance && (
+              <>
+                <dt>Maintenance</dt>
+                <dd>
+                  {maintenance.status === 'none' ? <span className="muted">Not planned (not an active, living tree)</span> : <>Next {fmtDay(maintenance.proposed_on)}</>}
+                  <span className="muted">
+                    {' · '}{maintenance.last_at ? `last ${fmtDate(maintenance.last_at)}` : 'none recorded yet'} · every {t.maintenance_interval_days} days
+                  </span>
+                </dd>
+              </>
+            )}
             {SHOW_HEIGHT && (
               <>
                 <dt>Height</dt>
@@ -173,6 +206,7 @@ export function TreeDetailPage() {
                 <div className="row">
                   <StatusBadge code={o.status_code} name={o.status_name} terminal={o.status_terminal} />
                   <strong>{fmtDateTime(o.observed_at)}</strong>
+                  <VisitTypeTag visit={o} />
                   {o.is_amendment && <span className="pill warning">Correction</span>}
                   {o.superseded && <span className="pill">Superseded by a correction</span>}
                 </div>

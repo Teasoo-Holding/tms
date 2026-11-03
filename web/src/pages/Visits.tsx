@@ -7,7 +7,7 @@ import { useIsAdmin } from '../auth';
 import { Pagination, usePage } from '../components/Pagination';
 import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
 import { fmtHeight, Lightbox, Thumbs } from '../components/Photos';
-import { Chevron, EmptyState, ErrorNotice, fmtNum, PageHeader, StatusBadge, todayStamp } from '../components/ui';
+import { Chevron, EmptyState, ErrorNotice, fmtNum, PageHeader, StatusBadge, todayStamp, VISIT_TYPES, VisitTypeTag } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 
 /** Days are counted in the browser's time zone. */
@@ -34,7 +34,7 @@ const names = (cs: { user_name: string }[]) => cs.map((c) => c.user_name).join('
  */
 export function VisitsPage() {
   const isAdmin = useIsAdmin();
-  const f = useReportFilters(['recorded_by', 'q']);
+  const f = useReportFilters(['recorded_by', 'q', 'visit_type']);
   const [params, setParams] = useSearchParams();
   const [q, setQ] = useState(f.get('q'));
   // Keep the search box in step with the URL (e.g. after "Reset filters" or following a link).
@@ -93,6 +93,13 @@ export function VisitsPage() {
 
       {filtersOpen && (
         <ReportFilters f={f} dateNote="Dates are visit dates. A day is listed when any of its records match." onClose={() => setFiltersOpen(false)}>
+          <label className="field">
+            Visit type
+            <select value={f.get('visit_type')} onChange={(e) => f.set('visit_type', e.target.value)}>
+              <option value="">Any type</option>
+              {VISIT_TYPES.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+            </select>
+          </label>
           {isAdmin && (
             <label className="field">
               Data collector
@@ -238,7 +245,7 @@ function Session({ session: s, date, query }: { session: any; date: string; quer
                   <td>
                     <div className="row" style={{ gap: 4 }}>
                       <StatusBadge code={r.status_code} name={r.status} terminal={r.status_terminal} />
-                      {r.is_initial && <span className="pill">Registered</span>}
+                      <VisitTypeTag visit={r} />
                       {r.is_amendment && <span className="pill warning" title={r.amendment_reason ?? undefined}>Correction</span>}
                       {r.superseded && <span className="pill">Superseded</span>}
                     </div>

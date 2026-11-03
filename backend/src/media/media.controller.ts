@@ -9,7 +9,7 @@ import { parse } from '../common/validation';
 import { config } from '../config';
 import { Db } from '../database/db.service';
 import { MediaService, UploadSessionBody } from './media.service';
-import { LocalStorage, OBJECT_STORAGE, ObjectStorage } from './storage';
+import { FallbackStorage, LocalStorage, OBJECT_STORAGE, ObjectStorage } from './storage';
 
 @Controller('media')
 export class MediaController {
@@ -74,7 +74,8 @@ export class MediaController {
   }
 
   private local(): LocalStorage {
-    if (!(this.storage instanceof LocalStorage)) throw new AppError(404, 'NOT_FOUND', 'Not found.');
-    return this.storage;
+    const store = this.storage instanceof FallbackStorage ? this.storage.primary : this.storage;
+    if (!(store instanceof LocalStorage)) throw new AppError(404, 'NOT_FOUND', 'Not found.');
+    return store;
   }
 }

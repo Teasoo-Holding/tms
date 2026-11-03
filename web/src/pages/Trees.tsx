@@ -1,13 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { FiltersButton } from '../components/ReportFilters';
 import { api, qs } from '../api/client';
 import { sectorLabel, subSectorLabel } from '../areaLabels';
 import { Pagination, usePage } from '../components/Pagination';
-import { ActiveFilter, EmptyState, ErrorNotice, FilterChips, fmtDate, fmtNum, PageHeader, RecordStatePill, SortOrder, SortTh, StatusBadge } from '../components/ui';
+import { ActiveFilter, EmptyState, ErrorNotice, FilterChips, fmtDate, fmtNum, MaintenanceDue, PageHeader, RecordStatePill, SortOrder, SortTh, StatusBadge } from '../components/ui';
 
-const FILTER_KEYS = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'record_state'];
+const FILTER_KEYS = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'record_state', 'maintenance'];
+/** What a tree's page needs to step through this list: its filters and sort (see TreePager). */
+export const TREE_LIST_KEYS = [...FILTER_KEYS, 'q', 'sort', 'order'];
+const MAINTENANCE_FILTERS: [string, string][] = [['overdue', 'Maintenance overdue'], ['due_soon', 'Maintenance due in 14 days']];
 /** Keys cleared when a parent filter changes: each planting year has its own survey, so its sectors differ. */
 const DEPENDENTS: Record<string, string[]> = {
   project_id: ['planting_year_id', 'sector_id', 'sub_sector_id'],
@@ -15,10 +18,13 @@ const DEPENDENTS: Record<string, string[]> = {
   sector_id: ['sub_sector_id'],
 };
 /** Sortable columns (the API's whitelist); the list is sorted on the server, across every page. */
-const SORTS = ['tree_id', 'planting_year', 'area', 'species', 'status', 'last_observed'];
+const SORTS = ['tree_id', 'planting_year', 'area', 'species', 'status', 'last_observed', 'maintenance'];
 
 export function TreesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  // A tree opened from here can step to the previous and next tree of this list (same filters and sort).
+  const listState = { list: location.search };
   const [params, setParams] = useSearchParams();
   const get = (k: string) => params.get(k) ?? '';
   const update = (changes: Record<string, string>) => {
@@ -111,6 +117,7 @@ export function TreesPage() {
     chip('species_id', 'Species', nameOf(species.data, get('species_id'), (s) => s.common_name ?? s.scientific_name)),
     chip('status_id', 'Status', nameOf(statuses.data, get('status_id'), (s) => s.name)),
     chip('record_state', 'Record', get('record_state') === 'CONFLICT' ? 'In conflict' : 'Rejected'),
+    chip('maintenance', 'Maintenance', get('maintenance') === 'overdue' ? 'Overdue' : 'Due in 14 days'),
   ].filter((c): c is ActiveFilter => !!c);
   const total: number = trees.data?.total ?? 0;
 
@@ -123,6 +130,7 @@ export function TreesPage() {
         </form>
         <div className="inline-filters" role="group" aria-label="Filters">
           {manyProjects && inline('project_id', 'Project', (projects.data ?? []).map((p) => [p.id, p.name]), 'All projects')}
+          {inline('maintenance', 'Maintenance', MAINTENANCE_FILTERS, 'Any maintenance')}
           {inline('status_id', 'Current status', (statuses.data ?? []).map((s) => [s.id, s.active === false ? `${s.name} (old)` : s.name]), 'Any status')}
           {inline('planting_year_id', 'Planting year', years.map((y) => [y.id, y.year_label]), 'All years', needsProject, 'Choose a project first')}
           {inline('sector_id', 'Sector', sectors.map((s) => [s.id, sectorOption(s)]), 'All sectors', needsProject, 'Choose a project first')}
@@ -155,15 +163,16 @@ export function TreesPage() {
                 {th('area', 'Area', 'hide-sm')}
                 {th('planting_year', 'Planting year', 'hide-sm', 'desc')}
                 {th('last_observed', 'Last visit', 'hide-sm', 'desc')}
+                {th('maintenance', 'Next maintenance', 'hide-sm')}
               </tr>
             </thead>
             <tbody>
               {trees.data.items.map((t: any) => {
                 const area = subSectorLabel(t.sector_code, t.sub_sector_code, t.sub_sector_name);
                 return (
-                  <tr key={t.id} className="clickable" onClick={() => navigate(`/trees/${t.id}`)}>
+                  <tr key={t.id} className="clickable" onClick={() => navigate(`/trees/${t.id}`, { state: listState })}>
                     <td className="mono">
-                      <Link to={`/trees/${t.id}`} onClick={(e) => e.stopPropagation()}>{t.physical_tree_id}</Link> <RecordStatePill state={t.record_state} />
+                      <Link to={`/trees/${t.id}`} state={listState} onClick={(e) => e.stopPropagation()}>{t.physical_tree_id}</Link> <RecordStatePill state={t.record_state} />
                       <div className="muted show-sm">{t.species_common_name ?? t.species_name} · {area}</div>
                     </td>
                     <td><StatusBadge code={t.status_code} name={t.status_name} terminal={t.status_terminal} /></td>
@@ -171,6 +180,7 @@ export function TreesPage() {
                     <td className="hide-sm">{area}</td>
                     <td className="hide-sm nowrap">{t.year_label}</td>
                     <td className="hide-sm nowrap">{t.last_observed_at ? fmtDate(t.last_observed_at) : <span className="muted">Never</span>}</td>
+                    <td className="hide-sm nowrap"><MaintenanceDue m={t.maintenance} /></td>
                   </tr>
                 );
               })}

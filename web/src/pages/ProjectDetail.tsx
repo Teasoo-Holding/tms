@@ -632,7 +632,11 @@ function AreaForm({ projectId, year, kind, area, sector, onClose }: { projectId:
     reference_longitude: '',
     boundary: '',
     active: area?.active ?? true,
+    // A new sector comes with numbered sub-sectors (SS1…), 4 by default.
+    with_sub_sectors: true,
+    sub_sectors: '4',
   });
+  const subSectorCount = Math.floor(Number(f.values.sub_sectors));
   const [corners, setCorners] = useState<Corner[]>(() => (editable ? existing.map(([lon, lat]) => ({ lat: String(lat), lon: String(lon) })) : blankCorners()));
   const [touched, setTouched] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -692,7 +696,11 @@ function AreaForm({ projectId, year, kind, area, sector, onClose }: { projectId:
       body.reference_latitude = num(v.reference_latitude);
       body.reference_longitude = num(v.reference_longitude);
     }
-    if (kind === 'sector' && !area) body.planting_year_id = year?.id;
+    if (kind === 'sector' && !area) {
+      body.planting_year_id = year?.id;
+      if (f.values.with_sub_sectors && !(subSectorCount >= 1 && subSectorCount <= 26)) return fail('Create between 1 and 26 sub-sectors, or untick “Also create sub-sectors”.');
+      body.sub_sectors = f.values.with_sub_sectors ? subSectorCount : 0;
+    }
     setLocalError(null);
     save.mutate(body);
   };
@@ -786,6 +794,19 @@ function AreaForm({ projectId, year, kind, area, sector, onClose }: { projectId:
           </div>
         </details>
         <label className="check"><input type="checkbox" {...f.bindCheck('active')} /> Active (selectable for new registrations)</label>
+        {kind === 'sector' && !area && (
+          <div className="row sub-sector-option">
+            <label className="check">
+              <input type="checkbox" {...f.bindCheck('with_sub_sectors')} />
+              {' '}Also create {subSectorCount >= 1 ? subSectorCount : '…'} sub-sectors{subSectorCount >= 1 && subSectorCount <= 26 ? ` (SS1${subSectorCount > 1 ? `–SS${subSectorCount}` : ''})` : ''}
+            </label>
+            <label className="field inline-number">
+              <span className="visually-hidden">Number of sub-sectors</span>
+              <input type="number" min={1} max={26} step={1} inputMode="numeric" disabled={!f.values.with_sub_sectors} {...f.bind('sub_sectors')} />
+            </label>
+            <span className="muted">Named Sub-sector 1, 2, …; rename them or add GPS later.</span>
+          </div>
+        )}
         <div className="form-actions">
           <button type="button" onClick={onClose}>Cancel</button>
           <button className="primary" disabled={save.isPending}>Save</button>

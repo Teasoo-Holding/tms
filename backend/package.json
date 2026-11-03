@@ -9,6 +9,7 @@
     "dev": "tsc -p tsconfig.build.json && node dist/main.js",
     "migrate": "tsx src/database/migrate.ts",
     "seed": "tsx src/database/seed.ts",
+    "storage:copy": "tsx src/media/copy-objects.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "jest --runInBand",
     "test:unit": "jest --runInBand test/unit",

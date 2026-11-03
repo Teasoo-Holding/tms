@@ -136,7 +136,7 @@ private fun VisitCard(r: MyVisitRow, firstPhoto: suspend (String) -> MediaEntity
                     StatusChip(r.statusCode, r.statusName)
                     Text(
                         listOfNotNull(
-                            when { r.isInitial -> "Registered"; r.isCorrection -> "Correction"; else -> "Visit" },
+                            when { r.isInitial -> "Registered"; r.isCorrection -> "Correction"; else -> com.teasoo.tms.data.local.VisitType.label(r.visitType) },
                             listOfNotNull(r.sectorCode, r.subSectorCode).joinToString("/").ifBlank { null },
                             r.heightCm?.let(::formatHeight),
                         ).joinToString(" · "),

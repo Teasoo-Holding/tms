@@ -6,7 +6,8 @@ import { areaName, sectorLabel, subSectorLabel } from '../areaLabels';
 import { ChartEmpty, LineChart, SERIES } from '../charts/charts';
 import { Pagination, usePage } from '../components/Pagination';
 import { fmtHeight, LatestPhoto, Lightbox, newestFirst, Thumbs } from '../components/Photos';
-import { ActiveFilter, CardHeader, EmptyState, ErrorNotice, FilterChips, fmtDate, fmtNum, SortOrder, SortTh, StatusBadge } from '../components/ui';
+import { listSearchAt, neighbourQuery, Neighbours, TreePager } from '../components/TreePager';
+import { ActiveFilter, CardHeader, EmptyState, ErrorNotice, FilterChips, fmtDate, fmtNum, SortOrder, SortTh, StatusBadge, VisitTypeTag } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 import type { ShareContext } from './Share';
 
@@ -14,6 +15,8 @@ const FILTER_KEYS = ['planting_year_id', 'sector_id', 'sub_sector_id', 'species_
 /** Keys cleared when a parent filter changes: each planting year has its own sectors. */
 const DEPENDENTS: Record<string, string[]> = { planting_year_id: ['sector_id', 'sub_sector_id'], sector_id: ['sub_sector_id'] };
 const SORTS = ['tree_id', 'planting_year', 'area', 'species', 'status', 'last_observed'];
+/** What a tree's page needs to step through the list it was opened from: its filters and sort. */
+const LIST_KEYS = [...FILTER_KEYS, 'q', 'sort', 'order'];
 const notMissing = (n: number, e: unknown) => (e as ApiError).status !== 404 && n < 1;
 
 /** The client's tree list: search by tree ID, the main filters, sortable columns and pages, all in the URL. */
@@ -152,11 +155,20 @@ export function ShareTrees({ token, base, root, view }: ShareContext) {
 export function ShareTree({ token, base, root }: ShareContext) {
   const { treeId = '' } = useParams<{ treeId: string }>();
   const location = useLocation();
-  const back = `${root}/trees${(location.state as { from?: string } | null)?.from ?? ''}`;
+  const navigate = useNavigate();
+  // The list's search string when opened from the tree list: Previous / Next follow its filters and sort.
+  const from = (location.state as { from?: string } | null)?.from ?? '';
+  const nq = neighbourQuery(from, LIST_KEYS);
+  const neighbours = useQuery({
+    queryKey: ['share-tree-neighbours', token, treeId, nq],
+    queryFn: () => publicGet<Neighbours>(`${base}/trees/${treeId}/neighbours${nq}`),
+    retry: notMissing,
+  });
+  const back = `${root}/trees${listSearchAt(from, neighbours.data?.position)}`;
   const tree = useQuery({ queryKey: ['share-tree', token, treeId], queryFn: () => publicGet(`${base}/trees/${treeId}`), retry: notMissing });
   const [lightbox, setLightbox] = useState<{ media: any[]; index: number } | null>(null);
   const t = tree.data;
-  const crumbs = <Link to={back}>← All trees</Link>;
+  const crumbs = <TreePager data={neighbours.data} backTo={back} onGo={(id) => navigate(`${root}/trees/${id}`, { state: { from } })} />;
   if (tree.error) {
     return (
       <div className="stack">
@@ -176,7 +188,7 @@ export function ShareTree({ token, base, root }: ShareContext) {
 
   return (
     <div className="stack">
-      <div className="crumbs muted no-print">{crumbs}</div>
+      {crumbs}
       <div className="page-header" style={{ marginBottom: 0 }}>
         <div className="page-title"><h2 className="mono" style={{ margin: 0 }}>{t.physical_tree_id}</h2></div>
         <StatusBadge code={t.status_code} name={t.status_name} terminal={t.status_terminal} />
@@ -234,7 +246,7 @@ export function ShareTree({ token, base, root }: ShareContext) {
                 <div className="row">
                   <StatusBadge code={o.status_code} name={o.status_name} terminal={o.status_terminal} />
                   <strong>{fmtDate(o.observed_at)}</strong>
-                  {o.is_initial && <span className="pill">Planted / registered</span>}
+                  <VisitTypeTag visit={o} />
                   {o.is_amendment && <span className="pill" title="This record corrects an earlier one">Corrected</span>}
                 </div>
                 {SHOW_HEIGHT && o.height_cm != null && <div className="muted">Height {fmtHeight(Number(o.height_cm))}</div>}

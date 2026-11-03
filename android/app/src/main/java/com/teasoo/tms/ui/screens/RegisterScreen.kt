@@ -391,7 +391,8 @@ fun PhotoTip() {
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
             Icon(Icons.Default.WbSunny, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
             Text(
-                "Turn the tag away from direct sunlight (or shade it with your hand) so the tag number is clear in the photo.",
+                "Center the tree in the photo and make sure its identification tag is clearly visible and readable. " +
+                    "Turn the tag away from direct sunlight (or shade it with your hand).",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer,
             )
         }

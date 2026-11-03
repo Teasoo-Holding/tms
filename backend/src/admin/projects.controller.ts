@@ -18,6 +18,8 @@ const ProjectBody = z.object({
   end_date: isoDate.nullish(),
   status: z.enum(['DRAFT', 'ACTIVE', 'PAUSED', 'COMPLETED', 'ARCHIVED']).default('DRAFT'),
   physical_id_uniqueness: z.enum(['GLOBAL', 'PROJECT']),
+  /** Days between maintenance visits: a tree's next maintenance is due this long after its last one (or its planting). */
+  maintenance_interval_days: z.number().int().min(7).max(730).optional(),
 });
 // Uniqueness scope cannot change once trees exist, so it is excluded from updates.
 const ProjectPatch = ProjectBody.omit({ physical_id_uniqueness: true }).partial();
@@ -119,9 +121,10 @@ export class ProjectsController {
       const project = await this.db
         .one(
           tx,
-          `INSERT INTO projects (name, short_code, description, location, start_date, end_date, status, physical_id_uniqueness)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-          [b.name, b.short_code, b.description ?? null, b.location ?? null, b.start_date ?? null, b.end_date ?? null, b.status, b.physical_id_uniqueness],
+          `INSERT INTO projects (name, short_code, description, location, start_date, end_date, status, physical_id_uniqueness, maintenance_interval_days)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, 90)) RETURNING *`,
+          [b.name, b.short_code, b.description ?? null, b.location ?? null, b.start_date ?? null, b.end_date ?? null, b.status, b.physical_id_uniqueness,
+            b.maintenance_interval_days ?? null],
         )
         .catch((e) => {
           if (isUniqueViolation(e)) throw badRequest('SHORT_CODE_TAKEN', 'Another project already uses this short code.');
@@ -150,8 +153,8 @@ export class ProjectsController {
         .one(
           tx,
           `UPDATE projects SET name = $2, short_code = $3, description = $4, location = $5, start_date = $6, end_date = $7,
-                  status = $8, updated_at = now() WHERE id = $1 RETURNING *`,
-          [id, next.name, next.short_code, next.description, next.location, next.start_date, next.end_date, next.status],
+                  status = $8, maintenance_interval_days = $9, updated_at = now() WHERE id = $1 RETURNING *`,
+          [id, next.name, next.short_code, next.description, next.location, next.start_date, next.end_date, next.status, next.maintenance_interval_days],
         )
         .catch((e) => {
           if (isUniqueViolation(e)) throw badRequest('SHORT_CODE_TAKEN', 'Another project already uses this short code.');

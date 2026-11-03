@@ -5,6 +5,7 @@ import { ApiError, apiUrl, publicGet, qs } from '../api/client';
 import { sectorLabel } from '../areaLabels';
 import { ChartCard, Donut, HBarChart, Legend, LineChart, SERIES, StackedBars, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
+import { TeasooLink, TeasooLogo } from '../components/Brand';
 import { DensityReport, DensityView, hasOutlines } from '../components/DensityMap';
 import { ShareArea } from '../components/ShareMap';
 import { PhotoSource, PhotoSourceProvider } from '../components/Photos';
@@ -16,14 +17,16 @@ const FILTER_KEYS = ['planting_year_id', 'vendor_id', 'sector_id', 'from', 'to']
 /** Changing a filter clears the ones that depend on it. */
 const DEPENDENTS: Record<string, string[]> = { planting_year_id: ['vendor_id', 'sector_id'] };
 
-export function BrandMark() {
+/** The footer of every client page: who prepared it, linking to the company's website. */
+function ShareFooter() {
   return (
-    <span className="teasoo-mark">
-      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden>
-        <path d="M16 3 6 17h6l-5 7h7v5h4v-5h7l-5-7h6z" fill="currentColor" />
-      </svg>
-      Teasoo Consulting
-    </span>
+    <footer className="share-footer">
+      <span className="share-footer-brand">
+        <TeasooLogo height={28} />
+        <span>Prepared by <TeasooLink /></span>
+      </span>
+      <span>Tree Management System</span>
+    </footer>
   );
 }
 
@@ -59,7 +62,7 @@ export function SharePage() {
     return (
       <div className="share-shell">
         <div className="share-error card">
-          <BrandMark />
+          <TeasooLogo height={36} />
           <h1>{e.code === 'LINK_INVALID' ? 'This link is no longer active' : 'Something went wrong'}</h1>
           <p className="subtle" style={{ margin: 0 }}>{e.code === 'LINK_INVALID' ? 'Ask Teasoo Consulting for a new link.' : e.message}</p>
           {e.code !== 'LINK_INVALID' && <button onClick={() => view.refetch()}>Try again</button>}
@@ -83,7 +86,7 @@ export function SharePage() {
     <PhotoSourceProvider value={photos}>
       <div className="share-shell">
         <header className="share-header">
-          <BrandMark />
+          <TeasooLogo height={38} />
           <span className="spacer" />
           <span className="muted print-only">Printed {fmtDateTime(new Date().toISOString())}</span>
         </header>
@@ -107,6 +110,7 @@ export function SharePage() {
             </Routes>
           </main>
         </div>
+        <ShareFooter />
       </div>
     </PhotoSourceProvider>
   );

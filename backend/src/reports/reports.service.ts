@@ -3,6 +3,7 @@ import { AccessService } from '../common/access.service';
 import { AuthUser } from '../common/auth.decorators';
 import { notFound } from '../common/errors';
 import { Db } from '../database/db.service';
+import { MAINTENANCE_DUE_SOON_DAYS, MAINTENANCE_JOIN, MAINTENANCE_PROPOSED_SQL, MAINTENANCE_STATUS_SQL } from '../domain/maintenance';
 
 export interface FieldActivityFilter {
   project_id?: string;
@@ -215,6 +216,13 @@ export class ReportsService {
               count(*) FILTER (WHERE EXISTS (SELECT 1 FROM tree_media m WHERE m.tree_id = t.id AND m.upload_state <> 'VERIFIED'))::int AS trees_with_unverified_photos
          FROM trees t WHERE ${where}`,
     );
+    // Maintenance due (see domain/maintenance.ts), for the dashboard's notice.
+    const [maintenance] = await q(
+      `SELECT count(*) FILTER (WHERE ${MAINTENANCE_STATUS_SQL} = 'overdue')::int AS overdue_trees,
+              count(*) FILTER (WHERE ${MAINTENANCE_STATUS_SQL} = 'due_soon')::int AS due_soon_trees
+         FROM trees t JOIN projects p ON p.id = t.project_id LEFT JOIN tree_statuses st ON st.id = t.current_status_id ${MAINTENANCE_JOIN}
+        WHERE ${where}`,
+    );
     const projectIds = await this.access.projectIds(user);
     const [ops] = (
       await this.db.query(
@@ -259,6 +267,7 @@ export class ReportsService {
       area_coverage: coverage,
       sector_share: sectorShare,
       filters: { ...f },
+      maintenance: { ...maintenance, due_soon_days: MAINTENANCE_DUE_SOON_DAYS },
       data_completeness: { ...completeness, open_conflicts: ops.open_conflicts, devices_not_synced_7_days: ops.devices_not_synced_7_days },
       officer_activity: officers,
       notes: [
@@ -526,12 +535,13 @@ export class ReportsService {
               s.short_code AS sector, ss.short_code AS sub_sector, ss.reference_latitude AS sub_sector_ref_lat,
               ss.reference_longitude AS sub_sector_ref_lon, sp.scientific_name AS species, st.name AS current_status,
               t.last_observed_at, v.name AS vendor, rt.physical_tree_id AS replaces, t.planted_on, t.id_scheme_version,
-              u.full_name AS registered_by, t.created_at AS registered_at, t.synced_at, t.notes
+              u.full_name AS registered_by, t.created_at AS registered_at, t.synced_at, t.notes,
+              mt.last_at AS last_maintenance_at, ${MAINTENANCE_PROPOSED_SQL} AS next_maintenance_on, ${MAINTENANCE_STATUS_SQL} AS maintenance_status
          FROM trees t JOIN projects p ON p.id = t.project_id JOIN planting_years py ON py.id = t.planting_year_id
          JOIN sectors s ON s.id = t.sector_id JOIN sub_sectors ss ON ss.id = t.sub_sector_id
          JOIN tree_species sp ON sp.id = t.species_id LEFT JOIN tree_statuses st ON st.id = t.current_status_id
          LEFT JOIN vendors v ON v.id = t.vendor_id LEFT JOIN trees rt ON rt.id = t.replaces_tree_id
-         JOIN users u ON u.id = t.created_by
+         JOIN users u ON u.id = t.created_by ${MAINTENANCE_JOIN}
         WHERE ${where} ORDER BY t.physical_tree_id`,
       params,
     );

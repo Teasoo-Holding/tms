@@ -293,6 +293,18 @@ dl.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .lightbox-caption { color: #eee; font-size: 13px; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; justify-content: center; }
 .lightbox-caption button { background: rgb(255 255 255 / 0.12); color: #fff; border-color: rgb(255 255 255 / 0.3); }
 .lightbox-caption .key { display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; }
+/* Zoom: the stage clips the scaled frame; pointer gestures are handled in Photos.tsx, so the browser must not pan or zoom. */
+.lightbox-stage { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.lightbox-stage .lightbox-frame { transform-origin: center center; will-change: transform; cursor: zoom-in; }
+.lightbox-stage.zoomed .lightbox-frame { cursor: grab; }
+.lightbox-stage.zoomed:active .lightbox-frame { cursor: grabbing; }
+.lightbox-zoom { display: inline-flex; align-items: center; gap: 6px; }
+.lightbox-zoom button { min-width: 38px; font-size: 16px; }
+.lightbox-zoom-level { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  .lightbox-stage .lightbox-frame, .lightbox-stage .lightbox-frame img { max-height: calc(100dvh - 180px); }
+  .lightbox-caption { gap: 8px 12px; }
+}
 
 /* audit */
 .audit-sentence { line-height: 1.5; overflow-wrap: anywhere; }
@@ -418,8 +430,23 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 .share-shell { max-width: 1200px; margin: 0 auto; padding: 16px 16px 48px; display: flex; flex-direction: column; gap: 16px; min-height: 100%; }
 .share-header { display: flex; align-items: center; gap: 12px; padding: 4px 0 12px; border-bottom: 1px solid var(--border); }
 .share-header .spacer { flex: 1; }
-.teasoo-mark { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: 0.01em; color: var(--text-primary); }
-.teasoo-mark svg { color: var(--brand); }
+/* Teasoo Consulting logo: dark lettering on light backgrounds, white on dark, following the portal's theme. */
+.teasoo-logo { display: inline-flex; align-items: center; line-height: 0; }
+.teasoo-logo img { height: var(--logo-h, 36px); width: auto; max-width: 100%; }
+.teasoo-logo .on-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .teasoo-logo .on-light { display: none; }
+  :root:not([data-theme="light"]) .teasoo-logo .on-dark { display: inline; }
+}
+:root[data-theme="dark"] .teasoo-logo .on-light { display: none; }
+:root[data-theme="dark"] .teasoo-logo .on-dark { display: inline; }
+@media (max-width: 640px) { .teasoo-logo img { height: calc(var(--logo-h, 36px) * 0.85); } }
+@media print { .teasoo-logo .on-light { display: inline !important; } .teasoo-logo .on-dark { display: none !important; } }
+.teasoo-link { color: inherit; font-weight: 600; text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 2px; }
+.teasoo-link:hover { color: var(--text-primary); text-decoration-color: currentColor; }
+.share-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 14px; margin-top: 8px; font-size: 13px; color: var(--text-muted); }
+.share-footer-brand { display: inline-flex; align-items: center; gap: 10px; }
+.landing-footer-brand { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .share-error { max-width: 460px; margin: 12vh auto 0; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; padding: 28px; }
 .print-only { display: none; }
 /* client link sections: side navigation on wide screens, tabs on top on phones */
@@ -571,3 +598,16 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
   a { color: inherit; }
   h1 { font-size: 20px; }
 }
+
+/* Previous / next tree on a tree's page */
+.tree-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; justify-content: space-between; }
+.tree-pager-steps { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tree-pager-steps .muted { font-variant-numeric: tabular-nums; }
+
+/* Visit type tags */
+.pill.visit-type.maintenance { color: var(--brand); border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); background: var(--brand-wash); }
+
+/* "Also create sub-sectors" on a new sector */
+.sub-sector-option { gap: 8px 12px; align-items: center; }
+.sub-sector-option .inline-number { margin: 0; }
+.sub-sector-option .inline-number input { width: 76px; }

@@ -3,7 +3,7 @@ import { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { fmtDate } from '../components/ui';
-import { BrandMark } from './Share';
+import { TeasooLink, TeasooLogo } from '../components/Brand';
 
 /** Published by .github/workflows/android-release.yml under a stable name, so this link always gets the newest app. */
 export const APK_URL = 'https://github.com/Teasoo-Holding/tms/releases/latest/download/tms-field.apk';
@@ -207,7 +207,7 @@ export function LandingPage() {
       <a className="skip-link" href="#main">Skip to content</a>
       <header className="landing-header">
         <div className="landing-wrap landing-header-row">
-          <BrandMark />
+          <TeasooLogo height={36} />
           <nav className="landing-nav" aria-label="Page sections">
             <a href="#features">Features</a>
             <a href="#how">How it works</a>
@@ -324,7 +324,10 @@ export function LandingPage() {
 
       <footer className="landing-footer">
         <div className="landing-wrap landing-footer-row">
-          <span>© {new Date().getFullYear()} Teasoo Consulting · Tree Management System</span>
+          <span className="landing-footer-brand">
+            <TeasooLogo height={28} />
+            <span>© {new Date().getFullYear()} <TeasooLink /> · Tree Management System</span>
+          </span>
           <Link to={portal}>{user ? 'Open the portal' : 'Portal sign-in'}</Link>
         </div>
       </footer>
