@@ -87,6 +87,7 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
     Scaffold(
         topBar = {
             TopAppBar(
+                colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
                 title = { Text(ctx?.project?.name ?: "TMS Field", maxLines = 1) },
                 actions = { AccountMenu(session, vm) },
             )

@@ -77,6 +77,7 @@ fun MyVisitsScreen(onOpenTree: (String) -> Unit, onBack: () -> Unit, vm: MyVisit
     BackHandler(enabled = open != null) { vm.openDay.value = null }
     Scaffold(topBar = {
         TopAppBar(
+            colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
             title = {
                 Column {
                     Text(open?.let { dayLabel(it.date) } ?: "My visits")

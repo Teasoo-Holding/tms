@@ -231,6 +231,7 @@ fun RegisterScreen(app: AppViewModel, onDone: (String) -> Unit, onBack: () -> Un
 
     Scaffold(topBar = {
         TopAppBar(
+            colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
             title = { Text(if (vm.replacesTreeId != null) "Plant a replacement" else "Register a tree") },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
         )

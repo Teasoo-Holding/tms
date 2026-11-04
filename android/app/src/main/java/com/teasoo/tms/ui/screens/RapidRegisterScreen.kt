@@ -229,6 +229,7 @@ fun RapidRegisterScreen(onBack: () -> Unit, onVisitTree: (String) -> Unit, vm: R
 
     Scaffold(topBar = {
         TopAppBar(
+            colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
             title = {
                 Column {
                     Text("Register trees")

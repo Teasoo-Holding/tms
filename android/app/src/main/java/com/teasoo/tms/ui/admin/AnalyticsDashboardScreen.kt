@@ -258,7 +258,7 @@ private fun DashboardBody(s: AnalyticsSummary) {
     }
 
     if (s.byPlantingYear.isNotEmpty()) ChartCard("By planting year", null) {
-        s.byPlantingYear.forEach { y -> BoldValue(y.name, "${y.originalTrees} original · ${y.replacementTrees} replacement") }
+        s.byPlantingYear.forEach { y -> YearCounts(y.name, y.originalTrees, y.replacementTrees) }
     }
 
     s.notes.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }

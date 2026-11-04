@@ -95,6 +95,7 @@ fun TreeDetailScreen(nav: NavController, onBack: () -> Unit, vm: TreeDetailViewM
     var correcting by remember { mutableStateOf(false) }
     Scaffold(topBar = {
         TopAppBar(
+            colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
             title = { Text(d?.tree?.physicalTreeId ?: "", fontFamily = FontFamily.Monospace) },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
         )

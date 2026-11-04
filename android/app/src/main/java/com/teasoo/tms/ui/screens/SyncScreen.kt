@@ -84,6 +84,7 @@ fun SyncScreen(app: AppViewModel, onOpenTree: (String) -> Unit, onBack: () -> Un
     var more by remember { mutableStateOf(false) }
     Scaffold(topBar = {
         TopAppBar(
+            colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
             title = { Text("Ready to send") },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
             actions = {

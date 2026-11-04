@@ -84,7 +84,6 @@ fun NavGraphBuilder.adminGraph(nav: NavController, onOpenTree: (String) -> Unit)
 /** Entries for a home screen's administration section. [danger] entries are destructive and drawn in red. */
 data class AdminEntry(val title: String, val subtitle: String, val icon: ImageVector, val route: String, val danger: Boolean = false)
 
-/** The first entry is the hub's primary action. */
 val ADMIN_ENTRIES = listOf(
     AdminEntry("Projects", "Years, areas, ID formats, officers", Icons.Default.Forest, AdminRoutes.PROJECTS),
     AdminEntry("Dashboard", "Progress and field activity", Icons.Default.Insights, AdminRoutes.ANALYTICS),
@@ -105,19 +104,8 @@ fun AdminHubScreen(onBack: () -> Unit, onNavigate: (String) -> Unit) {
             Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            val primary = ADMIN_ENTRIES.first()
-            Button(
-                onClick = { onNavigate(primary.route) },
-                shape = MaterialTheme.shapes.extraLarge,
-                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 20.dp),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp),
-            ) {
-                Icon(primary.icon, null, Modifier.size(28.dp))
-                Spacer(Modifier.width(12.dp))
-                Text(primary.title, style = MaterialTheme.typography.titleLarge)
-            }
-            Spacer(Modifier.height(4.dp))
-            ADMIN_ENTRIES.drop(1).forEach { e -> HubOption(e) { onNavigate(e.route) } }
+            // Every section looks the same: none is selected or more important than the others here.
+            ADMIN_ENTRIES.forEach { e -> HubOption(e) { onNavigate(e.route) } }
         }
     }
 }

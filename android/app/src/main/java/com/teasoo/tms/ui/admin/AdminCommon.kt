@@ -166,6 +166,7 @@ fun AdminScaffold(
     Scaffold(
         topBar = {
             TopAppBar(
+                colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
                 title = {
                     Column {
                         Text(title)
@@ -514,5 +515,17 @@ fun BoldValue(label: String, value: String, modifier: Modifier = Modifier, value
     Row(modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = valueColor)
+    }
+}
+
+/** One planting year: the year on its own line, its original and replacement tree counts underneath. */
+@Composable
+fun YearCounts(year: String, original: Int, replacement: Int) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(year, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            "${"%,d".format(original)} original trees · ${"%,d".format(replacement)} replacement trees",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
