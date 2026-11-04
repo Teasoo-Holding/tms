@@ -51,7 +51,7 @@ fun TreesScreen(app: AppViewModel, onOpen: (String) -> Unit, onBack: () -> Unit,
     val subs by vm.subSectors.collectAsStateWithLifecycle()
     val sub by vm.subSectorId.collectAsStateWithLifecycle()
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Find a tree") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
+        TopAppBar(colors = com.teasoo.tms.ui.components.tmsTopBarColors(), title = { Text("Find a tree") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
     }) { padding ->
         Column(Modifier.padding(padding).padding(horizontal = 16.dp)) {
             OutlinedTextField(

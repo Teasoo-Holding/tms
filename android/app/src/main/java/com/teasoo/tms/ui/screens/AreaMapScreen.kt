@@ -165,40 +165,51 @@ fun AreaMapScreen(app: AppViewModel, onBack: () -> Unit, vm: AreaMapViewModel = 
     val perDot = treesPerDot(dotted.map { it.trees })
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Tree density map") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
+        TopAppBar(colors = com.teasoo.tms.ui.components.tmsTopBarColors(), title = { Text("Tree density map") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
     }) { padding ->
         Column(Modifier.padding(padding)) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Picker("Project", projects, projects.find { it.id == projectId }, { it.name }, { vm.selectProject(it.id) }, modifier = Modifier.weight(1.4f), supportingText = null)
                 Picker("Planting year", years, years.find { it.id == yearId }, { it.yearLabel }, { vm.yearId.value = it.id }, modifier = Modifier.weight(1f), supportingText = null)
             }
-            if (BuildConfig.MAP_STYLE_URL.isBlank()) {
-                Text("Area outlines only (no background map configured).", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp))
+            // Trees have no GPS, so the map can only draw areas that have corner points. Without any, say so instead of
+            // showing an empty map; the numbers below still show every area.
+            val outlined = sectors.any { it.boundaryJson != null } || subs.any { it.boundaryJson != null }
+            if (outlined) {
+                if (BuildConfig.MAP_STYLE_URL.isBlank()) {
+                    Text("Outlines are drawn on a plain background (no street or satellite map is configured).", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp))
+                }
+                AndroidView(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    factory = { ctx ->
+                        MapLibre.getInstance(ctx)
+                        MapView(ctx).also { view ->
+                            view.onCreate(null)
+                            lifecycle.addObserver(LifecycleEventObserver { _, e ->
+                                when (e) {
+                                    Lifecycle.Event.ON_START -> view.onStart()
+                                    Lifecycle.Event.ON_RESUME -> view.onResume()
+                                    Lifecycle.Event.ON_PAUSE -> view.onPause()
+                                    Lifecycle.Event.ON_STOP -> view.onStop()
+                                    Lifecycle.Event.ON_DESTROY -> view.onDestroy()
+                                    else -> {}
+                                }
+                            })
+                        }
+                    },
+                    update = { view ->
+                        view.getMapAsync { map -> map.setStyle(styleBuilder()) { style -> render(map, style, sectors, subs, sectorDensity, subDensity, splitSectors, perDot) } }
+                    },
+                )
+            } else {
+                Notice(
+                    "No map yet: none of this year's sectors or sub-sectors has GPS corners. Add them in Administration → Projects → " +
+                        "the project → Areas (tap an area, then “Use my location” at each corner). The tree counts per area are below.",
+                    modifier = Modifier.padding(12.dp),
+                )
             }
-            AndroidView(
-                modifier = Modifier.fillMaxWidth().weight(1f),
-                factory = { ctx ->
-                    MapLibre.getInstance(ctx)
-                    MapView(ctx).also { view ->
-                        view.onCreate(null)
-                        lifecycle.addObserver(LifecycleEventObserver { _, e ->
-                            when (e) {
-                                Lifecycle.Event.ON_START -> view.onStart()
-                                Lifecycle.Event.ON_RESUME -> view.onResume()
-                                Lifecycle.Event.ON_PAUSE -> view.onPause()
-                                Lifecycle.Event.ON_STOP -> view.onStop()
-                                Lifecycle.Event.ON_DESTROY -> view.onDestroy()
-                                else -> {}
-                            }
-                        })
-                    }
-                },
-                update = { view ->
-                    view.getMapAsync { map -> map.setStyle(styleBuilder()) { style -> render(map, style, sectors, subs, sectorDensity, subDensity, splitSectors, perDot) } }
-                },
-            )
-            DensityList(sectors, subs, sectorDensity, subDensity, perDot, Modifier.fillMaxWidth().weight(0.9f))
+            DensityList(sectors, subs, sectorDensity, subDensity, perDot, Modifier.fillMaxWidth().weight(if (outlined) 0.9f else 1f))
         }
     }
 }

@@ -93,6 +93,7 @@ fun DashboardScreen(app: AppViewModel, onBack: (() -> Unit)?, actions: @Composab
 
     Scaffold(topBar = {
         TopAppBar(
+            colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
             title = { Column { Text("Dashboard"); Text(projects.find { it.id == projectId }?.name ?: "All my projects", style = MaterialTheme.typography.bodySmall) } },
             navigationIcon = { onBack?.let { IconButton(onClick = it) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } } },
             actions = {
@@ -123,7 +124,7 @@ fun DashboardScreen(app: AppViewModel, onBack: (() -> Unit)?, actions: @Composab
                     s.byStatus.forEach { row -> BarRow(row.name, row.count, max) }
                 }
                 Section("By planting year") {
-                    s.byPlantingYear.forEach { y -> LabelValue(y.name, "${y.originalTrees} original · ${y.replacementTrees} replacement") }
+                    s.byPlantingYear.forEach { y -> com.teasoo.tms.ui.admin.YearCounts(y.name, y.originalTrees, y.replacementTrees) }
                 }
                 Section("Data completeness") {
                     LabelValue("Never observed", s.completeness.neverObserved.toString())
@@ -221,6 +222,7 @@ fun ConflictsScreen(onOpenTree: (String) -> Unit, onBack: () -> Unit, vm: Oversi
 
     Scaffold(topBar = {
         TopAppBar(
+            colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
             title = { Text("Sync conflicts") },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
             actions = { TextButton(onClick = { vm.loadConflicts() }, enabled = !loading) { Text("Refresh") } },

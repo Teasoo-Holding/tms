@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,18 +52,20 @@ fun PhotoStrip(media: List<MediaEntity>, load: PhotoSource, measurement: HeightM
 
 @Composable
 private fun Thumbnail(m: MediaEntity, load: PhotoSource, onClick: () -> Unit) {
-    val image by produceState<ImageBitmap?>(null, m.id, m.state) { value = load(m, 320) }
+    var attempt by remember { mutableIntStateOf(0) }
+    val image by produceState<ImageBitmap?>(null, m.id, m.state, attempt) { value = load(m, 320) }
     Surface(
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.surfaceVariant,
-        modifier = Modifier.size(88.dp).clip(MaterialTheme.shapes.small).clickable(enabled = image != null, onClick = onClick),
+        // Tapping a photo that couldn't be fetched tries again (e.g. once the phone is back online).
+        modifier = Modifier.size(88.dp).clip(MaterialTheme.shapes.small).clickable { if (image != null) onClick() else attempt++ },
     ) {
         Box(contentAlignment = Alignment.Center) {
             val img = image
             when {
                 img != null -> Image(img, contentDescription = "Tree photo", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                m.state != MediaState.VERIFIED -> PhotoPlaceholder(Icons.Default.CloudUpload, "Uploading")
-                else -> PhotoPlaceholder(Icons.Default.CloudOff, "Connect to view")
+                m.state != MediaState.VERIFIED -> PhotoPlaceholder(Icons.Default.CloudUpload, "Not sent yet")
+                else -> PhotoPlaceholder(Icons.Default.CloudOff, "Online only · tap to retry")
             }
         }
     }
@@ -73,17 +76,34 @@ private fun Thumbnail(m: MediaEntity, load: PhotoSource, onClick: () -> Unit) {
 fun TreePhoto(media: List<MediaEntity>, load: PhotoSource, modifier: Modifier = Modifier) {
     val latest = media.maxByOrNull { it.capturedAt }
     var open by remember { mutableStateOf(false) }
-    val image by produceState<ImageBitmap?>(null, latest?.id, latest?.state) { value = latest?.let { load(it, 1024) } }
+    var attempt by remember { mutableIntStateOf(0) }
+    var loading by remember { mutableStateOf(false) }
+    val image by produceState<ImageBitmap?>(null, latest?.id, latest?.state, attempt) {
+        loading = true
+        value = latest?.let { load(it, 1024) }
+        loading = false
+    }
     val img = image
     if (img != null) {
         FittedImage(img, "Latest photo of the tree", modifier) { open = true }
     } else {
-        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = modifier.fillMaxWidth().height(140.dp)) {
-            Box(contentAlignment = Alignment.Center) {
+        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant, modifier = modifier.fillMaxWidth().heightIn(min = 140.dp)) {
+            Column(
+                Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+            ) {
                 when {
-                    latest == null -> PhotoPlaceholder(Icons.Default.CloudOff, "No photo yet")
-                    latest.state != MediaState.VERIFIED -> PhotoPlaceholder(Icons.Default.CloudUpload, "Uploading")
-                    else -> PhotoPlaceholder(Icons.Default.CloudOff, "Connect to view")
+                    latest == null -> PanelMessage(Icons.Default.PhotoCamera, "No photo of this tree yet", "Add one when you record a visit.")
+                    loading -> CircularProgressIndicator()
+                    latest.state != MediaState.VERIFIED -> PanelMessage(
+                        Icons.Default.CloudUpload, "Photo not sent yet",
+                        "It was taken on another phone and appears here once that phone has sent it.",
+                    )
+                    // The photo is on the server but not on this phone, and there's no connection to fetch it.
+                    else -> {
+                        PanelMessage(Icons.Default.CloudOff, "This photo is stored online", "Connect this phone to the internet to see it. Everything else on this page works offline.")
+                        OutlinedButton(onClick = { attempt++ }) { Text("Try again") }
+                    }
                 }
             }
         }
@@ -145,6 +165,13 @@ fun TreeThumb(treeId: String, latest: suspend (String) -> MediaEntity?, load: Ph
     Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(size).clip(MaterialTheme.shapes.small)) {
         image?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
     }
+}
+
+@Composable
+private fun PanelMessage(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, detail: String) {
+    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(32.dp))
+    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+    Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
 }
 
 @Composable

@@ -160,6 +160,7 @@ fun ObservationScreen(app: AppViewModel, onDone: () -> Unit, vm: ObservationView
 
     Scaffold(topBar = {
         TopAppBar(
+            colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
             title = { Text(if (amending) "Correct visit" else "Record a visit") },
             navigationIcon = { IconButton(onClick = onDone) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
         )

@@ -238,7 +238,7 @@ fun SessionSetupScreen(onStarted: () -> Unit, onBack: () -> Unit, vm: SessionSet
     LaunchedEffect(mySubs) { if (subSectorId == null && mySubs.size == 1) vm.subSectorId.value = mySubs[0].id }
 
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Field session") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
+        TopAppBar(colors = com.teasoo.tms.ui.components.tmsTopBarColors(), title = { Text("Field session") }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
     }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Picker("Project", projects, projects.find { it.id == projectId }, { "${it.name} (${it.shortCode})" }, { vm.selectProject(it.id) })

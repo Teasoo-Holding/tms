@@ -85,7 +85,7 @@ fun EditTreeScreen(app: AppViewModel, onDone: () -> Unit, vm: EditTreeViewModel 
     val physicalId by vm.physicalId.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Edit tree") }, navigationIcon = { IconButton(onClick = onDone) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
+        TopAppBar(colors = com.teasoo.tms.ui.components.tmsTopBarColors(), title = { Text("Edit tree") }, navigationIcon = { IconButton(onClick = onDone) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } })
     }) { padding ->
         Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             TreeIdText(physicalId, "")

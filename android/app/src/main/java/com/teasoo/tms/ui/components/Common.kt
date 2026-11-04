@@ -155,3 +155,17 @@ fun Modifier.bottomSafe(min: androidx.compose.ui.unit.Dp = 40.dp) = composed {
 fun Modifier.topSafe(min: androidx.compose.ui.unit.Dp = 28.dp) = composed {
     windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal).union(WindowInsets(top = min)))
 }
+
+/**
+ * The top bar on every screen: a soft green band, so it is clearly separate from the page below it. Text and icons use
+ * the matching dark (or, in dark mode, light) colour for contrast.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun tmsTopBarColors() = TopAppBarDefaults.topAppBarColors(
+    containerColor = MaterialTheme.colorScheme.primaryContainer,
+    scrolledContainerColor = MaterialTheme.colorScheme.primaryContainer,
+    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+    actionIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+)

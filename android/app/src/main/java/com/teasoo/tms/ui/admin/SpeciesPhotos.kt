@@ -116,6 +116,7 @@ fun SpeciesPhotosDialog(species: AdminSpeciesDto, onClose: () -> Unit, vm: Speci
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Scaffold(topBar = {
             TopAppBar(
+                colors = com.teasoo.tms.ui.components.tmsTopBarColors(),
                 title = { Column { Text("Reference photos"); Text(name, style = MaterialTheme.typography.bodySmall) } },
                 navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") } },
             )
