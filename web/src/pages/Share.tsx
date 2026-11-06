@@ -12,6 +12,10 @@ import { PhotoSource, PhotoSourceProvider } from '../components/Photos';
 import { ErrorNotice, fmtDate, fmtDateTime, fmtNum, relativeTime, SimpleTable } from '../components/ui';
 import { ShareAreas } from './ShareAreas';
 import { ShareTree, ShareTrees } from './ShareTrees';
+import { fmtShortDate } from '../time';
+import { glossary, metricTerms } from '../glossary';
+import { GlossaryList } from './Glossary';
+import { DAY_NOTE } from '../time';
 
 const FILTER_KEYS = ['planting_year_id', 'vendor_id', 'sector_id', 'from', 'to'] as const;
 /** Changing a filter clears the ones that depend on it. */
@@ -156,6 +160,7 @@ function ShareOverview({ token, base }: ShareContext) {
   const s = d.summary;
   const statusRows: any[] = s.by_status ?? [];
   const alive = statusRows.filter((r) => !r.is_terminal && r.code !== 'UNKNOWN').reduce((n, r) => n + r.count, 0);
+  const terms = metricTerms();
   const unknown = statusRows.filter((r) => r.code === 'UNKNOWN').reduce((n, r) => n + r.count, 0);
   let liveIndex = 0;
   const statusColor = (r: any) =>
@@ -167,13 +172,13 @@ function ShareOverview({ token, base }: ShareContext) {
   const vendorOptions = [...new Map(vendors.map((v) => [v.id, v.short_code ? `${v.name} (${v.short_code})` : v.name])).entries()];
   const download = (file: string) => apiUrl(`${base}/${file}${filter}`);
   const weeks: { week: string; trees: number; cumulative: number }[] = s.planted_by_week ?? [];
-  const fmtWeek = (x: number | string) => new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: '2-digit' });
+  const fmtWeek = fmtShortDate;
   const byVendor: any[] = (s.by_vendor ?? []).map((r: any) => ({ label: r.short_code && r.id ? `${r.name} (${r.short_code})` : r.name, value: r.count }));
   // Alive / dead / not yet visited per sector, as each sector's share.
   const lifeSeries = [
     { key: 'alive_trees', label: 'Alive', color: 'var(--status-good)' },
     { key: 'dead_trees', label: 'Dead or missing', color: 'var(--status-critical)' },
-    { key: 'unknown_trees', label: 'Not yet visited', color: 'var(--border-strong)' },
+    { key: 'unknown_trees', label: 'No status yet', color: 'var(--border-strong)' },
   ];
   const lifeSectors = sectorShare.filter((r: any) => r.registered_trees > 0);
   const lifeValue = (c: string, k: string) => lifeSectors.find((r: any) => sectorLabel(r) === c)?.[k] ?? 0;
@@ -232,10 +237,10 @@ function ShareOverview({ token, base }: ShareContext) {
 
       <div className={`stack ${view.isFetching ? 'refetching' : ''}`}>
         <div className="grid stats">
-          <StatTile label="Trees planted" value={fmtNum(s.totals.planting_events)} foot={s.totals.replacement_trees ? `incl. ${fmtNum(s.totals.replacement_trees)} replacements` : undefined} />
-          <StatTile label="Alive" value={fmtNum(alive)} />
-          <StatTile label="Dead or missing" value={fmtNum(s.totals.terminal_status_trees)} />
-          <StatTile label="Not yet visited" value={fmtNum(unknown)} />
+          <StatTile label="Trees planted" info={terms.planted} value={fmtNum(s.totals.planting_events)} foot={s.totals.replacement_trees ? `incl. ${fmtNum(s.totals.replacement_trees)} replacements` : undefined} />
+          <StatTile label="Alive" info={terms.alive} value={fmtNum(alive)} />
+          <StatTile label="Dead or missing" info={terms.dead} value={fmtNum(s.totals.terminal_status_trees)} />
+          <StatTile label="No status yet" info={terms.noStatus} value={fmtNum(unknown)} />
         </div>
 
         <div className="grid charts">
@@ -272,7 +277,7 @@ function ShareOverview({ token, base }: ShareContext) {
             legend={<Legend items={lifeSeries} />}
             table={
               <SimpleTable
-                head={['Sector', 'Alive', 'Dead or missing', 'Not yet visited', 'Alive share']}
+                head={['Sector', 'Alive', 'Dead or missing', 'No status yet', 'Alive share']}
                 rows={lifeSectors.map((r: any) => [sectorLabel(r), fmtNum(r.alive_trees), fmtNum(r.dead_trees), fmtNum(r.unknown_trees), aliveShare(r)])}
               />
             }
@@ -297,8 +302,12 @@ function ShareOverview({ token, base }: ShareContext) {
 
         <p className="muted" style={{ margin: 0 }}>
           Updated {relativeTime(s.last_server_sync_at)}
-          {s.last_server_sync_at ? ` (${fmtDateTime(s.last_server_sync_at)})` : ''}. Counts are registered trees; “alive” means the latest visit found the tree alive.
+          {s.last_server_sync_at ? ` (${fmtDateTime(s.last_server_sync_at)})` : ''}. Counts are registered trees; “alive” means the latest visit found the tree alive. {DAY_NOTE}
         </p>
+        <details className="card">
+          <summary>What these numbers mean</summary>
+          <GlossaryList terms={glossary().filter((t) => t.term !== 'Open conflicts')} />
+        </details>
       </div>
     </div>
   );

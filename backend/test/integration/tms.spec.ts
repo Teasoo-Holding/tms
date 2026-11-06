@@ -910,7 +910,7 @@ describe('field sessions and the field-activity report', () => {
     expect(r.officers[1]).toMatchObject({ role: 'ADMIN', trees_registered: 1, sessions: 1 });
 
     // In UTC the first registration falls on the 20th.
-    const utc = (await report(admin, 'from=2026-10-21&to=2026-10-21').expect(200)).body;
+    const utc = (await report(admin, 'from=2026-10-21&to=2026-10-21&tz=UTC').expect(200)).body;
     expect(utc.tz).toBe('UTC');
     expect(utc.days).toHaveLength(1);
     expect(utc.days[0].trees_registered).toBe(2);

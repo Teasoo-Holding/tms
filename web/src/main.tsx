@@ -23,6 +23,7 @@ import { TreesPage } from './pages/Trees';
 import { UsersPage } from './pages/Users';
 import { VisitsPage } from './pages/Visits';
 import './styles.css';
+import { GlossaryPage } from './pages/Glossary';
 
 const queryClient: QueryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1, placeholderData: (prev: unknown) => prev } },
@@ -68,6 +69,7 @@ function App() {
         <Route path="trees/:id" element={<TreeDetailPage />} />
         <Route path="visits" element={<VisitsPage />} />
         <Route path="field-activity" element={<FieldActivityPage />} />
+        <Route path="glossary" element={<GlossaryPage />} />
         <Route path="projects" element={<ProjectsPage />} />
         <Route path="projects/:id" element={<ProjectDetailPage />} />
         {admin && <Route path="client-links" element={<ClientLinksPage />} />}

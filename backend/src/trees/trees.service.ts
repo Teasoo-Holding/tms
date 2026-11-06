@@ -5,6 +5,7 @@ import { AccessService } from '../common/access.service';
 import { AuditService } from '../common/audit.service';
 import { AuthUser } from '../common/auth.decorators';
 import { Db, isUniqueViolation } from '../database/db.service';
+import { watDate } from '../domain/time';
 import { CustomFieldError, CustomValue, validateCustomValues } from '../domain/custom-fields';
 import {
   assemblePhysicalId,
@@ -252,9 +253,8 @@ export class TreesService {
     if (!custom) await this.assertSerialAllocated(tx, actor, serialKey, assembled.serial);
 
     if (p.replaces_tree_id) await this.assertReplaceable(tx, p.replaces_tree_id, p.project_id);
-    // Without a planting date, the first visit's date stands in for it (the device's local date as stamped),
-    // so reports keep a planting date for every tree.
-    const plantedOn = p.planted_on ?? p.initial_observation.observed_at.slice(0, 10);
+    // Without a planting date, the first visit's WAT date stands in for it, so reports keep a planting date for every tree.
+    const plantedOn = p.planted_on ?? watDate(p.initial_observation.observed_at);
     const treeFields = await this.customValues(tx, p.project_id, 'TREE', p.custom_fields);
 
     const insertValues = [

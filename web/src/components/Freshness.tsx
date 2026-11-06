@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useId, useState } from 'react';
 import { api, qs } from '../api/client';
 import { fmtNum, relativeTime } from './ui';
+import { fmtDateTime, fmtWhen } from '../time';
 
 /** One phone as of its last contact (GET /reports/freshness). Counts are null for app versions that do not report them. */
 export interface FreshnessDevice {
@@ -32,15 +33,7 @@ export function useFreshness(projectId?: string) {
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${fmtNum(n)} ${n === 1 ? one : many}`;
-const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
-const fmtTime = (v: string) => new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-/** "08:10" today, else "3 Nov, 08:10" (with the year when it is not this year). */
-export function fmtWhen(v: string) {
-  const d = new Date(v);
-  const now = new Date();
-  if (sameDay(d, now)) return fmtTime(v);
-  return d.toLocaleString(undefined, { day: 'numeric', month: 'short', ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }), hour: '2-digit', minute: '2-digit' });
-}
+export { fmtWhen };
 /** Sub-label for headline totals: "as of 10:12" (the last sync), or "nothing synced yet". */
 export const asOf = (v?: string | null) => (v ? `as of ${fmtWhen(v)}` : 'nothing synced yet');
 
@@ -68,7 +61,7 @@ export function FreshnessBanner({ freshness }: { freshness?: Freshness }) {
       <div className="freshness-line">
         <span>
           <strong>Data as of {f.last_sync_at ? relativeTime(f.last_sync_at) : 'no sync yet'}</strong>
-          {f.last_sync_at && <span className="muted"> ({new Date(f.last_sync_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })})</span>}
+          {f.last_sync_at && <span className="muted"> ({fmtDateTime(f.last_sync_at)})</span>}
         </span>
         {f.devices_with_pending > 0 ? (
           <span>

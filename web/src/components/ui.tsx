@@ -3,6 +3,7 @@ import { InputHTMLAttributes, KeyboardEvent as ReactKeyboardEvent, ReactNode, us
 import { createPortal } from 'react-dom';
 import { api, ApiError } from '../api/client';
 import { Pagination, useLocalPage, usePaged } from './Pagination';
+import { todayWat } from '../time';
 
 export function Modal({ title, onClose, children, wide, small }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; small?: boolean }) {
   useEffect(() => {
@@ -154,7 +155,7 @@ export function StatusBadge({ code, name, terminal }: { code?: string | null; na
   return (
     <span className={`status-badge ${tone}`}>
       <span className="symbol" aria-hidden>{STATUS_SYMBOL[tone]}</span>
-      {name ?? 'Not observed'}
+      {name ?? 'No status yet'}
     </span>
   );
 }
@@ -210,8 +211,8 @@ export function ActivePill({ active }: { active: boolean }) {
   return <span className={`pill ${active ? 'good' : ''}`}>{active ? 'Active' : 'Inactive'}</span>;
 }
 
-export const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
-export const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
+// Dates and times of instants are WAT (see time.ts).
+export { fmtDate, fmtDateTime } from '../time';
 export const fmtNum = (v?: number | null) => (v == null ? '—' : v.toLocaleString());
 
 const DAY = 86_400_000;
@@ -483,12 +484,9 @@ export function Chevron({ open }: { open: boolean }) {
   );
 }
 
-const pad2 = (n: number) => String(n).padStart(2, '0');
 /** Today as YYYY-MM-DD, for download file names. */
-export const todayStamp = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-};
+/** Today's WAT date, for file names. */
+export const todayStamp = todayWat;
 
 /** One active filter as a removable chip: "Planting year: 2024 ×". */
 export interface ActiveFilter {

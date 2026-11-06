@@ -138,8 +138,14 @@ fun Notice(text: String, color: Color = MaterialTheme.colorScheme.secondaryConta
     }
 }
 
-private val DISPLAY = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT).withZone(ZoneId.systemDefault())
-fun formatInstant(iso: String?): String = iso?.let { runCatching { DISPLAY.format(Instant.parse(it)) }.getOrDefault(it) } ?: "—"
+/** Every date and time is shown in West Africa Time, labelled "WAT", and days run midnight to midnight WAT. */
+val WAT: ZoneId = ZoneId.of("Africa/Lagos")
+const val WAT_LABEL = "WAT"
+/** Today's date in WAT. */
+fun todayWat(): LocalDate = LocalDate.now(WAT)
+
+private val DISPLAY = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT).withZone(WAT)
+fun formatInstant(iso: String?): String = iso?.let { runCatching { "${DISPLAY.format(Instant.parse(it))} $WAT_LABEL" }.getOrDefault(it) } ?: "—"
 
 /**
  * Keeps controls clear of the system navigation buttons/gesture bar at the bottom of the screen. Full-screen dialogs

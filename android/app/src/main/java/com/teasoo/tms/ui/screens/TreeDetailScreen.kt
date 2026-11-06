@@ -49,7 +49,7 @@ data class MaintenanceDue(val proposedOn: java.time.LocalDate, val lastMaintenan
 /** Null for trees that need none (dead, or not an active record). */
 internal fun maintenanceDue(t: TreeEntity, status: StatusEntity?, observations: List<ObservationEntity>, intervalDays: Int): MaintenanceDue? {
     if (t.recordState != "ACTIVE" || status?.isTerminal == true) return null
-    val zone = java.time.ZoneId.systemDefault()
+    val zone = WAT
     fun day(iso: String?) = iso?.let { runCatching { java.time.Instant.parse(it).atZone(zone).toLocalDate() }.getOrNull() }
     val superseded = observations.mapNotNull { it.amendsObservationId }.toSet()
     val last = observations.filter { it.id !in superseded && it.visitType == "MAINTENANCE" }.mapNotNull { day(it.observedAt) }.maxOrNull()

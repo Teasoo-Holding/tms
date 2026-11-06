@@ -24,6 +24,9 @@ import com.teasoo.tms.data.remote.DayActivityDto
 import com.teasoo.tms.data.remote.FieldActivityResponse
 import com.teasoo.tms.data.remote.SessionActivityDto
 import com.teasoo.tms.ui.components.Picker
+import com.teasoo.tms.ui.components.WAT
+import com.teasoo.tms.ui.components.WAT_LABEL
+import com.teasoo.tms.ui.components.todayWat
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,8 +50,8 @@ class FieldActivityViewModel @Inject constructor(@ApplicationContext context: Co
     init { refresh() }
 
     fun refresh() = load {
-        val to = LocalDate.now()
-        report.value = api.fieldActivity(projectId.value, to.minusDays(period.value.days).toString(), to.toString(), ZoneId.systemDefault().id)
+        val to = todayWat()
+        report.value = api.fieldActivity(projectId.value, to.minusDays(period.value.days).toString(), to.toString(), WAT.id)
     }
 
     fun setProject(id: String?) { projectId.value = id; refresh() }
@@ -56,11 +59,11 @@ class FieldActivityViewModel @Inject constructor(@ApplicationContext context: Co
 }
 
 private val DAY = DateTimeFormatter.ofPattern("EEE d MMM")
-private val TIME = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+private val TIME = DateTimeFormatter.ofPattern("HH:mm").withZone(WAT)
 private fun time(iso: String?) = iso?.let { runCatching { TIME.format(Instant.parse(it)) }.getOrNull() } ?: "–"
 private fun dayLabel(date: String) = runCatching {
     val d = LocalDate.parse(date)
-    when (d) { LocalDate.now() -> "Today"; LocalDate.now().minusDays(1) -> "Yesterday"; else -> DAY.format(d) }
+    when (d) { todayWat() -> "Today"; todayWat().minusDays(1) -> "Yesterday"; else -> DAY.format(d) }
 }.getOrDefault(date)
 
 /** How much each field officer recorded, per day and per field session, to follow data collection. Online only. */
@@ -119,7 +122,7 @@ private fun DayRow(d: DayActivityDto) {
                 Column(Modifier.weight(1f)) {
                     Text(d.userName ?: "Unknown", style = MaterialTheme.typography.titleSmall)
                     Text("${d.treesRegistered} registered · ${d.visits} visits · ${d.photos} photos", style = MaterialTheme.typography.bodyMedium)
-                    Text("${time(d.firstAt)} – ${time(d.lastAt)} · ${d.sessions.size} session${if (d.sessions.size == 1) "" else "s"}",
+                    Text("${time(d.firstAt)} – ${time(d.lastAt)} $WAT_LABEL · ${d.sessions.size} session${if (d.sessions.size == 1) "" else "s"}",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Icon(if (open) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight, if (open) "Hide sessions" else "Show sessions")
@@ -133,7 +136,7 @@ private fun DayRow(d: DayActivityDto) {
 private fun SessionRow(s: SessionActivityDto) {
     OutlinedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text("${time(s.firstAt)} – ${time(s.lastAt)}" + if (s.fieldSessionId == null) " · without a session" else "", style = MaterialTheme.typography.labelLarge)
+            Text("${time(s.firstAt)} – ${time(s.lastAt)} $WAT_LABEL" + if (s.fieldSessionId == null) " · without a session" else "", style = MaterialTheme.typography.labelLarge)
             Text(
                 listOfNotNull(
                     s.projectName, s.plantingYear,

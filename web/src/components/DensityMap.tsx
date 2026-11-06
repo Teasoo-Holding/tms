@@ -42,7 +42,7 @@ export interface DensityReport {
 
 // Dot colours by the tree's latest observation. MapLibre paints need literal colours.
 const DOT_COLORS: Record<DotState, string> = { alive: '#1a9641', dead: '#d03b3b', unknown: '#8f8f87' };
-const DOT_LABELS: Record<DotState, string> = { alive: 'Alive', dead: 'Dead', unknown: 'Not yet observed' };
+const DOT_LABELS: Record<DotState, string> = { alive: 'Alive', dead: 'Dead', unknown: 'No status yet' };
 const OUTLINE = '#1f3d2b';
 
 const fmtRate = (v: number | null) => (v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: 1 }));
@@ -192,7 +192,7 @@ function DensityTable({ sectors: all }: { sectors: DensityArea[] }) {
       <thead>
         <tr>
           <th>Area</th><th className="num">Hectares</th><th className="num">Trees</th><th className="num hide-sm">Alive</th><th className="num hide-sm">Dead</th>
-          <th className="num hide-sm">Not observed</th><th className="num">Trees / ha</th><th className="num">Alive %</th>
+          <th className="num hide-sm">No status yet</th><th className="num">Trees / ha</th><th className="num">Alive %</th>
         </tr>
       </thead>
       <tbody>

@@ -12,6 +12,7 @@ import { SHOW_HEIGHT } from '../features';
 import { currentScheme, previewId, Scheme } from '../idscheme';
 import type { CustomField } from './ProjectDetail';
 import { TREE_LIST_KEYS } from './Trees';
+import { fmtShortDate } from '../time';
 
 export function TreeDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -187,7 +188,7 @@ export function TreeDetailPage() {
           <LineChart
             series={[{ key: 'height', label: 'Height', color: SERIES[2], points: heights }]}
             unit="cm"
-            xFormat={(x) => new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: '2-digit' })}
+            xFormat={fmtShortDate}
             ariaLabel={`Height of tree ${t.physical_tree_id} over time`}
           />
         )}

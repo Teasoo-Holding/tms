@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api, qs } from '../api/client';
 import { ChartCard, Legend, SERIES, StackedColumns, StatTile } from '../charts/charts';
 import { CardHeader, Chevron, EmptyState, ErrorNotice, fmtNum, PageHeader, SimpleTable } from '../components/ui';
 import { Pagination, usePage, usePaged } from '../components/Pagination';
 import { asOf, AwaitingBadge, AwaitingNotice, awaitingDevices, FreshnessBanner, FreshnessDevice, useFreshness, WaitingTag } from '../components/Freshness';
+import { DAY_NOTE, daysAgoWat, TIME_ZONE, timeRange, todayWat } from '../time';
+import { RECORD_TERMS } from '../glossary';
 
 interface Counts {
   trees_registered: number;
@@ -47,23 +49,15 @@ interface Report {
   days: Day[];
 }
 
-/** The browser's time zone: a day is the officer's working day where the report is read. */
-const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-const pad2 = (n: number) => String(n).padStart(2, '0');
-const ymd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-const daysAgo = (n: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return ymd(d);
-};
+/** Days are WAT days, whatever the viewer's time zone. */
+const TZ = TIME_ZONE;
+const daysAgo = daysAgoWat;
 const QUICK: [string, number][] = [['Today', 0], ['7 days', 6], ['30 days', 29]];
 /** "2026-10-27" → "Tue 27 Oct", without a time-zone shift. */
 const fmtDay = (day: string) => {
   const [y, m, d] = day.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 };
-const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-const timeRange = (a: string, b: string) => (fmtTime(a) === fmtTime(b) ? fmtTime(a) : `${fmtTime(a)}–${fmtTime(b)}`);
 /** Every date from `from` to `to`, inclusive. */
 function datesBetween(from: string, to: string) {
   const out: string[] = [];
@@ -84,7 +78,7 @@ export function FieldActivityPage() {
     setParams(next, { replace: true });
   };
   const from = get('from') || daysAgo(6);
-  const to = get('to') || ymd(new Date());
+  const to = get('to') || todayWat();
   const projectId = get('project_id');
   const userId = get('user_id');
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.get<any[]>('/projects') });
@@ -111,7 +105,7 @@ export function FieldActivityPage() {
   const officers = allOfficers.filter((o) => !userId || o.user_id === userId);
   const days = (r?.days ?? []).filter((d) => !userId || d.user_id === userId);
   const dayPage = usePaged(days, usePage('days', 25));
-  const quick = QUICK.find(([, n]) => from === daysAgo(n) && to === ymd(new Date()))?.[0];
+  const quick = QUICK.find(([, n]) => from === daysAgo(n) && to === todayWat())?.[0];
 
   // Phones that may still hold this period's records: a zero then reads "awaiting sync", not "nobody worked".
   const freshness = useFreshness(projectId || undefined);
@@ -145,7 +139,7 @@ export function FieldActivityPage() {
     <div className="stack">
       <PageHeader
         title="Field activity"
-        subtitle={`What officers recorded each day, by field session. Days and times in ${TZ}.`}
+        subtitle={`What officers recorded each day, by field session. Days and times in West Africa Time (WAT).`}
         actions={<button onClick={exportXlsx} disabled={exporting}>{exporting ? 'Exporting…' : 'Export to Excel'}</button>}
       />
 
@@ -272,8 +266,8 @@ export function FieldActivityPage() {
             </section>
           )}
           <p className="muted" style={{ margin: 0 }}>
-            Trees registered are first visits; visits are later visits; corrections replace an earlier visit and are counted apart. Records of rejected trees are left out.
-            Work recorded by older app versions, which do not mark field sessions, is shown as one session per officer and day.
+            {RECORD_TERMS.filter((t) => ['Registered', 'Visit', 'Correction', 'Rejected'].includes(t.term)).map((t) => `${t.term}: ${t.definition}`).join(' ')} {DAY_NOTE}{' '}
+            Work recorded by older app versions, which do not mark field sessions, is shown as one session per officer and day. <Link to="/glossary">Glossary</Link>
           </p>
         </div>
       )}

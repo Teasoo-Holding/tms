@@ -218,7 +218,7 @@ fun PhotoViewer(m: MediaEntity, load: PhotoSource, measurement: HeightMeasuremen
     }
 }
 
-private val SHORT_DATE = DateTimeFormatter.ofPattern("d MMM yy").withZone(ZoneId.systemDefault())
+private val SHORT_DATE = DateTimeFormatter.ofPattern("d MMM yy").withZone(WAT)
 
 /** Height over time for one tree. */
 @Composable

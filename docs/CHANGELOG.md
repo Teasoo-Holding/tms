@@ -7,6 +7,17 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-06: 2026 sector map, times in WAT, metric definitions (migrations 014–015)
+- **2026 sectors (SEPLAT Ehor):** migration 014 loads the 2026 Sectoring Plan (BE.C.206) into the T4L 2026 planting year: 24 sectors (S1–S24, plan letters A–X) and 120 sub-sectors (SS1–SS5, numbered south to north), with outlines and GPS reference points. Existing 2026 areas are overwritten in place. Trees keep the sector and sub-sector they were recorded in. Areas outside the plan are removed only if nothing refers to them.
+- **Times in WAT:**
+  - Every time shown on the web, the client page and the phone is West Africa Time, labelled "WAT", whatever the viewer's own time zone.
+  - Day totals, date filters and "today" use midnight-to-midnight WAT days. Migration 015 makes Africa/Lagos the database's default time zone.
+  - Excel exports show times as WAT; CSV exports write times with a +01:00 offset.
+- **Definitions:**
+  - Each Dashboard and client-page tile has an "i" with its definition.
+  - A Glossary page is linked from the Dashboard, and the client page has "What these numbers mean".
+  - "Not yet visited" now counts trees with no follow-up visit. Trees with no status are labelled "No status yet".
+
 ## 2026-10-30: Offline sign-in, sessions that survive bad networks, quick area setup, landing page, automatic releases (migration 011)
 - **Offline sign-in:**
   - Anyone who has signed in online once on a device can sign in again without internet and keep collecting.

@@ -75,7 +75,7 @@ function popupNode(p: any) {
     `Trees: ${Number(p.trees).toLocaleString()}`,
     `Alive: ${Number(p.alive).toLocaleString()}`,
     `Dead: ${Number(p.dead).toLocaleString()}`,
-    `Not yet observed: ${Number(p.unknown).toLocaleString()}`,
+    `No status yet: ${Number(p.unknown).toLocaleString()}`,
     `% dead: ${share < 0 ? '—' : `${Math.round(share * 100)}% of observed trees`}`,
   ];
   for (const l of lines) {
@@ -197,7 +197,7 @@ export function ShareLegend() {
       <span>{swatch(SHARE_COLORS.alive)}Mostly alive</span>
       <span>{swatch(SHARE_COLORS.mid)}About half dead</span>
       <span>{swatch(SHARE_COLORS.dead)}Mostly dead</span>
-      <span>{swatch(SHARE_COLORS.none)}Not yet observed</span>
+      <span>{swatch(SHARE_COLORS.none)}No status yet</span>
       <span>Size = trees</span>
     </div>
   );

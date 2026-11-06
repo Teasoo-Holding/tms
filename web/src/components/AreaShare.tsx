@@ -7,7 +7,7 @@ import { fmtNum, SimpleTable } from './ui';
 export const SHARE_SERIES = [
   { key: 'alive_trees', label: 'Alive', color: 'var(--status-good)' },
   { key: 'dead_trees', label: 'Dead', color: 'var(--status-critical)' },
-  { key: 'unknown_trees', label: 'Not yet observed', color: 'var(--border-strong)' },
+  { key: 'unknown_trees', label: 'No status yet', color: 'var(--border-strong)' },
 ];
 
 const pctDead = (r: { alive_trees: number; dead_trees: number }) => {
@@ -44,7 +44,7 @@ export function AreaShareView({ rows, sectors, boundaries }: { rows: ShareArea[]
           {asTable || mapFailed || !located ? (
             <div className="table-wrap tall" style={{ maxHeight: 360 }}>
               <SimpleTable
-                head={['Sub-sector', 'Trees', 'Alive', 'Dead', 'Not observed', '% dead']}
+                head={['Sub-sector', 'Trees', 'Alive', 'Dead', 'No status yet', '% dead']}
                 rows={rows.map((r) => [
                   subSectorLabel(r.sector_code, r.short_code, r.name),
                   fmtNum(r.registered_trees),

@@ -10,6 +10,7 @@ import { addSheet, configurationSheets, csvCell } from './workbook';
 import { Db } from '../database/db.service';
 import { Roles } from '../common/auth.decorators';
 import { badRequest } from '../common/errors';
+import { TIME_ZONE } from '../domain/time';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const Filter = z.object({
@@ -33,7 +34,7 @@ export const VisitFilter = Filter.extend({
 });
 /** Visit days: the visits filters plus the time zone days are counted in. */
 export const VisitDaysQuery = VisitFilter.extend({
-  tz: z.string().trim().max(64).default('UTC'),
+  tz: z.string().trim().max(64).default(TIME_ZONE),
   limit: z.coerce.number().int().min(1).max(500).default(25),
 });
 /** One visit day of a project; field_session_id narrows it to one session ('none': records without one, with recorded_by). */
@@ -58,7 +59,7 @@ export const FieldActivityQuery = z.object({
   user_id: z.string().uuid().optional(),
   from: day.optional(),
   to: day.optional(),
-  tz: z.string().trim().max(64).default('UTC'),
+  tz: z.string().trim().max(64).default(TIME_ZONE),
 });
 
 /** Data freshness: one project or everything in the caller's scope. */

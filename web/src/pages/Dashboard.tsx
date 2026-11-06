@@ -11,6 +11,8 @@ import { FiltersButton, ReportFilters, useReportFilters } from '../components/Re
 import { ShareArea } from '../components/ShareMap';
 import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime, SimpleTable, todayStamp } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
+import { DAY_NOTE } from '../time';
+import { metricTerms } from '../glossary';
 
 export { SimpleTable };
 export const DATE_NOTE = 'Tree counts use the registration date; visit charts use the visit date.';
@@ -38,6 +40,7 @@ export function DashboardPage() {
   const filter = qs({ ...f.values, overdue_days: f.get('overdue_days') || 90 });
   const summary = useQuery({ queryKey: ['summary', filter], queryFn: () => api.get(`/reports/summary${filter}`) });
   const s = summary.data;
+  const terms = metricTerms(s?.overdue_days ?? 90);
   const freshness = useFreshness(projectId || undefined);
   // Headline totals are as of the last sync from the phones (or the last record received).
   const totalsAsOf = asOf(freshness.data?.last_sync_at ?? s?.last_server_sync_at);
@@ -152,11 +155,14 @@ export function DashboardPage() {
             </div>
           )}
           <div className="grid stats">
-            <StatTile label="Trees planted" value={fmtNum(s.totals.planting_events)} foot={s.totals.replacement_trees ? `incl. ${fmtNum(s.totals.replacement_trees)} replacements` : undefined} asOf={totalsAsOf} />
-            <StatTile label="Dead or missing" value={fmtNum(s.totals.terminal_status_trees)} asOf={totalsAsOf} />
-            <StatTile label="Overdue" value={fmtNum(s.totals.overdue_unknown_trees)} foot={`No visit in ${s.overdue_days} days`} asOf={totalsAsOf} />
-            {isAdmin && <StatTile label="Open conflicts" value={fmtNum(s.data_completeness.open_conflicts)} asOf={totalsAsOf} />}
+            <StatTile label="Trees planted" info={terms.planted} value={fmtNum(s.totals.planting_events)} foot={s.totals.replacement_trees ? `incl. ${fmtNum(s.totals.replacement_trees)} replacements` : undefined} asOf={totalsAsOf} />
+            <StatTile label="Dead or missing" info={terms.dead} value={fmtNum(s.totals.terminal_status_trees)} asOf={totalsAsOf} />
+            <StatTile label="Overdue" info={terms.overdue} value={fmtNum(s.totals.overdue_unknown_trees)} foot={`No visit in ${s.overdue_days} days`} asOf={totalsAsOf} />
+            {isAdmin && <StatTile label="Open conflicts" info={terms.conflicts} value={fmtNum(s.data_completeness.open_conflicts)} asOf={totalsAsOf} />}
           </div>
+          <p className="muted no-print" style={{ margin: 0 }}>
+            {DAY_NOTE} <Link to="/glossary">What these numbers mean</Link>
+          </p>
 
           <div className="grid charts">
             <ChartCard
@@ -259,7 +265,7 @@ export function DashboardPage() {
                     head={['Check', 'Count']}
                     numeric={[1]}
                     rows={[
-                      ['Never visited', fmtNum(s.data_completeness.never_observed)],
+                      ['Not yet visited', fmtNum(s.data_completeness.never_observed)],
                       ['No planted date', fmtNum(s.data_completeness.missing_planted_on)],
                       ['Photos not yet uploaded', fmtNum(s.data_completeness.trees_with_unverified_photos)],
                       ['Open conflicts', fmtNum(s.data_completeness.open_conflicts)],

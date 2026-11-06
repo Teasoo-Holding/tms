@@ -42,13 +42,13 @@ data class VisitDay(val date: LocalDate, val rows: List<MyVisitRow>) {
     val last get() = rows.maxOf { it.observedAt }
 }
 
-private fun localDate(iso: String) = runCatching { Instant.parse(iso).atZone(ZoneId.systemDefault()).toLocalDate() }.getOrDefault(LocalDate.EPOCH)
-private val TIME = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+private fun localDate(iso: String) = runCatching { Instant.parse(iso).atZone(WAT).toLocalDate() }.getOrDefault(LocalDate.EPOCH)
+private val TIME = DateTimeFormatter.ofPattern("HH:mm").withZone(WAT)
 private val DAY = DateTimeFormatter.ofPattern("EEE d MMM yyyy")
 private fun time(iso: String) = runCatching { TIME.format(Instant.parse(iso)) }.getOrDefault("")
 private fun dayLabel(d: LocalDate) = when (d) {
-    LocalDate.now() -> "Today"
-    LocalDate.now().minusDays(1) -> "Yesterday"
+    todayWat() -> "Today"
+    todayWat().minusDays(1) -> "Yesterday"
     else -> DAY.format(d)
 }
 
@@ -108,7 +108,7 @@ private fun DayCard(d: VisitDay, onClick: () -> Unit) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(dayLabel(d.date), style = MaterialTheme.typography.titleMedium)
-                Text("${time(d.first)} – ${time(d.last)}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${time(d.first)} – ${time(d.last)} $WAT_LABEL", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     listOfNotNull(
                         "${d.registered} registered".takeIf { d.registered > 0 },
@@ -130,7 +130,7 @@ private fun VisitCard(r: MyVisitRow, firstPhoto: suspend (String) -> MediaEntity
             TreeThumb(r.id, firstPhoto, load, size = 72.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(time(r.observedAt), style = MaterialTheme.typography.titleSmall)
+                    Text("${time(r.observedAt)} $WAT_LABEL", style = MaterialTheme.typography.titleSmall)
                     Text(r.physicalTreeId, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
