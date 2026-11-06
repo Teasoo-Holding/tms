@@ -280,6 +280,64 @@ export class ReportsService {
   }
 
   /**
+   * How fresh the data is: the latest sync from the phones of people working on the project(s) in scope, and what
+   * those phones last reported still waiting to be sent (POST /sync/status). Phones are those of officers assigned to
+   * the projects or who recorded in them in the last 90 days; without a project filter, every phone in the caller's
+   * scope. Revoked phones and phones silent for 60 days without pending records are left out. When no phone has
+   * synced (older apps, imported data), last_sync_at falls back to the latest record received.
+   */
+  async freshness(user: AuthUser, projectId?: string) {
+    if (projectId) await this.access.assertProject(user, projectId);
+    const projectIds = projectId ? [projectId] : await this.access.projectIds(user);
+    const { rows: devices } = await this.db.query(
+      `SELECT d.id AS device_id, d.user_id, u.full_name AS user_name, d.name AS device_name, d.last_sync_at,
+              d.pending_operations, d.pending_photos, d.oldest_pending_at, d.status_reported_at, d.app_version
+         FROM devices d JOIN users u ON u.id = d.user_id
+        WHERE d.revoked_at IS NULL AND u.active AND u.role IN ('FIELD_OFFICER', 'ADMIN')
+          AND (COALESCE(d.pending_operations, 0) + COALESCE(d.pending_photos, 0) > 0
+               OR GREATEST(d.last_sync_at, d.last_seen_at, d.status_reported_at, d.created_at) >= now() - interval '60 days')
+          AND ($1::uuid[] IS NULL
+               OR EXISTS (SELECT 1 FROM user_project_assignments a WHERE a.user_id = d.user_id AND a.active AND a.project_id = ANY($1))
+               OR EXISTS (SELECT 1 FROM tree_observations o JOIN trees t ON t.id = o.tree_id
+                           WHERE o.observed_at >= now() - interval '90 days' AND o.recorded_by = d.user_id AND t.project_id = ANY($1)))
+        ORDER BY COALESCE(d.pending_operations, 0) + COALESCE(d.pending_photos, 0) > 0 DESC, d.last_sync_at ASC NULLS FIRST, u.full_name`,
+      [projectIds],
+    );
+    const iso = (v: Date | null) => (v ? new Date(v).toISOString() : null);
+    const items = devices.map((d) => ({
+      device_id: d.device_id,
+      user_id: d.user_id,
+      user_name: d.user_name,
+      device_name: d.device_name,
+      last_sync_at: iso(d.last_sync_at),
+      pending_operations: d.pending_operations,
+      pending_photos: d.pending_photos,
+      oldest_pending_at: iso(d.oldest_pending_at),
+      status_reported_at: iso(d.status_reported_at),
+      app_version: d.app_version,
+    }));
+    let lastSync = items.map((d) => d.last_sync_at).filter(Boolean).sort().pop() ?? null;
+    if (!lastSync) {
+      const [r] = (
+        await this.db.query(
+          `SELECT max(o.synced_at) AS at FROM tree_observations o JOIN trees t ON t.id = o.tree_id WHERE ($1::uuid[] IS NULL OR t.project_id = ANY($1))`,
+          [projectIds],
+        )
+      ).rows;
+      lastSync = iso(r.at);
+    }
+    const pending = items.filter((d) => (d.pending_operations ?? 0) + (d.pending_photos ?? 0) > 0);
+    return {
+      generated_at: new Date().toISOString(),
+      last_sync_at: lastSync,
+      devices: items,
+      devices_with_pending: pending.length,
+      pending_operations: pending.reduce((n, d) => n + (d.pending_operations ?? 0), 0),
+      pending_photos: pending.reduce((n, d) => n + (d.pending_photos ?? 0), 0),
+    };
+  }
+
+  /**
    * Field activity per officer and day, split into the phone's field sessions: trees registered (first visits), later
    * visits, corrections (amendments, counted apart from visits) and photos. A day is the date of observed_at in the
    * caller's time zone. Records of rejected trees are left out. Observations without a field session (older apps)
