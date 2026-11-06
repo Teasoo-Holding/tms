@@ -3,6 +3,7 @@ package com.teasoo.tms.sync
 import androidx.room.withTransaction
 import com.teasoo.tms.data.local.*
 import com.teasoo.tms.data.remote.*
+import kotlinx.coroutines.flow.first
 import com.teasoo.tms.data.repo.ReferenceRepository
 import com.teasoo.tms.data.repo.SpeciesImageStore
 import com.teasoo.tms.data.session.SessionState
@@ -83,7 +84,22 @@ class SyncEngine @Inject constructor(
         if (outcome !is SyncOutcome.Success) {
             db.kv().put(KeyValueEntity(Keys.LAST_SYNC_ERROR, (outcome as? SyncOutcome.Retry)?.reason ?: (outcome as SyncOutcome.Blocked).reason))
         }
+        // Tell the server what is still waiting here, even after a partial sync; best effort (offline: nothing to do).
+        if (outcome !is SyncOutcome.Blocked) runCatching { reportStatus() }
         return outcome
+    }
+
+    private suspend fun reportStatus() {
+        api.reportStatus(
+            SyncStatusRequest(
+                deviceId = session.deviceId(),
+                pendingOperations = db.outbox().pendingCount().first(),
+                pendingPhotos = db.media().pendingCount().first(),
+                oldestPendingAt = db.outbox().oldestPending().first(),
+                appVersion = com.teasoo.tms.BuildConfig.VERSION_NAME,
+                lastSyncAt = db.kv().get(Keys.LAST_SUCCESSFUL_SYNC),
+            ),
+        )
     }
 
     // ------------------------------------------------------------------ push

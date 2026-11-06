@@ -395,3 +395,14 @@ data class SerialCorrectionRequest(
 )
 
 @Serializable data class ViewUrlDto(val url: String, @SerialName("expires_in") val expiresIn: Int = 300)
+
+/** What is still waiting on this phone, so supervisors can tell "not synced yet" from "no work done". */
+@Serializable
+data class SyncStatusRequest(
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("pending_operations") val pendingOperations: Int,
+    @SerialName("pending_photos") val pendingPhotos: Int,
+    @SerialName("oldest_pending_at") val oldestPendingAt: String?,
+    @SerialName("app_version") val appVersion: String,
+    @SerialName("last_sync_at") val lastSyncAt: String?,
+)
