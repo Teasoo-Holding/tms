@@ -20,9 +20,9 @@ export const MAINTENANCE_JOIN = `LEFT JOIN LATERAL (
      WHERE o.tree_id = t.id AND o.visit_type = 'MAINTENANCE'
        AND NOT EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id)) mt ON true`;
 
-const TODAY = `(now() AT TIME ZONE 'UTC')::date`;
+const TODAY = `(now() AT TIME ZONE 'Africa/Lagos')::date`;
 export const MAINTENANCE_PROPOSED_SQL =
-  `(COALESCE((mt.last_at AT TIME ZONE 'UTC')::date, t.planted_on, (t.created_at AT TIME ZONE 'UTC')::date) + p.maintenance_interval_days)`;
+  `(COALESCE((mt.last_at AT TIME ZONE 'Africa/Lagos')::date, t.planted_on, (t.created_at AT TIME ZONE 'Africa/Lagos')::date) + p.maintenance_interval_days)`;
 export const MAINTENANCE_STATUS_SQL = `(CASE
     WHEN t.record_state <> 'ACTIVE' OR COALESCE(st.is_terminal, false) THEN 'none'
     WHEN ${MAINTENANCE_PROPOSED_SQL} < ${TODAY} THEN 'overdue'

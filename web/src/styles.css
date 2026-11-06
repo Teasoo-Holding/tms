@@ -648,3 +648,19 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 .short-code-help { display: flex; flex-direction: column; gap: 2px; font-weight: 400; }
 .short-code-help .good-text { color: var(--good-ink); font-size: 13px; }
 .id-preview.small { font-size: 16px; padding: 8px 10px; font-weight: 400; color: var(--text-primary); }
+
+/* Definitions: the "i" next to a metric, and the glossary. */
+.info-tip { position: relative; display: inline-flex; vertical-align: middle; margin-left: 6px; }
+.info-tip-button {
+  width: 18px; height: 18px; min-height: 0; padding: 0; border-radius: 50%; font-size: 11px; font-weight: 700; font-style: italic;
+  line-height: 16px; text-align: center; color: var(--text-secondary); background: transparent; border: 1px solid currentColor; cursor: help;
+}
+.info-tip-text {
+  position: absolute; z-index: 30; top: calc(100% + 6px); left: -8px; width: min(280px, 80vw); padding: 10px 12px; border-radius: 8px;
+  background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border-strong); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+  font-size: 13px; font-weight: 400; line-height: 1.4; white-space: normal; text-align: left;
+}
+.glossary { margin: 0; display: grid; gap: 14px; }
+.glossary dt { font-weight: 600; }
+.glossary dd { margin: 2px 0 0; color: var(--text-secondary); }
+@media print { .info-tip { display: none; } }

@@ -10,6 +10,7 @@ import { listSearchAt, neighbourQuery, Neighbours, TreePager } from '../componen
 import { ActiveFilter, CardHeader, EmptyState, ErrorNotice, FilterChips, fmtDate, fmtNum, SortOrder, SortTh, StatusBadge, VisitTypeTag } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 import type { ShareContext } from './Share';
+import { fmtShortDate } from '../time';
 
 const FILTER_KEYS = ['planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id'];
 /** Keys cleared when a parent filter changes: each planting year has its own sectors. */
@@ -228,7 +229,7 @@ export function ShareTree({ token, base, root }: ShareContext) {
             <LineChart
               series={[{ key: 'height', label: 'Height', color: SERIES[2], points: heights }]}
               unit="cm"
-              xFormat={(x) => new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: '2-digit' })}
+              xFormat={fmtShortDate}
               ariaLabel={`Height of tree ${t.physical_tree_id} over time`}
             />
           )}

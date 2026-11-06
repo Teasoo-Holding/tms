@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { Db } from '../database/db.service';
+import { watIso, watWallClock } from '../domain/time';
 
 export function addSheet(wb: ExcelJS.Workbook, name: string, rows: any[]) {
   const sheet = wb.addWorksheet(name);
@@ -7,7 +8,25 @@ export function addSheet(wb: ExcelJS.Workbook, name: string, rows: any[]) {
   sheet.columns = header.map((h) => ({ header: h, key: h, width: Math.min(40, Math.max(12, h.length + 2)) }));
   sheet.getRow(1).font = { bold: true };
   sheet.views = [{ state: 'frozen', ySplit: 1 }];
-  rows.forEach((r) => sheet.addRow(Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v !== null && typeof v === 'object' && !(v instanceof Date) ? JSON.stringify(v) : v]))));
+  const timeCols = new Set<string>();
+  rows.forEach((r) =>
+    sheet.addRow(
+      Object.fromEntries(
+        Object.entries(r).map(([k, v]) => {
+          if (v instanceof Date) {
+            timeCols.add(k);
+            return [k, watWallClock(v)];
+          }
+          return [k, v !== null && typeof v === 'object' ? JSON.stringify(v) : v];
+        }),
+      ),
+    ),
+  );
+  // Times are shown as WAT wall-clock time and say so.
+  for (const k of timeCols) {
+    sheet.getColumn(k).numFmt = 'yyyy-mm-dd hh:mm "WAT"';
+    sheet.getColumn(k).width = Math.max(sheet.getColumn(k).width ?? 12, 20);
+  }
   return sheet;
 }
 
@@ -36,7 +55,7 @@ export async function configurationSheets(db: Db, projectIds: string[] | null) {
 
 export function csvCell(v: unknown): string {
   if (v === null || v === undefined) return '';
-  let s = v instanceof Date ? v.toISOString() : String(v);
+  let s = v instanceof Date ? watIso(v) : String(v);
   // Neutralise spreadsheet formula injection.
   if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;

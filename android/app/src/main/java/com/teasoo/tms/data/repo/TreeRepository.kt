@@ -188,7 +188,7 @@ class TreeRepository @Inject constructor(private val db: TmsDatabase) {
         val treeId = UUID.randomUUID().toString()
         val observationId = UUID.randomUUID().toString()
         val now = Instant.now().toString()
-        val plantedOn = t.plantedOn ?: t.observedAt.atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString()
+        val plantedOn = t.plantedOn ?: t.observedAt.atZone(com.teasoo.tms.ui.components.WAT).toLocalDate().toString()
         val snapshot = buildJsonObject {
             put("scheme_version", info.scheme.version)
             put("separator", info.scheme.separator)

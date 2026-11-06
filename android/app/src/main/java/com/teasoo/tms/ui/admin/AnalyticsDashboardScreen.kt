@@ -38,8 +38,8 @@ enum class Period(val label: String, val days: Long?) {
 
     fun from(): String? = when (this) {
         ALL -> null
-        YEAR -> LocalDate.now().withDayOfYear(1).toString()
-        else -> LocalDate.now().minusDays(days!! - 1).toString()
+        YEAR -> todayWat().withDayOfYear(1).toString()
+        else -> todayWat().minusDays(days!! - 1).toString()
     }
 }
 

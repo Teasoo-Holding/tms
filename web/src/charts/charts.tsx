@@ -1,5 +1,8 @@
 import { ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import { useMarkTooltip } from './Tooltip';
+import { fmtShortDate } from '../time';
+import type { Term } from '../glossary';
+import { InfoTip } from '../components/InfoTip';
 
 /** Categorical slots in fixed order (validated palette); colour follows the entity, never its rank. */
 export const SERIES = Array.from({ length: 8 }, (_, i) => `var(--series-${i + 1})`);
@@ -62,10 +65,13 @@ export function Legend({ items }: { items: { label: string; color: string }[] })
 }
 
 /** A headline number. `asOf` says how fresh it is (e.g. "as of 10:12", the last sync). */
-export function StatTile({ label, value, foot, asOf }: { label: string; value: ReactNode; foot?: ReactNode; asOf?: ReactNode }) {
+export function StatTile({ label, value, foot, asOf, info }: { label: string; value: ReactNode; foot?: ReactNode; asOf?: ReactNode; info?: Term }) {
   return (
     <div className="card stat">
-      <span className="label">{label}</span>
+      <span className="label">
+        {label}
+        {info && <InfoTip term={info} />}
+      </span>
       <span className="value">{value}</span>
       {foot && <span className="foot">{foot}</span>}
       {asOf && <span className="foot as-of">{asOf}</span>}
@@ -217,7 +223,7 @@ export interface LineSeries {
 }
 
 /** Multi-series line chart over a numeric (usually time) x axis. 2px lines, point markers carry the tooltip. */
-export function LineChart({ series, height = 220, unit = '', xFormat = (x) => new Date(x).toLocaleDateString(), ariaLabel = 'Line chart' }: {
+export function LineChart({ series, height = 220, unit = '', xFormat = fmtShortDate, ariaLabel = 'Line chart' }: {
   series: LineSeries[];
   height?: number;
   unit?: string;

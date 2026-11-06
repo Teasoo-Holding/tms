@@ -75,7 +75,7 @@ describe('visit days', () => {
   it('keeps a day when any record matches the filters, counting the matching records', async () => {
     const found = await days('q=302');
     expect(found.items).toEqual([expect.objectContaining({ date: '2026-10-28', records: 1, trees_registered: 1, collector_count: 1 })]);
-    const mine = await days(`recorded_by=${f.officerId}`);
+    const mine = await days(`tz=UTC&recorded_by=${f.officerId}`);
     expect(mine.items.map((d: any) => [d.date, d.records, d.sessions])).toEqual([['2026-10-28', 4, 2], ['2026-10-27', 1, 1]]);
     const period = await days('from=2026-10-27&to=2026-10-27');
     expect(period.items.map((d: any) => d.date)).toEqual(['2026-10-27']);
@@ -84,8 +84,10 @@ describe('visit days', () => {
   });
 
   it('opens a day grouped by field session and collector, with its records', async () => {
-    const d = (await admin.get(`/reports/visit-days/2026-10-28?project_id=${f.projectId}`).expect(200)).body;
+    const d = (await admin.get(`/reports/visit-days/2026-10-28?project_id=${f.projectId}&tz=UTC`).expect(200)).body;
     expect(d).toMatchObject({ date: '2026-10-28', tz: 'UTC', project: { id: f.projectId } });
+    // Without tz, days are WAT days.
+    expect((await admin.get(`/reports/visit-days/2026-10-28?project_id=${f.projectId}`).expect(200)).body.tz).toBe('Africa/Lagos');
     expect(d.sessions.map((s: any) => [s.field_session_id, s.user_name, s.records])).toEqual([
       [S1, 'Femi Field Officer', 3],
       [S2, 'Ada Administrator', 1],
@@ -93,12 +95,12 @@ describe('visit days', () => {
     ]);
     expect(d.sessions[0]).toMatchObject({ trees_registered: 3, visits: 0, photos: 1, sectors: ['S01'], sub_sectors: ['S01/SS01', 'S01/SS02'], first_at: '2026-10-28T08:00:00.000Z' });
 
-    const records = (await admin.get(`/reports/visit-days/2026-10-28/records?project_id=${f.projectId}&field_session_id=${S1}&limit=2`).expect(200)).body;
+    const records = (await admin.get(`/reports/visit-days/2026-10-28/records?project_id=${f.projectId}&tz=UTC&field_session_id=${S1}&limit=2`).expect(200)).body;
     expect(records).toMatchObject({ total: 3, limit: 2, offset: 0 });
     expect(records.items.map((r: any) => r.physical_tree_id)).toHaveLength(2);
     expect(records.items[0]).toMatchObject({ tree_id: trees.a, status_code: 'ALIVE', is_initial: true, sector: 'S01', sub_sector: 'SS01' });
     expect(records.items[0].media).toEqual([expect.objectContaining({ upload_state: 'VERIFIED', observation_id: observations.a })]);
-    const none = (await admin.get(`/reports/visit-days/2026-10-28/records?project_id=${f.projectId}&field_session_id=none&recorded_by=${f.officerId}`).expect(200)).body;
+    const none = (await admin.get(`/reports/visit-days/2026-10-28/records?project_id=${f.projectId}&tz=UTC&field_session_id=none&recorded_by=${f.officerId}`).expect(200)).body;
     expect(none.items).toEqual([expect.objectContaining({ id: observations.visit, status_code: 'DEAD', is_initial: false })]);
 
     await admin.get(`/reports/visit-days/2026-02-30?project_id=${f.projectId}`).expect(400);

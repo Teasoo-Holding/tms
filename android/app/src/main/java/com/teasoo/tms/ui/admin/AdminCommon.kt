@@ -33,6 +33,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.teasoo.tms.data.remote.TmsJson
 import com.teasoo.tms.sync.SyncScheduler
+import com.teasoo.tms.ui.components.WAT
+import com.teasoo.tms.ui.components.WAT_LABEL
+import com.teasoo.tms.ui.components.todayWat
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
@@ -495,19 +498,19 @@ fun relativeTime(value: String?, now: Instant = Instant.now()): String {
         d.toMinutes() < 60 -> "${d.toMinutes()} min ago"
         d.toHours() < 24 -> "${d.toHours()} h ago"
         d.toDays() < 14 -> "${d.toDays()} day${if (d.toDays() == 1L) "" else "s"} ago"
-        else -> DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withZone(ZoneId.systemDefault()).format(t)
+        else -> DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withZone(WAT).format(t)
     }
 }
 
 /** True when the time is missing or older than [days]. */
 fun isStale(value: String?, days: Long = 7): Boolean = parseInstant(value)?.let { Duration.between(it, Instant.now()).toDays() >= days } ?: true
 
-/** "12 Oct 10:21" this year, "12 Oct 2023 10:21" otherwise. */
+/** "12 Oct 10:21 WAT" this year, "12 Oct 2023 10:21 WAT" otherwise. */
 fun shortDateTime(value: String?): String {
     val t = parseInstant(value) ?: return value ?: "—"
-    val z = t.atZone(ZoneId.systemDefault())
-    val pattern = if (z.year == LocalDate.now().year) "d MMM HH:mm" else "d MMM yyyy HH:mm"
-    return DateTimeFormatter.ofPattern(pattern).format(z)
+    val z = t.atZone(WAT)
+    val pattern = if (z.year == todayWat().year) "d MMM HH:mm" else "d MMM yyyy HH:mm"
+    return "${DateTimeFormatter.ofPattern(pattern).format(z)} $WAT_LABEL"
 }
 
 @Composable

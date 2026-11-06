@@ -124,7 +124,7 @@ export class ReportsService {
       q(`SELECT ${select}, count(*)::int AS count FROM trees t ${join} WHERE ${where} GROUP BY ${groupBy} ORDER BY ${order}`);
 
     const [byStatus, byYear, bySector, bySpecies, byVendor] = await Promise.all([
-      group(`COALESCE(st.code, 'UNKNOWN') AS code, COALESCE(st.name, 'Not observed') AS name, COALESCE(st.is_terminal, false) AS is_terminal`,
+      group(`COALESCE(st.code, 'UNKNOWN') AS code, COALESCE(st.name, 'No status yet') AS name, COALESCE(st.is_terminal, false) AS is_terminal`,
         'LEFT JOIN tree_statuses st ON st.id = t.current_status_id', 'st.code, st.name, st.is_terminal, st.sort_order', 'st.sort_order NULLS LAST'),
       group(`py.id, py.year_label AS name,
              count(*) FILTER (WHERE t.replaces_tree_id IS NULL)::int AS original_trees,
@@ -180,7 +180,7 @@ export class ReportsService {
     );
 
     const statusBy = (dim: string, join: string, groupBy: string) =>
-      q(`SELECT ${dim}, COALESCE(st.code, 'UNKNOWN') AS code, COALESCE(st.name, 'Not observed') AS status_name, count(*)::int AS count
+      q(`SELECT ${dim}, COALESCE(st.code, 'UNKNOWN') AS code, COALESCE(st.name, 'No status yet') AS status_name, count(*)::int AS count
            FROM trees t ${join} LEFT JOIN tree_statuses st ON st.id = t.current_status_id
           WHERE ${where} GROUP BY ${groupBy}, st.code, st.name, st.sort_order ORDER BY ${groupBy}, st.sort_order NULLS LAST`);
     const [statusBySector, statusBySpecies] = await Promise.all([
@@ -212,7 +212,7 @@ export class ReportsService {
 
     const [completeness] = await q(
       `SELECT count(*) FILTER (WHERE t.planted_on IS NULL)::int AS missing_planted_on,
-              count(*) FILTER (WHERE t.last_observed_at IS NULL)::int AS never_observed,
+              count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM tree_observations o WHERE o.tree_id = t.id AND NOT o.is_initial))::int AS never_observed,
               count(*) FILTER (WHERE EXISTS (SELECT 1 FROM tree_media m WHERE m.tree_id = t.id AND m.upload_state <> 'VERIFIED'))::int AS trees_with_unverified_photos
          FROM trees t WHERE ${where}`,
     );
@@ -274,6 +274,7 @@ export class ReportsService {
         'Counts are registered trees, not survival rates.',
         'Replacement trees are counted separately from original trees; planting events = original + replacement.',
         `Trees without an observation in the last ${f.overdue_days} days are "unknown/overdue", not dead or missing.`,
+        'Days run from midnight to midnight West Africa Time (WAT, Africa/Lagos); times are shown in WAT.',
         'Area coverage uses administrator-defined sub-sector boundaries; trees have no individual GPS positions.',
       ],
     };

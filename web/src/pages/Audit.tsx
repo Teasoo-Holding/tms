@@ -5,6 +5,7 @@ import { api, qs } from '../api/client';
 import { Pagination, usePage } from '../components/Pagination';
 import { FiltersButton } from '../components/ReportFilters';
 import { Chevron, EmptyState, ErrorNotice, fmtDateTime, fmtNum, PageHeader, SortOrder, SortTh, todayStamp } from '../components/ui';
+import { fmtWhen } from '../time';
 
 
 /** Activity filter options: [action prefix, friendly name]. The API matches actions by prefix. */
@@ -107,8 +108,6 @@ function Sentence({ l }: { l: any }) {
   );
 }
 
-const fmtWhen = (v: string) =>
-  new Date(v).toLocaleString(undefined, { day: 'numeric', month: 'short', year: new Date(v).getFullYear() === new Date().getFullYear() ? undefined : 'numeric', hour: '2-digit', minute: '2-digit' });
 
 // ------------------------------------------------------------------ before/after diff
 const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);

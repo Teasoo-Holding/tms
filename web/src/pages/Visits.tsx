@@ -10,21 +10,14 @@ import { FiltersButton, ReportFilters, useReportFilters } from '../components/Re
 import { fmtHeight, Lightbox, Thumbs } from '../components/Photos';
 import { Chevron, EmptyState, ErrorNotice, fmtNum, PageHeader, StatusBadge, todayStamp, VISIT_TYPES, VisitTypeTag } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
+import { fmtTime, TIME_ZONE, timeRange } from '../time';
 
-/** Days are counted in the browser's time zone. */
-const TZ = (() => {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch {
-    return 'UTC';
-  }
-})();
+/** Days are WAT days, whatever the viewer's time zone. */
+const TZ = TIME_ZONE;
 /** Records of a session shown at first, and added by each "Show more". */
 const RECORDS_STEP = 25;
 
 const fmtDay = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-const fmtTime = (v: string) => new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-const timeRange = (a: string, b: string) => (fmtTime(a) === fmtTime(b) ? fmtTime(a) : `${fmtTime(a)}–${fmtTime(b)}`);
 const plural = (n: number, one: string, many = `${one}s`) => `${fmtNum(n)} ${n === 1 ? one : many}`;
 const names = (cs: { user_name: string }[]) => cs.map((c) => c.user_name).join(', ');
 
@@ -88,7 +81,7 @@ export function VisitsPage() {
     <div className="stack">
       <PageHeader
         title="Visits"
-        subtitle={`One row per project and day; open a day to see each field session and its trees. Times in ${TZ.replace(/_/g, ' ')}.`}
+        subtitle={`One row per project and day; open a day to see each field session and its trees. Days and times in West Africa Time (WAT).`}
         actions={
           <>
             {days.data && <span className="pill">{plural(total, 'day')}</span>}
