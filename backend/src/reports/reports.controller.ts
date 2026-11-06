@@ -61,6 +61,9 @@ export const FieldActivityQuery = z.object({
   tz: z.string().trim().max(64).default('UTC'),
 });
 
+/** Data freshness: one project or everything in the caller's scope. */
+const FreshnessQuery = z.object({ project_id: z.string().uuid().optional() });
+
 const MAX_ACTIVITY_DAYS = 366;
 
 /** [d] when it is a real date (YYYY-MM-DD), else 400 DATE_INVALID. */
@@ -125,6 +128,13 @@ export class ReportsController {
   density(@CurrentUser() user: AuthUser, @Query() query: unknown) {
     const f = parse(DensityFilter, query);
     return this.reports.density(user, f.project_id, f.planting_year_id);
+  }
+
+  /** When the data was last synced, and what phones last reported still waiting to be sent. */
+  @Roles('ADMIN', 'EXECUTIVE')
+  @Get('freshness')
+  freshness(@CurrentUser() user: AuthUser, @Query() query: unknown) {
+    return this.reports.freshness(user, parse(FreshnessQuery, query).project_id);
   }
 
   /** Per officer and day, with the phone's field sessions: what was done, where and when. */

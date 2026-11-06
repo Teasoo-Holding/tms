@@ -4,7 +4,7 @@ import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
 import { AccessService } from '../common/access.service';
 import { parse } from '../common/validation';
 import { config } from '../config';
-import { BatchBody, SyncService } from './sync.service';
+import { BatchBody, StatusBody, SyncService } from './sync.service';
 import { SyncDataService } from './sync-data.service';
 
 const ChangesQuery = z.object({
@@ -38,6 +38,13 @@ export class SyncController {
   @HttpCode(200)
   submit(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     return this.sync.submitBatch(user, parse(BatchBody, body));
+  }
+
+  /** The phone's pending records and last sync, sent at the end of every sync run. */
+  @Post('sync/status')
+  @HttpCode(204)
+  async status(@CurrentUser() user: AuthUser, @Body() body: unknown) {
+    await this.sync.reportStatus(user, parse(StatusBody, body));
   }
 
   @Get('sync/changes')

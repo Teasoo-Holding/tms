@@ -61,12 +61,14 @@ export function Legend({ items }: { items: { label: string; color: string }[] })
   );
 }
 
-export function StatTile({ label, value, foot }: { label: string; value: ReactNode; foot?: ReactNode }) {
+/** A headline number. `asOf` says how fresh it is (e.g. "as of 10:12", the last sync). */
+export function StatTile({ label, value, foot, asOf }: { label: string; value: ReactNode; foot?: ReactNode; asOf?: ReactNode }) {
   return (
     <div className="card stat">
       <span className="label">{label}</span>
       <span className="value">{value}</span>
       {foot && <span className="foot">{foot}</span>}
+      {asOf && <span className="foot as-of">{asOf}</span>}
     </div>
   );
 }

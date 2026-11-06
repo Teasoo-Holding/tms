@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
 import { AccessService } from '../common/access.service';
 import { AuditService } from '../common/audit.service';
-import { badRequest, notFound } from '../common/errors';
+import { badRequest, conflict, notFound } from '../common/errors';
 import { isoDate, parse, shortCode } from '../common/validation';
 import { Db, isUniqueViolation } from '../database/db.service';
 import { DEFAULT_SCHEME, IdScheme, validateScheme, COMPONENT_TYPES, SCOPE_DIMENSIONS } from '../domain/tree-id';
@@ -21,6 +21,18 @@ const ProjectBody = z.object({
   /** Days between maintenance visits: a tree's next maintenance is due this long after its last one (or its planting). */
   maintenance_interval_days: z.number().int().min(7).max(730).optional(),
 });
+/** 400 DATE_RANGE_INVALID when an end date is before the start date (the same day is allowed). */
+function assertDateRange(start: string | Date | null | undefined, end: string | Date | null | undefined, what: string) {
+  const day = (d: string | Date) => (typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10));
+  if (start && end && day(end) < day(start)) {
+    throw badRequest('DATE_RANGE_INVALID', `The ${what} end date is before its start date. Choose an end date on or after the start date.`, [
+      { path: 'end_date', message: 'Must be on or after the start date' },
+    ]);
+  }
+}
+const shortCodeTaken = (code: string) =>
+  conflict('SHORT_CODE_TAKEN', `Another project already uses the short code ${code}. Choose a different code; it becomes part of every tree ID.`);
+
 // Uniqueness scope cannot change once trees exist, so it is excluded from updates.
 const ProjectPatch = ProjectBody.omit({ physical_id_uniqueness: true }).partial();
 
@@ -91,6 +103,15 @@ export class ProjectsController {
     return rows;
   }
 
+  /** Whether a short code is free for a new project (codes are unique across all projects, whatever the case typed). */
+  @Roles('ADMIN')
+  @Get('projects/short-code-available')
+  async shortCodeAvailable(@Query() query: unknown) {
+    const { code } = parse(z.object({ code: shortCode }), query);
+    const taken = await this.db.one(this.db, 'SELECT 1 FROM projects WHERE short_code = $1', [code]);
+    return { code, available: !taken };
+  }
+
   @Get('projects/:id')
   async get(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     await this.access.assertProject(user, id);
@@ -117,6 +138,7 @@ export class ProjectsController {
   @Post('projects')
   async create(@CurrentUser() user: AuthUser, @Body() body: unknown) {
     const b = parse(ProjectBody, body);
+    assertDateRange(b.start_date, b.end_date, 'project');
     return this.db.tx(async (tx) => {
       const project = await this.db
         .one(
@@ -127,7 +149,7 @@ export class ProjectsController {
             b.maintenance_interval_days ?? null],
         )
         .catch((e) => {
-          if (isUniqueViolation(e)) throw badRequest('SHORT_CODE_TAKEN', 'Another project already uses this short code.');
+          if (isUniqueViolation(e)) throw shortCodeTaken(b.short_code);
           throw e;
         });
       await this.audit.record({ actorId: user.id, action: 'project.create', entityType: 'project', entityId: project!.id, projectId: project!.id, after: project }, tx);
@@ -148,19 +170,18 @@ export class ProjectsController {
     return this.db.tx(async (tx) => {
       const before = await this.db.one(tx, 'SELECT * FROM projects WHERE id = $1 FOR UPDATE', [id]);
       if (!before) throw notFound('Project');
+      // The short code is part of every tree ID, so it is fixed once the project is created (sending it unchanged is fine).
+      if (b.short_code !== undefined && b.short_code !== before.short_code) {
+        throw conflict('SHORT_CODE_FIXED', `The short code cannot be changed after the project is created; it is part of every tree ID. It stays ${before.short_code}.`);
+      }
       const next = { ...before, ...b };
-      const after = await this.db
-        .one(
-          tx,
-          `UPDATE projects SET name = $2, short_code = $3, description = $4, location = $5, start_date = $6, end_date = $7,
-                  status = $8, maintenance_interval_days = $9, updated_at = now() WHERE id = $1 RETURNING *`,
-          [id, next.name, next.short_code, next.description, next.location, next.start_date, next.end_date, next.status, next.maintenance_interval_days],
-        )
-        .catch((e) => {
-          if (isUniqueViolation(e)) throw badRequest('SHORT_CODE_TAKEN', 'Another project already uses this short code.');
-          throw e;
-        });
-      // A short-code change affects future IDs only; existing trees keep their registered physical IDs.
+      assertDateRange(next.start_date, next.end_date, 'project');
+      const after = await this.db.one(
+        tx,
+        `UPDATE projects SET name = $2, description = $3, location = $4, start_date = $5, end_date = $6,
+                status = $7, maintenance_interval_days = $8, updated_at = now() WHERE id = $1 RETURNING *`,
+        [id, next.name, next.description, next.location, next.start_date, next.end_date, next.status, next.maintenance_interval_days],
+      );
       await this.audit.record({ actorId: user.id, action: 'project.update', entityType: 'project', entityId: id, projectId: id, before, after }, tx);
       return after;
     });
@@ -170,6 +191,7 @@ export class ProjectsController {
   @Post('projects/:id/planting-years')
   async createYear(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) projectId: string, @Body() body: unknown) {
     const b = parse(PlantingYearBody, body);
+    assertDateRange(b.start_date, b.end_date, 'planting year');
     return this.db.tx(async (tx) => {
       if (!(await this.db.one(tx, 'SELECT id FROM projects WHERE id = $1', [projectId]))) throw notFound('Project');
       const year = await this.db
@@ -196,6 +218,7 @@ export class ProjectsController {
       const before = await this.db.one(tx, 'SELECT * FROM planting_years WHERE id = $1 FOR UPDATE', [id]);
       if (!before) throw notFound('Planting year');
       const n = { ...before, ...b };
+      assertDateRange(n.start_date, n.end_date, 'planting year');
       const after = await this.db.one(
         tx,
         'UPDATE planting_years SET start_date = $2, end_date = $3, active = $4, updated_at = now() WHERE id = $1 RETURNING *',

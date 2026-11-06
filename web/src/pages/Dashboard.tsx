@@ -6,6 +6,7 @@ import { sectorLabel, subSectorLabel } from '../areaLabels';
 import { useIsAdmin } from '../auth';
 import { ChartCard, Donut, GroupedColumns, HBarChart, Legend, LineChart, LineSeries, SERIES, StackedBars, StackedColumns, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
+import { asOf, FreshnessBanner, useFreshness } from '../components/Freshness';
 import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
 import { ShareArea } from '../components/ShareMap';
 import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime, SimpleTable, todayStamp } from '../components/ui';
@@ -37,6 +38,9 @@ export function DashboardPage() {
   const filter = qs({ ...f.values, overdue_days: f.get('overdue_days') || 90 });
   const summary = useQuery({ queryKey: ['summary', filter], queryFn: () => api.get(`/reports/summary${filter}`) });
   const s = summary.data;
+  const freshness = useFreshness(projectId || undefined);
+  // Headline totals are as of the last sync from the phones (or the last record received).
+  const totalsAsOf = asOf(freshness.data?.last_sync_at ?? s?.last_server_sync_at);
   // The tree list with the same tree filters, narrowed to trees due for maintenance.
   const maintenanceLink = (status: string) =>
     `/trees${qs({ ...Object.fromEntries(['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id'].map((k) => [k, f.get(k)])), maintenance: status })}`;
@@ -135,6 +139,7 @@ export function DashboardPage() {
 
       {filtersOpen && <ReportFilters f={f} showOverdue dateNote={DATE_NOTE} onClose={() => setFiltersOpen(false)} />}
 
+      <FreshnessBanner freshness={freshness.data} />
       <ErrorNotice error={summary.error ?? exportError} />
       {summary.isLoading && <div className="card empty">Loading…</div>}
       {s && (
@@ -147,10 +152,10 @@ export function DashboardPage() {
             </div>
           )}
           <div className="grid stats">
-            <StatTile label="Trees planted" value={fmtNum(s.totals.planting_events)} foot={s.totals.replacement_trees ? `incl. ${fmtNum(s.totals.replacement_trees)} replacements` : undefined} />
-            <StatTile label="Dead or missing" value={fmtNum(s.totals.terminal_status_trees)} />
-            <StatTile label="Overdue" value={fmtNum(s.totals.overdue_unknown_trees)} foot={`No visit in ${s.overdue_days} days`} />
-            {isAdmin && <StatTile label="Open conflicts" value={fmtNum(s.data_completeness.open_conflicts)} />}
+            <StatTile label="Trees planted" value={fmtNum(s.totals.planting_events)} foot={s.totals.replacement_trees ? `incl. ${fmtNum(s.totals.replacement_trees)} replacements` : undefined} asOf={totalsAsOf} />
+            <StatTile label="Dead or missing" value={fmtNum(s.totals.terminal_status_trees)} asOf={totalsAsOf} />
+            <StatTile label="Overdue" value={fmtNum(s.totals.overdue_unknown_trees)} foot={`No visit in ${s.overdue_days} days`} asOf={totalsAsOf} />
+            {isAdmin && <StatTile label="Open conflicts" value={fmtNum(s.data_completeness.open_conflicts)} asOf={totalsAsOf} />}
           </div>
 
           <div className="grid charts">
@@ -176,10 +181,6 @@ export function DashboardPage() {
           <ChartCard title="Trees by species" empty={s.by_species.length === 0 && 'No trees yet.'} table={<SimpleTable head={['Species', 'Trees']} rows={s.by_species.map((r: any) => [r.name, fmtNum(r.count)])} />}>
             <HBarChart data={s.by_species.map((r: any) => ({ label: r.common_name ?? r.name, value: r.count }))} />
           </ChartCard>
-
-          <p className="muted" style={{ margin: 0 }} title={fmtDateTime(s.last_server_sync_at)}>
-            Last sync {relativeTime(s.last_server_sync_at)}. Records still on phones appear after they sync.
-          </p>
 
           <div className="more-toggle no-print">
             <button onClick={() => setMore((v) => !v)} aria-expanded={more}>

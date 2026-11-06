@@ -15,6 +15,7 @@ interface TmsApi {
     suspend fun trees(@Query("project_id") projectId: String, @Query("after_id") afterId: String?, @Query("limit") limit: Int = 500): MobileTreesResponse
 
     @POST("api/v1/sync/batches") suspend fun submit(@Body body: SyncBatchRequest): SyncBatchResponse
+    @POST("api/v1/sync/status") suspend fun reportStatus(@Body body: SyncStatusRequest): retrofit2.Response<Unit>
     @GET("api/v1/sync/changes") suspend fun changes(@Query("cursor") cursor: String, @Query("limit") limit: Int = 500): ChangesResponse
 
     @POST("api/v1/media/upload-sessions") suspend fun uploadSession(@Body body: UploadSessionRequest): UploadSessionResponse

@@ -183,18 +183,22 @@ function YearForm({ projectId, year, onClose, onCreated }: { projectId: string; 
     },
   });
   const apiError = create.error as ApiError | null;
+  const datesInvalid = !!f.values.start_date && !!f.values.end_date && f.values.end_date < f.values.start_date;
   return (
     <Modal title={year ? `Edit ${year.year_label}` : 'Add planting year'} onClose={onClose}>
-      <form className="stack" onSubmit={(e) => (e.preventDefault(), create.mutate())}>
+      <form className="stack" onSubmit={(e) => (e.preventDefault(), !datesInvalid && create.mutate())}>
         {apiError?.code === 'YEAR_EXISTS' ? <div className="notice error" role="alert">This planting year already exists for the project.</div> : <ErrorNotice error={create.error} />}
         <div className="form-grid">
           <Field label="Label" hint={year ? 'fixed' : 'cannot change later'}><input required maxLength={16} disabled={!!year} {...f.bind('year_label')} /></Field>
           <Field label="Start date" hint="optional"><input type="date" {...f.bind('start_date')} /></Field>
-          <Field label="End date" hint="optional"><input type="date" {...f.bind('end_date')} /></Field>
+          <Field label="End date" hint="optional">
+            <input type="date" min={f.values.start_date || undefined} {...f.bind('end_date')} aria-invalid={datesInvalid} aria-describedby={datesInvalid ? 'year-end-error' : undefined} />
+            {datesInvalid && <span id="year-end-error" className="field-error" role="alert">The end date is before the start date. Choose an end date on or after the start date, or clear it.</span>}
+          </Field>
         </div>
         <div className="form-actions">
           <button type="button" onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={create.isPending}>{year ? 'Save' : 'Add planting year'}</button>
+          <button className="primary" disabled={create.isPending || datesInvalid}>{year ? 'Save' : 'Add planting year'}</button>
         </div>
       </form>
     </Modal>

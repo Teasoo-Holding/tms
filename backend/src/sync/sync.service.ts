@@ -23,6 +23,18 @@ export const BatchBody = z.object({
 });
 type Op = z.infer<typeof Operation>;
 
+/** What is still waiting on the phone, reported at the end of every sync run (and after a failed one when online). */
+export const StatusBody = z.object({
+  /** Optional when the access token names the device. */
+  device_id: z.string().uuid().optional(),
+  pending_operations: z.number().int().min(0).max(10_000_000),
+  pending_photos: z.number().int().min(0).max(10_000_000),
+  oldest_pending_at: z.string().datetime({ offset: true }).nullish(),
+  app_version: z.string().trim().max(50).nullish(),
+  /** The phone's last fully successful sync. */
+  last_sync_at: z.string().datetime({ offset: true }).nullish(),
+});
+
 @Injectable()
 export class SyncService {
   constructor(private readonly db: Db, private readonly trees: TreesService) {}
@@ -53,6 +65,29 @@ export class SyncService {
     );
     await this.db.query('UPDATE devices SET last_sync_at = now(), last_seen_at = now() WHERE id = $1', [body.device_id]);
     return { batch_id: batch!.id, server_time: new Date().toISOString(), results };
+  }
+
+  /**
+   * Stores the phone's sync status on its device row. last_sync_at never moves backwards (accepted batches also set it)
+   * and is capped at the server's clock, so a phone with a fast clock cannot report a sync in the future.
+   */
+  async reportStatus(user: AuthUser, body: z.infer<typeof StatusBody>) {
+    const deviceId = body.device_id ?? user.deviceId;
+    if (!deviceId) throw badRequest('DEVICE_REQUIRED', 'Send device_id, or sign in on the device first.');
+    if (user.deviceId && body.device_id && user.deviceId !== body.device_id) throw badRequest('DEVICE_MISMATCH', 'The device ID does not match this session.');
+    const device = await this.db.one(this.db, 'SELECT user_id, revoked_at FROM devices WHERE id = $1', [deviceId]);
+    if (!device || device.user_id !== user.id) throw new AppError(403, 'DEVICE_NOT_REGISTERED', 'Sign in on this device before syncing.');
+    if (device.revoked_at) throw new AppError(401, 'DEVICE_REVOKED', 'This device has been revoked. Contact an administrator.');
+    const nothingPending = body.pending_operations === 0 && body.pending_photos === 0;
+    await this.db.query(
+      `UPDATE devices SET pending_operations = $2, pending_photos = $3, oldest_pending_at = $4,
+              app_version = COALESCE($5, app_version),
+              last_sync_at = CASE WHEN $6::timestamptz IS NULL THEN last_sync_at ELSE GREATEST(last_sync_at, LEAST($6::timestamptz, now())) END,
+              status_reported_at = now(), status_user_id = $7, last_seen_at = now()
+        WHERE id = $1`,
+      [deviceId, body.pending_operations, body.pending_photos, nothingPending ? null : body.oldest_pending_at ?? null, body.app_version || null,
+        body.last_sync_at ?? null, user.id],
+    );
   }
 
   private async processOperation(user: AuthUser, deviceId: string, batchId: string, op: Op) {

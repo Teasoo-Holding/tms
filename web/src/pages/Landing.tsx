@@ -233,6 +233,13 @@ export function LandingPage() {
             </div>
             <HeroArt />
           </div>
+          {/* The hero fills the first screen; this keeps the sections below discoverable. */}
+          <a className="landing-next" href="#features">
+            See features
+            <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+              <path d="M12 5v14m0 0-6-6m6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </a>
         </section>
 
         <section id="features" className="landing-section" aria-labelledby="features-title">
