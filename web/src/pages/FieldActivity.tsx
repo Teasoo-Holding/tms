@@ -5,6 +5,7 @@ import { api, qs } from '../api/client';
 import { ChartCard, Legend, SERIES, StackedColumns, StatTile } from '../charts/charts';
 import { CardHeader, Chevron, EmptyState, ErrorNotice, fmtNum, PageHeader, SimpleTable } from '../components/ui';
 import { Pagination, usePage, usePaged } from '../components/Pagination';
+import { asOf, AwaitingBadge, AwaitingNotice, awaitingDevices, FreshnessBanner, FreshnessDevice, useFreshness, WaitingTag } from '../components/Freshness';
 
 interface Counts {
   trees_registered: number;
@@ -112,6 +113,19 @@ export function FieldActivityPage() {
   const dayPage = usePaged(days, usePage('days', 25));
   const quick = QUICK.find(([, n]) => from === daysAgo(n) && to === ymd(new Date()))?.[0];
 
+  // Phones that may still hold this period's records: a zero then reads "awaiting sync", not "nobody worked".
+  const freshness = useFreshness(projectId || undefined);
+  const periodStart = new Date(`${from}T00:00:00`).getTime();
+  const periodEnd = new Date(`${to}T00:00:00`).getTime() + 86_400_000;
+  const awaiting = awaitingDevices(freshness.data, periodStart, periodEnd, userId ? [userId] : null);
+  const awaitingOf = (id: string) => awaiting.filter((d) => d.user_id === id);
+  const periodLabel = quick === 'Today' ? 'today' : 'this period';
+  const totalsAsOf = asOf(freshness.data?.last_sync_at);
+  /** The count, or "awaiting sync" when it is zero and phones may still hold records. */
+  const count = (n: number, devices: FreshnessDevice[] = awaiting) => (n === 0 && devices.length ? <AwaitingBadge devices={devices} /> : fmtNum(n));
+  // Officers with phones awaiting sync but nothing received yet are listed too, so they do not read as absent.
+  const silent = [...new Map(awaiting.filter((d) => !officers.some((o) => o.user_id === d.user_id)).map((d) => [d.user_id, d.user_name])).entries()];
+
   // Trees registered per day, stacked by officer (the eight most active get their own colour).
   const dates = r ? datesBetween(r.from, r.to) : [];
   const top = officers.slice(0, 8);
@@ -174,20 +188,21 @@ export function FieldActivityPage() {
         </div>
       </section>
 
+      <FreshnessBanner freshness={freshness.data} />
       <ErrorNotice error={report.error ?? exportError} />
       {report.isLoading && <div className="empty">Loading…</div>}
       {r && (
         <div className={`stack ${report.isFetching ? 'refetching' : ''}`}>
           <div className="grid stats">
-            <StatTile label="Trees registered" value={fmtNum(sum(officers, 'trees_registered'))} />
-            <StatTile label="Visits" value={fmtNum(sum(officers, 'visits'))} foot={sum(officers, 'corrections') ? `plus ${fmtNum(sum(officers, 'corrections'))} corrections` : undefined} />
-            <StatTile label="Photos" value={fmtNum(sum(officers, 'photos'))} />
-            <StatTile label="Officers active" value={fmtNum(officers.length)} foot={`${fmtNum(officers.reduce((n, o) => n + o.sessions, 0))} field sessions`} />
+            <StatTile label="Trees registered" value={count(sum(officers, 'trees_registered'))} asOf={totalsAsOf} />
+            <StatTile label="Visits" value={count(sum(officers, 'visits'))} foot={sum(officers, 'corrections') ? `plus ${fmtNum(sum(officers, 'corrections'))} corrections` : undefined} asOf={totalsAsOf} />
+            <StatTile label="Photos" value={count(sum(officers, 'photos'))} asOf={totalsAsOf} />
+            <StatTile label="Officers active" value={count(officers.length)} foot={`${fmtNum(officers.reduce((n, o) => n + o.sessions, 0))} field sessions`} asOf={totalsAsOf} />
           </div>
 
           <ChartCard
             title="Trees registered per day"
-            empty={sum(officers, 'trees_registered') === 0 && 'No trees registered in this period.'}
+            empty={sum(officers, 'trees_registered') === 0 && (awaiting.length ? `No trees have arrived for ${periodLabel} yet; some phones have not synced.` : 'No trees registered in this period.')}
             legend={<Legend items={series} />}
             table={<SimpleTable head={['Day', ...series.map((s) => s.label)]} rows={dates.map((d) => [label(d), ...series.map((s) => fmtNum(perDay(d, s.key)))])} />}
           >
@@ -199,8 +214,16 @@ export function FieldActivityPage() {
             {officers.length ? (
               <SimpleTable
                 head={['Officer', 'Trees', 'Visits', 'Corrections', 'Photos', 'Days active', 'Sessions']}
-                rows={officers.map((o) => [o.user_name, fmtNum(o.trees_registered), fmtNum(o.visits), fmtNum(o.corrections), fmtNum(o.photos), fmtNum(o.days_active), fmtNum(o.sessions)])}
+                rows={[
+                  ...officers.map((o) => [
+                    <>{o.user_name} <WaitingTag devices={awaitingOf(o.user_id)} /></>,
+                    count(o.trees_registered, awaitingOf(o.user_id)), fmtNum(o.visits), fmtNum(o.corrections), fmtNum(o.photos), fmtNum(o.days_active), fmtNum(o.sessions),
+                  ]),
+                  ...silent.map(([id, name]) => [name, <AwaitingBadge devices={awaitingOf(id)} />, '—', '—', '—', '—', '—']),
+                ]}
               />
+            ) : awaiting.length ? (
+              <AwaitingNotice devices={awaiting} period={periodLabel} />
             ) : (
               <EmptyState title="No field activity in this period">Widen the period or choose another project.</EmptyState>
             )}

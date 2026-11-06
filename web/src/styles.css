@@ -482,8 +482,14 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 .landing-nav a { color: var(--text-secondary); font-weight: 550; padding: 8px 10px; border-radius: 6px; }
 .landing-nav a:hover { background: var(--surface-2); color: var(--text-primary); text-decoration: none; }
 .landing-header-row > .btn { margin-left: auto; }
-.landing-hero { padding: 32px 0 24px; background: linear-gradient(180deg, var(--brand-wash), var(--bg)); }
-.landing-hero-grid { display: grid; gap: 24px; align-items: center; }
+/* The hero fills the first screen below the sticky header (60px + 1px border), centred, up to a sensible height; it
+   grows with its content when the screen is short or zoomed. svh: the screen with the mobile browser bars shown. */
+.landing-hero { --landing-header: 61px; display: flex; flex-direction: column; padding: 20px 0 8px; background: linear-gradient(180deg, var(--brand-wash), var(--bg));
+  min-height: min(calc(100vh - var(--landing-header)), 960px); min-height: min(calc(100svh - var(--landing-header)), 960px); }
+.landing-hero-grid { display: grid; gap: 20px; align-items: center; align-content: center; flex: 1; width: 100%; }
+.landing-next { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 8px 12px; min-height: 40px; border-radius: 999px;
+  color: var(--text-secondary); font-size: 14px; font-weight: 550; }
+.landing-next:hover { color: var(--text-primary); background: var(--surface-2); text-decoration: none; }
 .landing-hero-text { display: flex; flex-direction: column; gap: 12px; }
 .landing-eyebrow { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--good-ink); }
 .landing-hero h1 { font-size: 30px; line-height: 1.15; letter-spacing: -0.02em; }
@@ -494,6 +500,8 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 .btn.landing-secondary { padding: 14px 22px; min-height: 52px; border-radius: 10px; }
 .landing-meta { margin: 0; font-size: 13px; }
 .landing-art { width: 100%; max-width: 420px; height: auto; justify-self: center; }
+/* On phones the illustration sits below the actions; keep it small enough that the actions stay in the first screen. */
+@media (max-width: 899px) { .landing-art { max-height: min(260px, 28svh); } }
 .landing-art .art-card { fill: var(--surface-1); stroke: var(--border); }
 .landing-art .art-bar { fill: color-mix(in srgb, var(--brand) 35%, var(--surface-2)); }
 .landing-art .art-bar.strong { fill: var(--brand); }
@@ -545,7 +553,7 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 @media (min-width: 900px) {
   .landing-nav { display: flex; }
   .landing-nav + .btn { margin-left: 8px; }
-  .landing-hero { padding: 64px 0 48px; }
+  .landing-hero { padding: 40px 0 12px; }
   .landing-hero-grid { grid-template-columns: 1.1fr 1fr; gap: 40px; }
   .landing-hero h1 { font-size: 44px; }
   .landing-lead { font-size: 20px; }
@@ -611,3 +619,32 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 .sub-sector-option { gap: 8px 12px; align-items: center; }
 .sub-sector-option .inline-number { margin: 0; }
 .sub-sector-option .inline-number input { width: 76px; }
+
+/* data freshness (banner on dashboard, visits and field activity) and "awaiting sync" in place of a zero */
+.freshness-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.freshness-line > span { min-width: 0; overflow-wrap: anywhere; }
+.freshness-line .link { margin-left: auto; }
+.freshness-devices { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.freshness-devices li { display: flex; flex-wrap: wrap; gap: 2px 10px; padding-top: 6px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.pill.awaiting { color: var(--text-secondary); border-style: dashed; border-color: var(--border-strong); font-weight: 600;
+  background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--surface-1) 4px 8px); }
+.stat .value .pill.awaiting { font-size: 13px; vertical-align: middle; letter-spacing: 0; }
+.awaiting-state { padding: 20px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.awaiting-state p { margin: 0; }
+.awaiting-state ul { margin: 0; padding-left: 20px; }
+.awaiting-state strong { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.field-error { color: var(--critical-ink); font-size: 13px; font-weight: 500; }
+.choice-list.neutral .choice.on { border-color: var(--brand); background: var(--brand-wash); }
+.choice-list legend .hint { font-weight: 400; }
+/* Short phone screens (e.g. 360×640): tighten the hero so the actions and the "See features" hint fit the first screen. */
+@media (max-width: 899px) and (max-height: 700px) {
+  .landing-hero { padding-top: 12px; }
+  .landing-hero-grid { gap: 12px; }
+  .landing-hero-text { gap: 8px; }
+  .landing-lead { font-size: 17px; }
+  .landing-art { max-height: 18svh; }
+  .landing-next { margin-top: 4px; }
+}
+.short-code-help { display: flex; flex-direction: column; gap: 2px; font-weight: 400; }
+.short-code-help .good-text { color: var(--good-ink); font-size: 13px; }
+.id-preview.small { font-size: 16px; padding: 8px 10px; font-weight: 400; color: var(--text-primary); }

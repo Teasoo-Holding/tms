@@ -5,6 +5,7 @@ import { api, qs } from '../api/client';
 import { subSectorLabel } from '../areaLabels';
 import { useIsAdmin } from '../auth';
 import { Pagination, usePage } from '../components/Pagination';
+import { AwaitingNotice, awaitingDevices, FreshnessBanner, useFreshness } from '../components/Freshness';
 import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
 import { fmtHeight, Lightbox, Thumbs } from '../components/Photos';
 import { Chevron, EmptyState, ErrorNotice, fmtNum, PageHeader, StatusBadge, todayStamp, VISIT_TYPES, VisitTypeTag } from '../components/ui';
@@ -69,6 +70,18 @@ export function VisitsPage() {
     }
   };
   const items: any[] = days.data?.items ?? [];
+  // With no visits in the period, say so differently when phones may still hold them.
+  const freshness = useFreshness(f.get('project_id') || undefined);
+  const dayStart = (d: string) => new Date(`${d}T00:00:00`).getTime();
+  const awaiting = awaitingDevices(
+    freshness.data,
+    f.get('from') ? dayStart(f.get('from')) : null,
+    f.get('to') ? dayStart(f.get('to')) + 86_400_000 : null,
+    f.get('recorded_by') ? [f.get('recorded_by')] : null,
+  );
+  const today = new Date().toDateString();
+  const isToday = (d: string) => !!d && new Date(`${d}T00:00:00`).toDateString() === today;
+  const periodLabel = isToday(f.get('from')) && (!f.get('to') || isToday(f.get('to'))) ? 'today' : 'this period';
   const manyProjects = new Set(items.map((d) => d.project_id)).size > 1 || !f.get('project_id');
 
   return (
@@ -114,6 +127,7 @@ export function VisitsPage() {
         </ReportFilters>
       )}
 
+      <FreshnessBanner freshness={freshness.data} />
       <ErrorNotice error={days.error ?? exportError} />
       <div className={`card table-wrap ${days.isFetching ? 'refetching' : ''}`}>
         {items.length > 0 && (
@@ -173,7 +187,12 @@ export function VisitsPage() {
             </tbody>
           </table>
         )}
-        {days.data && items.length === 0 && <EmptyState title="No visits found">{f.active ? 'Clear a filter or widen the period.' : undefined}</EmptyState>}
+        {days.data && items.length === 0 &&
+          (awaiting.length > 0 && !f.get('q') ? (
+            <AwaitingNotice devices={awaiting} period={periodLabel} />
+          ) : (
+            <EmptyState title="No visits found">{f.active ? 'Clear a filter or widen the period.' : undefined}</EmptyState>
+          ))}
         {days.isLoading && <div className="empty">Loading…</div>}
         <Pagination page={page} total={total} label="visit days" />
       </div>

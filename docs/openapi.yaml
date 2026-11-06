@@ -322,6 +322,31 @@ paths:
                   batch_id: { type: string, format: uuid }
                   server_time: { type: string, format: date-time }
                   results: { type: array, items: { $ref: '#/components/schemas/OperationResult' } }
+  /sync/status:
+    post:
+      summary: Report what is still waiting on the phone (field officer or admin). Sent at the end of every sync run, and after a failed run when online.
+      description: >-
+        Stored on the device row (pending_operations, pending_photos, oldest_pending_at, status_reported_at, app_version, last_sync_at) for
+        GET /reports/freshness. device_id may be omitted when the access token names the device; a different device_id than the token's gives
+        400 DEVICE_MISMATCH, a device not signed in by the caller 403 DEVICE_NOT_REGISTERED, a revoked one 401 DEVICE_REVOKED. last_sync_at
+        never moves backwards (accepted batches also set it) and is capped at the server time; null keeps the stored value. oldest_pending_at
+        is cleared when both counts are 0. app_version null keeps the stored one. Apps that never call this leave the fields null.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pending_operations, pending_photos]
+              properties:
+                device_id: { type: string, format: uuid }
+                pending_operations: { type: integer, minimum: 0, description: Outbox operations not yet accepted by the server }
+                pending_photos: { type: integer, minimum: 0, description: Photos not yet uploaded }
+                oldest_pending_at: { type: string, format: date-time, nullable: true }
+                app_version: { type: string, maxLength: 50, nullable: true, example: 1.0.15 }
+                last_sync_at: { type: string, format: date-time, nullable: true, description: The phone's last fully successful sync }
+      responses:
+        '204': { description: Stored }
+        '400': { $ref: '#/components/responses/Error' }
   /sync/changes:
     get:
       summary: Authorised changes after a server-issued cursor (gap-free, in commit order).
@@ -341,17 +366,32 @@ paths:
     post:
       summary: Create project (admin). physical_id_uniqueness (GLOBAL or PROJECT) must be chosen explicitly and is fixed.
       description: >-
+        short_code is 1–16 letters or digits, stored upper-case, unique across all projects (409 SHORT_CODE_TAKEN) and fixed once
+        created. end_date before start_date gives 400 DATE_RANGE_INVALID (the same day is allowed).
         Optional maintenance_interval_days (integer 7–730, default 90): a tree's next maintenance is due this many days after its latest
         maintenance visit, else its planting date, else its registration date. Every project object (here, GET /projects, /projects/{id},
         bootstrap projects and project changes) carries maintenance_interval_days.
-      responses: { '201': { description: Project }, '400': { $ref: '#/components/responses/Error' } }
+      responses: { '201': { description: Project }, '400': { $ref: '#/components/responses/Error' }, '409': { description: SHORT_CODE_TAKEN } }
+  /projects/short-code-available:
+    get:
+      summary: Whether a short code is free for a new project (admin)
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string, pattern: '^[A-Za-z0-9]{1,16}$' } }
+      responses:
+        '200': { description: '{ code (upper-cased), available: boolean }' }
+        '400': { description: Not 1–16 letters or digits }
   /projects/{id}:
     get: { summary: Project with planting years and ID scheme versions, responses: { '200': { description: Project } } }
-    patch: { summary: 'Update project (admin), including maintenance_interval_days (7–730). Short-code changes affect future IDs only.', responses: { '200': { description: Project } } }
+    patch:
+      summary: 'Update project (admin), including maintenance_interval_days (7–730).'
+      description: >-
+        The short code is fixed: sending it unchanged is accepted, a different one gives 409 SHORT_CODE_FIXED. The resulting dates are
+        checked: end_date before start_date gives 400 DATE_RANGE_INVALID.
+      responses: { '200': { description: Project }, '400': { $ref: '#/components/responses/Error' }, '409': { description: SHORT_CODE_FIXED } }
   /projects/{id}/planting-years:
-    post: { summary: Create planting year or cohort (admin), responses: { '201': { description: Planting year } } }
+    post: { summary: Create planting year or cohort (admin; end_date before start_date gives 400 DATE_RANGE_INVALID), responses: { '201': { description: Planting year } } }
   /planting-years/{id}:
-    patch: { summary: Open/close or re-date a planting year (admin; the label is fixed), responses: { '200': { description: Planting year } } }
+    patch: { summary: Open/close or re-date a planting year (admin; the label is fixed; end_date before start_date gives 400 DATE_RANGE_INVALID), responses: { '200': { description: Planting year } } }
   /projects/{id}/tree-id-schemes:
     post:
       summary: Publish a new version of the project's ID format (admin); it becomes current for new registrations.
@@ -719,6 +759,24 @@ paths:
       responses:
         '200': { description: Density map, content: { application/json: { schema: { $ref: '#/components/schemas/DensityMap' } } } }
         '404': { description: LINK_INVALID }
+  /reports/freshness:
+    get:
+      summary: How fresh the data is, and which phones last reported unsent records (admin and executive)
+      description: >-
+        Phones (devices) of users assigned to the project(s) in scope or who recorded in them in the last 90 days; without project_id,
+        every phone in the caller's scope (executives: their projects, or all with all-projects access). Revoked phones and phones silent
+        for 60 days without pending records are left out. Phones with pending records come first, then the longest unsynced.
+        last_sync_at is the latest devices.last_sync_at among them, else the latest observation synced_at in scope. Counts are as of
+        each phone's status_reported_at; phones on apps that do not report have null counts and are not counted as pending.
+      parameters:
+        - { name: project_id, in: query, schema: { type: string, format: uuid }, description: Omitted means every project the caller can see. }
+      responses:
+        '200':
+          description: >-
+            { generated_at, last_sync_at (null when nothing synced), devices: [{ device_id, user_id, user_name, device_name, last_sync_at,
+            pending_operations, pending_photos, oldest_pending_at, status_reported_at, app_version }], devices_with_pending,
+            pending_operations, pending_photos }
+        '403': { description: Not an administrator or executive, or not assigned to the project }
   /reports/field-activity:
     get:
       summary: Field activity per officer, day and field session (admin and executive)

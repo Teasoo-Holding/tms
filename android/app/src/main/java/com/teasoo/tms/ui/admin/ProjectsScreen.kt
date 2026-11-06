@@ -160,9 +160,11 @@ class ProjectFormState(initial: ProjectRequest?) {
 @Composable
 fun ProjectFields(state: ProjectFormState, creating: Boolean, originalCode: String? = null) {
     TextInput(state.name, { state.name = it }, "Project name")
+    // The short code is part of every tree ID, so it is fixed once the project exists (the server refuses changes).
     CodeInput(
-        state.shortCode, { state.shortCode = it },
-        supporting = if (!creating && originalCode != null && state.shortCode != originalCode) "Existing tree IDs keep the old code." else null,
+        state.shortCode, { state.shortCode = it }, enabled = creating,
+        supporting = if (creating) "Part of every tree ID, e.g. ${state.shortCode.ifBlank { "T4L" }}-2026-KNM-000001. Can't be changed after saving."
+        else "Can't be changed: it's part of every tree ID.",
     )
     TextInput(state.description, { state.description = it }, "Description (optional)", singleLine = false, minLines = 2)
     TextInput(state.location, { state.location = it }, "Location (optional)")
