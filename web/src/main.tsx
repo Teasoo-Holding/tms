@@ -24,6 +24,7 @@ import { UsersPage } from './pages/Users';
 import { VisitsPage } from './pages/Visits';
 import './styles.css';
 import { GlossaryPage } from './pages/Glossary';
+import { PrivacyPage, TermsPage } from './pages/Legal';
 
 const queryClient: QueryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1, placeholderData: (prev: unknown) => prev } },
@@ -34,12 +35,14 @@ const queryClient: QueryClient = new QueryClient({
   }),
 });
 
-/** Client share links (/share/:token) and the app download page (/download) are public: they render without signing in. */
+/** Client share links (/share/:token), the app download page (/download), /privacy and /terms are public: they render without signing in. */
 function Root() {
   return (
     <Routes>
       <Route path="/share/:token/*" element={<SharePage />} />
       <Route path="/download" element={<LandingPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/terms" element={<TermsPage />} />
       <Route path="*" element={<App />} />
     </Routes>
   );

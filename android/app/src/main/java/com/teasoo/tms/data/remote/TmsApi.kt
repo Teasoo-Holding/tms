@@ -8,6 +8,8 @@ import retrofit2.http.Query
 
 interface TmsApi {
     @POST("api/v1/auth/login") suspend fun login(@Body body: LoginRequest): TokenResponse
+    @POST("api/v1/auth/google") suspend fun loginWithGoogle(@Body body: GoogleLoginRequest): TokenResponse
+    @GET("api/v1/auth/options") suspend fun authOptions(): AuthOptions
     @POST("api/v1/auth/logout") suspend fun logout(@Body body: RefreshRequest)
 
     @GET("api/v1/mobile/bootstrap") suspend fun bootstrap(): BootstrapResponse

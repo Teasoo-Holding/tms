@@ -132,6 +132,14 @@ Off until the API has `GOOGLE_CLIENT_ID`. To turn it on (repository owner, one t
 4. Copy the **Client ID** (it ends in `.apps.googleusercontent.com`). It is a public value; the client secret is not used.
 5. In Render, add `GOOGLE_CLIENT_ID` to the API's environment and redeploy. The "Sign in with Google" button then appears on the sign-in page.
 
+**Android app.** The phone uses the same web client ID (from the server) and Android's Credential Manager. Google also needs an **Android** OAuth client in the same Google Cloud project, otherwise the phone shows "Google sign-in did not work":
+
+- Credentials → Create credentials → OAuth client ID → **Android**
+- Package name: `com.teasoo.tms.field`
+- SHA-1 certificate fingerprint: `7F:15:15:C5:4E:FA:7B:3B:27:2E:56:DE:2E:46:4D:E6:14:74:F3:D3` (the release keystore; each Android release run prints it under "Verify signature")
+
+Google sign-in needs internet. Offline, people sign in with their password, which the device remembers as a salted hash after a password sign-in.
+
 Who can sign in: only existing, active accounts. The first Google sign-in must use the same email as the TMS account (Google must have verified it), and links that Google account to the user. Later sign-ins match the linked Google account. Google sign-in never creates accounts or changes roles. Changing a user's email unlinks Google.
 
 ## Sessions

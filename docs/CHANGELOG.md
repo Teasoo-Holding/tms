@@ -7,6 +7,11 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-09: Google sign-in on Android, Privacy and Terms pages, 2027 budget
+- **Android Google sign-in:** "Sign in with Google" on the phone's sign-in screen, using Android's Credential Manager and the same rules as the web. It needs internet; offline, people sign in with their password. Setup: an Android OAuth client in Google Cloud (see operations.md).
+- **Privacy and Terms:** plain-language public pages at `/privacy` and `/terms`, each with a "Last updated" date. They are linked from the landing page, the sign-in pages (web and phone) and client reports. Both are marked as drafts until a legal professional has reviewed them (`LEGAL_REVIEWED` in `web/src/pages/Legal.tsx`).
+- **2027 budget:** `docs/budget/TMS-2027-Technology-Budget.xlsx`.
+
 ## 2026-11-09: Sign in with Google, vision on the landing page (migration 016)
 - **Sign in with Google (web):**
   - A "Sign in with Google" button next to the password form, once `GOOGLE_CLIENT_ID` is set (see operations.md).

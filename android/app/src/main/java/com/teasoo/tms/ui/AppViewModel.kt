@@ -9,6 +9,7 @@ import com.teasoo.tms.data.local.KeyValueEntity
 import com.teasoo.tms.data.local.Keys
 import com.teasoo.tms.data.local.TmsDatabase
 import com.teasoo.tms.data.remote.ApiFailure
+import com.teasoo.tms.data.remote.GoogleLoginRequest
 import com.teasoo.tms.data.remote.LoginRequest
 import com.teasoo.tms.data.remote.RefreshRequest
 import com.teasoo.tms.data.remote.TmsApi
@@ -135,6 +136,41 @@ class AppViewModel @Inject constructor(
     val loginError = _loginError.asStateFlow()
     private val _loggingIn = MutableStateFlow(false)
     val loggingIn = _loggingIn.asStateFlow()
+
+    /** The Google client id when the server has Sign in with Google on; null otherwise or while offline. */
+    private val _googleClientId = MutableStateFlow<String?>(null)
+    val googleClientId = _googleClientId.asStateFlow()
+
+    fun loadSignInOptions() = viewModelScope.launch {
+        runCatching { api.authOptions() }.onSuccess { _googleClientId.value = it.googleClientId }
+    }
+
+    /** Shows a sign-in problem that happened before reaching the server (e.g. the Google sheet was cancelled). */
+    fun showLoginError(message: String?) {
+        _loginError.value = message
+    }
+
+    /**
+     * Signs in with a Google ID token. Google sign-in needs internet; offline, people sign in with their password
+     * (the device only remembers passwords, as a salted hash).
+     */
+    fun loginWithGoogle(idToken: String) = viewModelScope.launch {
+        _loggingIn.value = true
+        _loginError.value = null
+        val previous = db.kv().get(Keys.LAST_USER)
+        try {
+            val tokens = api.loginWithGoogle(GoogleLoginRequest(idToken, session.deviceId(), "${Build.MANUFACTURER} ${Build.MODEL}", BuildConfig.VERSION_NAME))
+            session.save(tokens)
+            if (previous != tokens.user.id) fieldSessions.end()
+            db.kv().put(KeyValueEntity(Keys.LAST_USER, tokens.user.id))
+            SyncScheduler.syncNow(app)
+        } catch (e: Throwable) {
+            val failure = e.toApiFailure()
+            _loginError.value = if (failure is ApiFailure.Offline) "Sign in with Google needs internet. Without internet, sign in with your password." else failure.message
+        } finally {
+            _loggingIn.value = false
+        }
+    }
 
     /** [allowOffline]: fall back to this device's offline check when there is no internet (not when sending records). */
     fun login(email: String, password: String, allowOffline: Boolean = true) = viewModelScope.launch {

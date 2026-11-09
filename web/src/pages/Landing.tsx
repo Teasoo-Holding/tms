@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../auth';
 import { fmtDate } from '../components/ui';
 import { TeasooLink, TeasooLogo } from '../components/Brand';
+import { LegalLinks } from './Legal';
 
 /** Published by .github/workflows/android-release.yml under a stable name, so this link always gets the newest app. */
 export const APK_URL = 'https://github.com/Teasoo-Holding/tms/releases/latest/download/tms-field.apk';
@@ -347,7 +348,9 @@ export function LandingPage() {
             <TeasooLogo height={28} />
             <span>© {new Date().getFullYear()} <TeasooLink /> · Tree Management System</span>
           </span>
-          <Link to={portal}>{user ? 'Open the portal' : 'Portal sign-in'}</Link>
+          <span className="legal-links">
+            <LegalLinks /> · <Link to={portal}>{user ? 'Open the portal' : 'Portal sign-in'}</Link>
+          </span>
         </div>
       </footer>
     </div>

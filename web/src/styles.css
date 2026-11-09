@@ -673,3 +673,13 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 /* "or" between the password form and Sign in with Google. */
 .or-divider { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 13px; }
 .or-divider::before, .or-divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+
+/* Privacy and Terms: a readable column. */
+.legal { max-width: 720px; padding-top: 32px; padding-bottom: 48px; line-height: 1.6; }
+.legal h1 { font-size: 32px; margin: 0 0 4px; letter-spacing: -0.02em; }
+.legal h2 { font-size: 21px; margin: 32px 0 8px; }
+.legal h3 { font-size: 17px; margin: 20px 0 6px; }
+.legal ul { padding-left: 22px; }
+.legal li { margin: 4px 0; }
+.legal-updated { color: var(--text-secondary); margin: 0 0 16px; font-weight: 600; }
+.legal-links a { white-space: nowrap; }
