@@ -16,6 +16,7 @@ import { fmtShortDate } from '../time';
 import { glossary, metricTerms } from '../glossary';
 import { GlossaryList } from './Glossary';
 import { DAY_NOTE } from '../time';
+import { LegalLinks } from './Legal';
 
 const FILTER_KEYS = ['planting_year_id', 'vendor_id', 'sector_id', 'from', 'to'] as const;
 /** Changing a filter clears the ones that depend on it. */
@@ -308,6 +309,9 @@ function ShareOverview({ token, base }: ShareContext) {
           <summary>What these numbers mean</summary>
           <GlossaryList terms={glossary().filter((t) => t.term !== 'Open conflicts')} />
         </details>
+        <p className="muted no-print" style={{ margin: 0 }}>
+          <LegalLinks />
+        </p>
       </div>
     </div>
   );

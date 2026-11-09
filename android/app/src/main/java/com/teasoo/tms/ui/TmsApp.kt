@@ -18,6 +18,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.teasoo.tms.data.session.SessionState
 import com.teasoo.tms.ui.admin.adminGraph
+import com.teasoo.tms.ui.components.GoogleSignInButton
 import com.teasoo.tms.ui.components.KeyboardAware
 import com.teasoo.tms.ui.components.Notice
 import com.teasoo.tms.ui.components.PasswordField
@@ -88,6 +89,8 @@ private fun LoginScreen(vm: AppViewModel, prefillEmail: String, reason: String?)
     var password by remember { mutableStateOf("") }
     val error by vm.loginError.collectAsStateWithLifecycle()
     val busy by vm.loggingIn.collectAsStateWithLifecycle()
+    val googleClientId by vm.googleClientId.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { vm.loadSignInOptions() }
     Scaffold { padding ->
         Column(
             Modifier.padding(padding).padding(24.dp).fillMaxSize(),
@@ -103,6 +106,22 @@ private fun LoginScreen(vm: AppViewModel, prefillEmail: String, reason: String?)
             Button(onClick = { vm.login(email, password) }, enabled = !busy && email.isNotBlank() && password.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
                 Text(if (busy) "Signing in…" else "Sign in")
             }
+            googleClientId?.let { id ->
+                GoogleSignInButton(id, enabled = !busy, onToken = vm::loginWithGoogle, onError = vm::showLoginError)
+            }
+            LegalLinks()
         }
+    }
+}
+
+/** Privacy and Terms on the portal's public pages. */
+@Composable
+private fun LegalLinks() {
+    val uri = androidx.compose.ui.platform.LocalUriHandler.current
+    val base = com.teasoo.tms.BuildConfig.PORTAL_URL.ifBlank { "https://tms.teasooconsulting.com" }.trimEnd('/')
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.TextButton(onClick = { runCatching { uri.openUri("$base/privacy") } }) { Text("Privacy") }
+        Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        androidx.compose.material3.TextButton(onClick = { runCatching { uri.openUri("$base/terms") } }) { Text("Terms") }
     }
 }

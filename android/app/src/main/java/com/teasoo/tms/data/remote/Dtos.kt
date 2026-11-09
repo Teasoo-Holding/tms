@@ -14,6 +14,19 @@ val TmsJson = Json {
 }
 
 @Serializable
+data class GoogleLoginRequest(
+    /** The Google ID token from Credential Manager. */
+    val credential: String,
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("device_name") val deviceName: String,
+    @SerialName("app_version") val appVersion: String,
+)
+
+/** Sign-in methods the server has turned on. */
+@Serializable
+data class AuthOptions(@SerialName("google_client_id") val googleClientId: String? = null)
+
+@Serializable
 data class LoginRequest(
     /** Username, email or phone number. */
     val login: String,

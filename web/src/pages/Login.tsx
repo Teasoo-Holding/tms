@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { auth } from '../api/client';
 import { GoogleSignIn } from '../components/GoogleSignIn';
 import { ErrorNotice, Field, PasswordInput } from '../components/ui';
+import { Link } from 'react-router-dom';
 
 export function LoginPage() {
   const [login, setLogin] = useState('');
@@ -35,6 +36,9 @@ export function LoginPage() {
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
         <GoogleSignIn onError={setError} onBusy={setBusy} />
+        <p className="muted" style={{ margin: 0, fontSize: 13, textAlign: 'center' }}>
+          By signing in you agree to the <Link to="/terms">Terms</Link>. See how we use your information: <Link to="/privacy">Privacy</Link>.
+        </p>
       </form>
     </div>
   );
