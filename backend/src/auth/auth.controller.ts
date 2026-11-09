@@ -5,6 +5,7 @@ import { AuthUser, CurrentUser, Public } from '../common/auth.decorators';
 import { parse } from '../common/validation';
 import { Db } from '../database/db.service';
 import { AuthService } from './auth.service';
+import { config } from '../config';
 
 const LoginBody = z.object({
   /** Username, email or phone number. */
@@ -12,6 +13,12 @@ const LoginBody = z.object({
   /** Older app versions send the email here. */
   email: z.string().trim().min(1).max(200).optional(),
   password: z.string().min(1).max(200),
+  device_id: z.string().uuid().optional(),
+  device_name: z.string().max(100).optional(),
+  app_version: z.string().max(40).optional(),
+});
+const GoogleBody = z.object({
+  credential: z.string().min(20).max(4096),
   device_id: z.string().uuid().optional(),
   device_name: z.string().max(100).optional(),
   app_version: z.string().max(40).optional(),
@@ -29,6 +36,22 @@ export class AuthController {
   login(@Body() body: unknown) {
     const b = parse(LoginBody, body);
     return this.auth.login(b.login ?? b.email ?? '', b.password, { deviceId: b.device_id, deviceName: b.device_name, appVersion: b.app_version });
+  }
+
+  /** Which sign-in methods are on, for the sign-in page. */
+  @Public()
+  @Get('options')
+  options() {
+    return { google_client_id: config.googleClientId };
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Post('google')
+  @HttpCode(200)
+  google(@Body() body: unknown) {
+    const b = parse(GoogleBody, body);
+    return this.auth.loginWithGoogle(b.credential, { deviceId: b.device_id, deviceName: b.device_name, appVersion: b.app_version });
   }
 
   @Public()

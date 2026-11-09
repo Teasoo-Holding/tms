@@ -7,6 +7,14 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-09: Sign in with Google, vision on the landing page (migration 016)
+- **Sign in with Google (web):**
+  - A "Sign in with Google" button next to the password form, once `GOOGLE_CLIENT_ID` is set (see operations.md).
+  - Only existing, active accounts can sign in. The first Google sign-in links the Google account whose verified email matches the TMS account.
+  - Accounts are never created this way, and roles don't change.
+  - Clear messages when sign-in fails; the password form always works.
+- **Landing page:** "We are building the largest database of reforested trees in Africa." appears in the hero and in a short "Our vision" section.
+
 ## 2026-11-06: 2026 sector map, times in WAT, metric definitions (migrations 014–015)
 - **2026 sectors (SEPLAT Ehor):** migration 014 loads the 2026 Sectoring Plan (BE.C.206) into the T4L 2026 planting year: 24 sectors (S1–S24, plan letters A–X) and 120 sub-sectors (SS1–SS5, numbered south to north), with outlines and GPS reference points. Existing 2026 areas are overwritten in place. Trees keep the sector and sub-sector they were recorded in. Areas outside the plan are removed only if nothing refers to them.
 - **Times in WAT:**

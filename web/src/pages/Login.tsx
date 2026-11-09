@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { auth } from '../api/client';
+import { GoogleSignIn } from '../components/GoogleSignIn';
 import { ErrorNotice, Field, PasswordInput } from '../components/ui';
 
 export function LoginPage() {
@@ -33,6 +34,7 @@ export function LoginPage() {
         <button className="primary" type="submit" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
+        <GoogleSignIn onError={setError} onBusy={setBusy} />
       </form>
     </div>
   );

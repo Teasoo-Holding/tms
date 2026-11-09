@@ -65,6 +65,11 @@ export const auth = {
     const res = await raw('POST', '/auth/login', { login, password }, false);
     setSession(res);
   },
+  /** Signs in with a Google ID token from Google Identity Services. */
+  async loginWithGoogle(credential: string) {
+    const res = await raw('POST', '/auth/google', { credential }, false);
+    setSession(res);
+  },
   async logout() {
     if (session) await raw('POST', '/auth/logout', { refresh_token: session.refresh_token }, false).catch(() => undefined);
     setSession(null);

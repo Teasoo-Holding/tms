@@ -119,7 +119,9 @@ export class UsersController {
         .one(
           tx,
           `UPDATE users SET email = $2, full_name = $3, role = $4, active = $5, password_hash = COALESCE($6, password_hash),
-                  username = $7, phone = $8, all_projects = $9, updated_at = now()
+                  username = $7, phone = $8, all_projects = $9, updated_at = now(),
+                  -- A new email unlinks Google: the next Google sign-in must match the new address.
+                  google_sub = CASE WHEN lower(email) IS DISTINCT FROM $2 THEN NULL ELSE google_sub END
             WHERE id = $1 RETURNING ${USER_COLUMNS}`,
           [id, n.email?.toLowerCase() ?? null, n.full_name, n.role, n.active, hash, n.username ?? null, n.phone ?? null, n.role === 'EXECUTIVE' && !!n.all_projects],
         )
