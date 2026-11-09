@@ -1,9 +1,10 @@
+// The harness first: it points the app's config at the test database before config is loaded.
+import { bootApp, resetDatabase, sql } from './harness';
 import { INestApplication } from '@nestjs/common';
 import { createSign, generateKeyPairSync } from 'crypto';
 import request from 'supertest';
 import { AuthService } from '../../src/auth/auth.service';
 import { config } from '../../src/config';
-import { bootApp, resetDatabase, sql } from './harness';
 
 const CLIENT_ID = 'test-client.apps.googleusercontent.com';
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
