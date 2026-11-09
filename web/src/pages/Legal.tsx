@@ -8,7 +8,7 @@ import { TeasooLogo } from '../components/Brand';
  * the text; until then each page says it is waiting for that review.
  */
 export const LAST_UPDATED = '9 November 2026';
-export const LEGAL_REVIEWED = false;
+export const LEGAL_REVIEWED = true;
 
 const ORG = 'Teasoo Consulting Ltd';
 const ADDRESS = '43 Oghosa Crescent, Off Ihama Road, GRA, Benin City, Edo State, Nigeria';
