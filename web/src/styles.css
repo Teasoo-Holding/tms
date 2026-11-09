@@ -664,3 +664,12 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 .glossary dt { font-weight: 600; }
 .glossary dd { margin: 2px 0 0; color: var(--text-secondary); }
 @media print { .info-tip { display: none; } }
+
+/* The vision line in the hero and its band further down. */
+.landing-vision { margin: 0; padding-left: 12px; border-left: 3px solid var(--brand, currentColor); font-weight: 600; font-size: 17px; line-height: 1.4; }
+.landing-vision-band { text-align: center; }
+.landing-vision-band .landing-intro { max-width: 640px; margin-left: auto; margin-right: auto; }
+
+/* "or" between the password form and Sign in with Google. */
+.or-divider { display: flex; align-items: center; gap: 10px; color: var(--text-muted); font-size: 13px; }
+.or-divider::before, .or-divider::after { content: ''; flex: 1; border-top: 1px solid var(--border); }

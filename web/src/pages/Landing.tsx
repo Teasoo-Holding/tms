@@ -225,6 +225,7 @@ export function LandingPage() {
               <p className="landing-eyebrow">TMS by Teasoo Consulting</p>
               <h1 id="hero-title">Tree Management System</h1>
               <p className="landing-lead">Register and monitor every tree planted — offline in the field, live for managers and sponsors.</p>
+              <p className="landing-vision">We are building the largest database of reforested trees in Africa.</p>
               <div className="landing-actions">
                 {download}
                 <Link className="btn landing-secondary" to={portal}>{portalLabel}</Link>
@@ -288,6 +289,17 @@ export function LandingPage() {
                 </article>
               ))}
             </div>
+          </div>
+        </section>
+
+        <section className="landing-section landing-vision-band" aria-labelledby="vision-title">
+          <div className="landing-wrap">
+            <p className="landing-eyebrow">Our vision</p>
+            <h2 id="vision-title" className="landing-h2">The largest database of reforested trees in Africa</h2>
+            <p className="landing-intro">
+              Every tree registered in TMS has its own ID, species, location and visit history. Tree by tree, project by project, we are building one
+              trusted record of how Africa’s reforestation grows and survives.
+            </p>
           </div>
         </section>
 

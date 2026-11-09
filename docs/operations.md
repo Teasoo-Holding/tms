@@ -122,6 +122,18 @@ is usually enough. New uploads and thumbnails always go to the new bucket.
 R2 has no object versioning: for the backup policy below, copy the bucket regularly to a second bucket or provider
 (for example with `rclone sync`), with credentials separate from the API's.
 
+## Sign in with Google
+
+Off until the API has `GOOGLE_CLIENT_ID`. To turn it on (repository owner, one time):
+
+1. In Google Cloud Console, open **APIs & Services → OAuth consent screen**. Set it up as **External**, with the app name "Tree Management System" and a support email. Publish it.
+2. Open **Credentials → Create credentials → OAuth client ID**. Choose **Web application**.
+3. Under **Authorised JavaScript origins**, add `https://tms.teasooconsulting.com`, plus any other address the portal is opened at (for example the Vercel URL). No redirect URI is needed.
+4. Copy the **Client ID** (it ends in `.apps.googleusercontent.com`). It is a public value; the client secret is not used.
+5. In Render, add `GOOGLE_CLIENT_ID` to the API's environment and redeploy. The "Sign in with Google" button then appears on the sign-in page.
+
+Who can sign in: only existing, active accounts. The first Google sign-in must use the same email as the TMS account (Google must have verified it), and links that Google account to the user. Later sign-ins match the linked Google account. Google sign-in never creates accounts or changes roles. Changing a user's email unlinks Google.
+
 ## Sessions
 
 Field phones often lose the network mid-request. Refresh tokens rotate, but a phone that presents its

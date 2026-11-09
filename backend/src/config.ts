@@ -82,6 +82,8 @@ export const config = {
   /** Direct (unpooled) connection for migrations, which PgBouncer's transaction mode can break. */
   migrationDatabaseUrl: process.env.DATABASE_URL_UNPOOLED || required('DATABASE_URL', 'postgres://tms:tms@localhost:5432/tms'),
   jwtAccessSecret: required('JWT_ACCESS_SECRET', 'dev-access-secret'),
+  /** OAuth client id (a public value) for Sign in with Google; Google sign-in is off when unset. */
+  googleClientId: process.env.GOOGLE_CLIENT_ID?.trim() || null,
   accessTokenTtlSeconds: num('ACCESS_TOKEN_TTL_SECONDS', 900),
   refreshTokenTtlDays: num('REFRESH_TOKEN_TTL_DAYS', 90),
   offlineSessionDays: num('OFFLINE_SESSION_DAYS', 30),

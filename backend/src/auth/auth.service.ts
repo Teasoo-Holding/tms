@@ -7,6 +7,7 @@ import { AppError } from '../common/errors';
 import { AuditService } from '../common/audit.service';
 import { verifyPassword } from './passwords';
 import { normalizePhone } from '../domain/login-id';
+import { googleKeys, JwksSource, verifyGoogleIdToken } from './google';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 // Verifying against a dummy hash keeps response time similar for unknown accounts.
@@ -41,6 +42,42 @@ export class AuthService {
     return this.db.tx(async (tx) => {
       if (device.deviceId) await this.registerDevice(tx, user.id, device);
       await this.audit.record({ actorId: user.id, action: 'auth.login', entityType: 'user', entityId: user.id, metadata: { deviceId: device.deviceId } }, tx);
+      return this.issue(tx, user, device.deviceId ?? null, randomUUID());
+    });
+  }
+
+  /** Keys used to check Google tokens; tests replace them. */
+  googleKeys: JwksSource = googleKeys;
+
+  /**
+   * Sign in with a Google ID token. Only existing, active accounts can sign in: the Google account must already be
+   * linked to the user, or its verified email must match the user's email, in which case it is linked now. Google
+   * sign-in never creates accounts or changes roles.
+   */
+  async loginWithGoogle(credential: string, device: DeviceInfo) {
+    if (!config.googleClientId) throw new AppError(404, 'GOOGLE_SIGN_IN_OFF', 'Sign in with Google is not turned on.');
+    const g = await verifyGoogleIdToken(credential, config.googleClientId, this.googleKeys).catch(() => {
+      throw new AppError(503, 'GOOGLE_UNAVAILABLE', 'Google could not be reached. Try again, or sign in with your password.');
+    });
+    if (!g) throw new AppError(401, 'GOOGLE_TOKEN_INVALID', 'Google sign-in did not work. Try again, or sign in with your password.');
+    return this.db.tx(async (tx) => {
+      let user = await this.db.one(tx, 'SELECT * FROM users WHERE google_sub = $1', [g.sub]);
+      let linked = false;
+      if (!user) {
+        const byEmail = await this.db.one(tx, 'SELECT * FROM users WHERE lower(email) = $1 FOR UPDATE', [g.email]);
+        // A user already linked to a different Google account is not re-linked silently.
+        if (byEmail && !byEmail.google_sub) {
+          await tx.query('UPDATE users SET google_sub = $1, updated_at = now() WHERE id = $2', [g.sub, byEmail.id]);
+          user = { ...byEmail, google_sub: g.sub };
+          linked = true;
+        }
+      }
+      if (!user) {
+        throw new AppError(401, 'GOOGLE_ACCOUNT_UNKNOWN', `No TMS account uses ${g.email}. Ask an administrator to add this email to your account, or sign in with your password.`);
+      }
+      if (!user.active) throw new AppError(401, 'ACCOUNT_DISABLED', 'This account has been deactivated.');
+      if (device.deviceId) await this.registerDevice(tx, user.id, device);
+      await this.audit.record({ actorId: user.id, action: 'auth.login', entityType: 'user', entityId: user.id, metadata: { method: 'google', linked, deviceId: device.deviceId } }, tx);
       return this.issue(tx, user, device.deviceId ?? null, randomUUID());
     });
   }
