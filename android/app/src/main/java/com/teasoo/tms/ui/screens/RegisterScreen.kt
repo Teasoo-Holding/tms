@@ -385,7 +385,7 @@ private suspend fun decodeFile(file: java.io.File, maxPx: Int) = kotlinx.corouti
     }.getOrNull()
 }
 
-/** Shown wherever a tree photo is taken: glare on the tag makes the number unreadable. */
+/** Shown wherever a tree photo is taken: glare on the tag makes the number unreadable, and other plants confuse the species check. */
 @Composable
 fun PhotoTip() {
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
@@ -393,6 +393,7 @@ fun PhotoTip() {
             Icon(Icons.Default.WbSunny, contentDescription = null, tint = MaterialTheme.colorScheme.onSecondaryContainer)
             Text(
                 "Center the tree in the photo and make sure its identification tag is clearly visible and readable. " +
+                    "Fill the photo with the tree’s leaves and keep other plants out of the picture. " +
                     "Turn the tag away from direct sunlight (or shade it with your hand).",
                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer,
             )

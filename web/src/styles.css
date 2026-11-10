@@ -696,3 +696,18 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 .species-match.green { color: var(--good-ink); } .species-match.green .dot { background: var(--status-good); }
 .species-match.amber { color: var(--warning-ink); } .species-match.amber .dot { background: var(--status-warning); }
 .species-match.red { color: var(--critical-ink); } .species-match.red .dot { background: var(--status-critical); }
+
+/* Check tree species page (#107). */
+.species-check-page th { text-transform: none; letter-spacing: 0; font-size: 13px; }
+.species-check-page .inline-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-secondary); }
+.species-check-page .stat .stat-of { font-size: 15px; font-weight: 500; color: var(--text-secondary); }
+.species-check-facts { margin: 0; display: grid; gap: 4px; }
+.species-check-facts > div { display: grid; grid-template-columns: 190px 1fr; gap: 8px; }
+.species-check-facts dt { color: var(--text-secondary); }
+.species-check-facts dd { margin: 0; }
+@media (max-width: 520px) { .species-check-facts > div { grid-template-columns: 1fr; gap: 0; } }
+.species-check .species-match { font-weight: 500; }
+.species-choice { border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: grid; gap: 8px; margin: 0; }
+.species-choice legend { font-weight: 600; padding: 0 4px; }
+.species-choice .radio { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.link-button { background: none; border: none; padding: 0 4px; color: var(--focus); text-decoration: underline; cursor: pointer; min-height: 0; }
