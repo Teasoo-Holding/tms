@@ -33,18 +33,22 @@ export const TreeQuery = pagination.extend({
 });
 type TreeFilter = z.infer<typeof TreeQuery>;
 
+/** Species match colours by Pl@ntNet's likelihood that the officer's species is right (#105). */
+export const SPECIES_MATCH_GREEN = 0.6;
+export const SPECIES_MATCH_AMBER = 0.25;
+
 /**
- * The species check's traffic light for a tree (#103): green when Pl@ntNet agrees with the officer or an
- * administrator confirmed the species, red when it clearly disagrees, amber when unsure; "changed" when the species
- * was edited after the check, "unchecked" when no photo was checked.
+ * The species check's traffic light for a tree: green at 60% or more (or when an administrator confirmed or
+ * corrected the species), amber from 25%, red below; "changed" when the species was edited after the check,
+ * "unchecked" when no photo was checked.
  */
 export const SPECIES_MATCH_SQL = `(CASE
     WHEN sc.verdict IS NULL THEN 'unchecked'
     WHEN sc.review_state IN ('KEPT', 'CORRECTED') THEN 'green'
     WHEN sc.claimed_species_id <> t.species_id THEN 'changed'
-    WHEN sc.verdict = 'AGREE' THEN 'green'
-    WHEN sc.verdict = 'DISAGREE' THEN 'red'
-    ELSE 'amber' END)`;
+    WHEN sc.claimed_score >= ${SPECIES_MATCH_GREEN} THEN 'green'
+    WHEN sc.claimed_score >= ${SPECIES_MATCH_AMBER} THEN 'amber'
+    ELSE 'red' END)`;
 
 /** Codes such as S2 and S10 sort by their number: the letters first, then the trailing digits as a number. */
 const natural = (col: string) => [`regexp_replace(${col}, '[0-9]+$', '')`, `NULLIF(substring(${col} from '[0-9]+$'), '')::bigint`];

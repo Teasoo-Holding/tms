@@ -7,6 +7,9 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-10: Species match colours by percentage
+- The Trees list's species match is now coloured by the percentage: green at 60% or more, amber 25–59%, red under 25%. Administrator-confirmed trees stay green.
+
 ## 2026-11-10: Species match on the Trees list
 - Administrators see a **Species match** column on the web Trees list. It shows Pl@ntNet's likelihood that the officer's species is right as a percentage, with a coloured dot:
   - green: agrees, or an administrator confirmed or corrected the species

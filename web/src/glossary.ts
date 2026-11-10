@@ -66,6 +66,10 @@ export const SPECIES_CHECK_TERMS = {
     term: 'Species to review',
     definition: 'Photos where Pl@ntNet is confident it is another genus and sees almost no sign of the officer’s species. An administrator keeps the officer’s species or corrects it.',
   },
+  match: {
+    term: 'Species match',
+    definition: 'On the Trees list: how likely Pl@ntNet thinks the officer’s species is, from the tree’s registration photo. Green is 60% or more, amber 25–59%, red under 25%. Trees an administrator confirmed or corrected are green.',
+  },
   unsure: {
     term: 'Unsure',
     definition: 'Pl@ntNet was not confident, suggested a species of the same genus (young trees of one genus look alike), or found no plant in the photo.',

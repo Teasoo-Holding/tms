@@ -79,11 +79,13 @@ describe('species check', () => {
   });
 
   it('shows the traffic light and likelihood on the tree list, with a filter and sort', async () => {
+    // Colours follow the officer's species' score: 60%+ green, 25%+ amber, below red.
+    await sql(`UPDATE species_checks c SET claimed_score = 0.4 FROM trees t WHERE t.id = c.tree_id AND t.serial_number LIKE '%903'`);
     const red = (await admin.get('/trees?species_match=red').expect(200)).body;
     expect(red.total).toBe(1);
     expect(red.items[0]).toMatchObject({ id: wrongTree, species_match: 'red', species_match_score: 0.01 });
     expect((await admin.get('/trees?species_match=green').expect(200)).body.items[0]).toMatchObject({ species_match: 'green', species_match_score: 0.8 });
-    expect((await admin.get('/trees?species_match=amber').expect(200)).body.total).toBe(1);
+    expect((await admin.get('/trees?species_match=amber').expect(200)).body.items[0]).toMatchObject({ species_match: 'amber', species_match_score: 0.4 });
     const sorted = (await admin.get('/trees?sort=species_match').expect(200)).body.items.map((t: any) => t.species_match);
     expect(sorted.slice(0, 3)).toEqual(['red', 'amber', 'green']);
     expect(sorted.slice(3).every((m: string) => m === 'unchecked')).toBe(true);

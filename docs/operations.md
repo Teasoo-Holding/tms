@@ -156,6 +156,10 @@ What it does: every 15 minutes the server picks, at random, registration photos 
 - **Disagrees**: Pl@ntNet is at least 40% sure it is a species of another genus, and gives the officer's species under 5%. These wait for an administrator, who keeps the officer's species or corrects it (a correction is a normal tree edit, so phones receive it).
 - **Unsure**: anything else, including suggestions of the same genus and photos with no plant found.
 
+On the Trees list, the **Species match** column shows the officer's species' score as a percentage: green at 60% or more, amber 25–59%, red under 25% (`SPECIES_MATCH_GREEN` and `SPECIES_MATCH_AMBER` in `backend/src/trees/trees.controller.ts`). Trees an administrator confirmed or corrected are green. The review list above is separate: it holds only the confident disagreements.
+
+The match uses each species' **scientific name** (genus and species, e.g. *Triplochiton scleroxylon* for Obeche). A species whose scientific name is misspelt or outdated in Lists will always score 0%.
+
 Nothing changes without an administrator. The thresholds are in `backend/src/species/plantnet.ts`. On Render's free plan the server sleeps when idle, so checks only run while it is awake.
 
 ## Sessions
