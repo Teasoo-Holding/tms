@@ -25,6 +25,7 @@ import { VisitsPage } from './pages/Visits';
 import './styles.css';
 import { GlossaryPage } from './pages/Glossary';
 import { PrivacyPage, TermsPage } from './pages/Legal';
+import { SpeciesCheckPage } from './pages/SpeciesCheck';
 
 const queryClient: QueryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1, placeholderData: (prev: unknown) => prev } },
@@ -77,6 +78,7 @@ function App() {
         <Route path="projects/:id" element={<ProjectDetailPage />} />
         {admin && <Route path="client-links" element={<ClientLinksPage />} />}
         {admin && <Route path="conflicts" element={<ConflictsPage />} />}
+        {admin && <Route path="species-check" element={<SpeciesCheckPage />} />}
         {admin && <Route path="reference" element={<ReferencePage />} />}
         {admin && <Route path="users" element={<UsersPage />} />}
         {admin && <Route path="audit" element={<AuditPage />} />}

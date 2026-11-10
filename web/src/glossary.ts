@@ -52,4 +52,24 @@ export const RECORD_TERMS: Term[] = [
   { term: 'Days and times', definition: `All dates and times are West Africa Time (WAT, Africa/Lagos). ${DAY_NOTE}` },
 ];
 
-export const glossary = (overdueDays = 90): Term[] => [...Object.values(metricTerms(overdueDays)), ...RECORD_TERMS];
+/** The species check (#101): Pl@ntNet's view of a sample of registration photos. */
+export const SPECIES_CHECK_TERMS = {
+  check: {
+    term: 'Species check',
+    definition: 'Each day, a random sample of up to 450 registration photos is sent to Pl@ntNet after they sync. Its suggestion is compared with the species the officer chose. It never changes a record by itself.',
+  },
+  agreement: {
+    term: 'Agreement rate',
+    definition: 'Of the photos where Pl@ntNet gave a clear answer, the share where it agrees with the officer’s species. Unsure results are left out.',
+  },
+  disagree: {
+    term: 'Species to review',
+    definition: 'Photos where Pl@ntNet is confident it is another genus and sees almost no sign of the officer’s species. An administrator keeps the officer’s species or corrects it.',
+  },
+  unsure: {
+    term: 'Unsure',
+    definition: 'Pl@ntNet was not confident, suggested a species of the same genus (young trees of one genus look alike), or found no plant in the photo.',
+  },
+} satisfies Record<string, Term>;
+
+export const glossary = (overdueDays = 90): Term[] => [...Object.values(metricTerms(overdueDays)), ...RECORD_TERMS, ...Object.values(SPECIES_CHECK_TERMS)];

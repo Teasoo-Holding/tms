@@ -44,7 +44,7 @@ export class DataMaintenanceController {
         await tx.query(`SELECT (SELECT count(*) FROM trees)::int AS trees, (SELECT count(*) FROM tree_observations)::int AS visits,
                                (SELECT count(*) FROM tree_media)::int AS photos, (SELECT count(*) FROM projects)::int AS projects`)
       ).rows[0];
-      await tx.query(`TRUNCATE tree_media, tree_observations, tree_physical_id_history, conflict_records, sync_operations, sync_batches, trees`);
+      await tx.query(`TRUNCATE species_checks, tree_media, tree_observations, tree_physical_id_history, conflict_records, sync_operations, sync_batches, trees`);
       if (b.scope === 'EVERYTHING') {
         await tx.query(`TRUNCATE projects, species_images, tree_species, vendors, tree_statuses CASCADE`);
         // The working statuses are always present.

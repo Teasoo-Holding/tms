@@ -7,7 +7,7 @@ import { TeasooLogo } from '../components/Brand';
  * that matters to readers. Set LEGAL_REVIEWED to true once a qualified legal or privacy professional has approved
  * the text; until then each page says it is waiting for that review.
  */
-export const LAST_UPDATED = '9 November 2026';
+export const LAST_UPDATED = '10 November 2026';
 export const LEGAL_REVIEWED = true;
 
 const ORG = 'Teasoo Consulting Ltd';
@@ -103,7 +103,7 @@ export function PrivacyPage() {
       <h3>What you record</h3>
       <ul>
         <li>tree records and visits, with who made them, when, and in which field session</li>
-        <li>photos of trees. Please do not photograph people. If someone appears by accident, ask us to remove the photo.</li>
+        <li>photos of trees. A sample is checked by Pl@ntNet to confirm the species (see below). Please do not photograph people. If someone appears by accident, ask us to remove the photo.</li>
         <li>
           the GPS position of planting areas, which administrators record. TMS does not record the position of each tree, and it does not
           track where you are.
@@ -145,6 +145,10 @@ export function PrivacyPage() {
         <li>
           the companies that host TMS for us: Neon (database and storage), Render (server), Vercel (website) and, if you sign in with
           Google, Google. They process data only to provide their service to us.
+        </li>
+        <li>
+          Pl@ntNet, a plant identification service run by French research institutes. Each day we send it a sample of tree photos,
+          only the photo, to check which species the tree is. It does not receive names or other details about you.
         </li>
       </ul>
       <p>We do not sell your information, and we do not share it with anyone else, unless the law requires us to.</p>
