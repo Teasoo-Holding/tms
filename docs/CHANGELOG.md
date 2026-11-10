@@ -7,6 +7,17 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-10: Check tree species: clearer wording, new colour bands (migration 018)
+- **Colours:** green 75–100%, amber 25–74%, red under 25%, on the review page and the Trees list.
+- **Review list:** every amber and red tree, lowest score first. Earlier checks are re-scored when the server starts.
+- **Page wording** (from a content audit):
+  - Plain-English intro and status line; tiles for likely right, possibly wrong, likely wrong and reviewed.
+  - "Recorded as" and "Pl@ntNet suggests" with common and italic scientific names; "Not on your species list".
+  - "Species is correct" and "Change species to …" buttons of equal weight; "Choose a different species" opens a list of options.
+  - GOV.UK dates ("10 November 2026 at 11:10am WAT"); counts on the tabs; "Not enough results yet" under 5 checks; sentence-case table headings; a labelled project filter.
+- **Species names:** migration 018 drops a leading "Genus" (e.g. "Genus Swietenia" → *Swietenia*) and lower-cases species epithets (e.g. *Tectona grandis*). A genus-only name matches every species of that genus.
+- **Phone photo tip:** "Fill the photo with the tree's leaves and keep other plants out of the picture."
+
 ## 2026-11-10: Species match colours by percentage
 - The Trees list's species match is now coloured by the percentage: green at 60% or more, amber 25–59%, red under 25%. Administrator-confirmed trees stay green.
 

@@ -50,3 +50,13 @@ export function fmtWhen(v: string) {
 const SHORT_DATE = fmt({ day: 'numeric', month: 'short', year: '2-digit' });
 /** "6 Nov 26" in WAT, for chart axes. */
 export const fmtShortDate = (v: string | number | Date) => SHORT_DATE.format(toDate(v));
+
+const GOV_DATE = new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, day: 'numeric', month: 'long', year: 'numeric' });
+const GOV_TIME = new Intl.DateTimeFormat('en-GB', { timeZone: TIME_ZONE, hour: 'numeric', minute: '2-digit', hour12: true });
+/** GOV.UK style: "10 November 2026 at 11:10am WAT". */
+export function fmtLongDateTime(v?: string | null) {
+  if (!v) return '—';
+  const d = toDate(v);
+  const parts = Object.fromEntries(GOV_TIME.formatToParts(d).map((p) => [p.type, p.value]));
+  return `${GOV_DATE.format(d)} at ${parts.hour}:${parts.minute}${String(parts.dayPeriod ?? '').toLowerCase().replace(/\./g, '')} ${TZ_LABEL}`;
+}

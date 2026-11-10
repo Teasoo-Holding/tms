@@ -41,6 +41,12 @@ export function speciesKey(name: string | null | undefined): string {
 }
 const genusOf = (name: string | null | undefined) => speciesKey(name).split(' ')[0] ?? '';
 
+/** Colour bands for Pl@ntNet's score for the recorded species (#107): green 75–100%, amber 25–74%, red below. */
+export const MATCH_GREEN = 0.75;
+export const MATCH_AMBER = 0.25;
+export type MatchColour = 'green' | 'amber' | 'red';
+export const colourOf = (score: number): MatchColour => (score >= MATCH_GREEN ? 'green' : score >= MATCH_AMBER ? 'amber' : 'red');
+
 /** A suggestion is confident above this score. */
 export const CONFIDENT = 0.4;
 /** The officer's species counts as likely at or above this score. */
@@ -56,9 +62,13 @@ export const UNLIKELY = 0.05;
 export function compare(claimedName: string, results: PlantNetResult[]) {
   const claimed = speciesKey(claimedName);
   const top = results[0];
-  const claimedScore = results.find((r) => speciesKey(r.name) === claimed)?.score ?? 0;
+  // A genus-only name ("Swietenia") matches every species of that genus: their scores add up.
+  const genusOnly = !!claimed && !claimed.includes(' ');
+  const claimedScore = genusOnly
+    ? Math.min(1, results.filter((r) => genusOf(r.name) === claimed).reduce((n, r) => n + r.score, 0))
+    : results.find((r) => speciesKey(r.name) === claimed)?.score ?? 0;
   let verdict: 'AGREE' | 'DISAGREE' | 'UNSURE' = 'UNSURE';
-  if (top && (speciesKey(top.name) === claimed || claimedScore >= LIKELY)) verdict = 'AGREE';
+  if (top && (speciesKey(top.name) === claimed || (genusOnly && genusOf(top.name) === claimed) || claimedScore >= LIKELY)) verdict = 'AGREE';
   else if (top && top.score >= CONFIDENT && claimedScore < UNLIKELY && genusOf(top.name) !== genusOf(claimedName)) verdict = 'DISAGREE';
   return { verdict, claimedScore, top };
 }

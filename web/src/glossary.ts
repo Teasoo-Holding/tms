@@ -52,27 +52,27 @@ export const RECORD_TERMS: Term[] = [
   { term: 'Days and times', definition: `All dates and times are West Africa Time (WAT, Africa/Lagos). ${DAY_NOTE}` },
 ];
 
-/** The species check (#101): Pl@ntNet's view of a sample of registration photos. */
+/** The species check (#101, #107): Pl@ntNet's score for the recorded species, from the tree's registration photo. */
 export const SPECIES_CHECK_TERMS = {
   check: {
     term: 'Species check',
-    definition: 'Each day, a random sample of up to 450 registration photos is sent to Pl@ntNet after they sync. Its suggestion is compared with the species the officer chose. It never changes a record by itself.',
+    definition: 'Each day, a random sample of up to 450 new tree photos is sent to Pl@ntNet, a plant identification service. It scores how likely the recorded species is. Trees scoring under 75% are listed for an administrator to check. It never changes a record by itself.',
   },
-  agreement: {
-    term: 'Agreement rate',
-    definition: 'Of the photos where Pl@ntNet gave a clear answer, the share where it agrees with the officer’s species. Unsure results are left out.',
+  green: {
+    term: 'Likely right (green)',
+    definition: 'Pl@ntNet gives the recorded species a score of 75% or more.',
   },
-  disagree: {
-    term: 'Species to review',
-    definition: 'Photos where Pl@ntNet is confident it is another genus and sees almost no sign of the officer’s species. An administrator keeps the officer’s species or corrects it.',
+  amber: {
+    term: 'Possibly wrong (amber)',
+    definition: 'Pl@ntNet gives the recorded species a score from 25% to 74%. These trees are listed for review.',
   },
-  match: {
-    term: 'Species match',
-    definition: 'On the Trees list: how likely Pl@ntNet thinks the officer’s species is, from the tree’s registration photo. Green is 60% or more, amber 25–59%, red under 25%. Trees an administrator confirmed or corrected are green.',
+  red: {
+    term: 'Likely wrong (red)',
+    definition: 'Pl@ntNet gives the recorded species a score under 25%. These trees are listed for review. A low score can also mean the photo shows other plants, or the tree is too young to recognise.',
   },
-  unsure: {
-    term: 'Unsure',
-    definition: 'Pl@ntNet was not confident, suggested a species of the same genus (young trees of one genus look alike), or found no plant in the photo.',
+  reviewed: {
+    term: 'Reviewed',
+    definition: 'An administrator confirmed the recorded species or corrected it. Reviewed trees show as green on the Trees list.',
   },
 } satisfies Record<string, Term>;
 

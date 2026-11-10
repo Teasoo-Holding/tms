@@ -150,15 +150,15 @@ Off until the API has `PLANTNET_API_KEY`. To turn it on (repository owner, one t
 2. In Render, add `PLANTNET_API_KEY` to the API's environment (it is a secret: never put it in the repository or a chat) and redeploy.
 3. Optional: `SPECIES_CHECK_DAILY_LIMIT` (default 450). The free plan allows 500 identifications a day; 450 leaves room for testing in the Pl@ntNet website.
 
-What it does: every 15 minutes the server picks, at random, registration photos synced in the last 14 days that have not been checked, and sends them to Pl@ntNet. Checks are spread evenly through the day up to the daily limit. Each photo is checked once. Results are on the web under **Species check**:
+What it does: every 15 minutes the server picks, at random, registration photos synced in the last 14 days that have not been checked, and sends them to Pl@ntNet. Checks are spread evenly through the day up to the daily limit. Each photo is checked once. Pl@ntNet's score for the recorded species sets the colour (`MATCH_GREEN` and `MATCH_AMBER` in `backend/src/species/plantnet.ts`):
 
-- **Agrees**: the officer's species is Pl@ntNet's top suggestion, or scores 30% or more.
-- **Disagrees**: Pl@ntNet is at least 40% sure it is a species of another genus, and gives the officer's species under 5%. These wait for an administrator, who keeps the officer's species or corrects it (a correction is a normal tree edit, so phones receive it).
-- **Unsure**: anything else, including suggestions of the same genus and photos with no plant found.
+- **Green, likely right:** 75–100%.
+- **Amber, possibly wrong:** 25–74%.
+- **Red, likely wrong:** under 25%.
 
-On the Trees list, the **Species match** column shows the officer's species' score as a percentage: green at 60% or more, amber 25–59%, red under 25% (`SPECIES_MATCH_GREEN` and `SPECIES_MATCH_AMBER` in `backend/src/trees/trees.controller.ts`). Trees an administrator confirmed or corrected are green. The review list above is separate: it holds only the confident disagreements.
+Amber and red trees wait on the web page **Check tree species** (menu: Species check). An administrator confirms the species or corrects it; a correction is a normal tree edit, so phones receive it. The **Species match** column on the Trees list uses the same colours; reviewed trees are green. When the server starts, it re-scores earlier checks from their stored results, so renamed species and changed thresholds apply to them too.
 
-The match uses each species' **scientific name** (genus and species, e.g. *Triplochiton scleroxylon* for Obeche). A species whose scientific name is misspelt or outdated in Lists will always score 0%.
+The match uses each species' **scientific name** (genus and species, e.g. *Triplochiton scleroxylon* for Obeche). A species whose scientific name is misspelt or outdated in Lists will always score 0%. A genus-only name (e.g. *Swietenia*) matches every species of that genus.
 
 Nothing changes without an administrator. The thresholds are in `backend/src/species/plantnet.ts`. On Render's free plan the server sleeps when idle, so checks only run while it is awake.
 

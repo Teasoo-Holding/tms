@@ -10,6 +10,7 @@ import { MAINTENANCE_COLUMNS, MAINTENANCE_JOIN, MAINTENANCE_PROPOSED_SQL, MAINTE
 import { OperationResult } from './operation-result';
 import { runOperation } from './operation-runner';
 import { CreateTreePayload, ObservationPayload, TreesService, UpdateTreePayload } from './trees.service';
+import { MATCH_AMBER, MATCH_GREEN } from '../species/plantnet';
 
 /** Sorts every tree list offers (the client share link's too). */
 export const TREE_SORT_KEYS = ['tree_id', 'planting_year', 'area', 'species', 'status', 'last_observed'] as const;
@@ -33,12 +34,12 @@ export const TreeQuery = pagination.extend({
 });
 type TreeFilter = z.infer<typeof TreeQuery>;
 
-/** Species match colours by Pl@ntNet's likelihood that the officer's species is right (#105). */
-export const SPECIES_MATCH_GREEN = 0.6;
-export const SPECIES_MATCH_AMBER = 0.25;
+/** Species match colours by Pl@ntNet's likelihood that the recorded species is right (#105, #107). */
+export const SPECIES_MATCH_GREEN = MATCH_GREEN;
+export const SPECIES_MATCH_AMBER = MATCH_AMBER;
 
 /**
- * The species check's traffic light for a tree: green at 60% or more (or when an administrator confirmed or
+ * The species check's traffic light for a tree: green at 75% or more (or when an administrator confirmed or
  * corrected the species), amber from 25%, red below; "changed" when the species was edited after the check,
  * "unchecked" when no photo was checked.
  */

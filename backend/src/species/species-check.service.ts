@@ -7,7 +7,10 @@ import { Db } from '../database/db.service';
 import { OBJECT_STORAGE, ObjectStorage } from '../media/storage';
 import { runOperation } from '../trees/operation-runner';
 import { TreesService } from '../trees/trees.service';
-import { compare, identify, PlantNetQuotaError, PlantNetResult, speciesKey } from './plantnet';
+import { compare, identify, MATCH_AMBER, MATCH_GREEN, PlantNetQuotaError, PlantNetResult, speciesKey } from './plantnet';
+
+/** The colour band of a check's score, in SQL (see plantnet.ts). */
+export const CHECK_COLOUR_SQL = `(CASE WHEN c.claimed_score >= ${MATCH_GREEN} THEN 'green' WHEN c.claimed_score >= ${MATCH_AMBER} THEN 'amber' ELSE 'red' END)`;
 
 /** Only one server checks at a time (see migration 001 for the other lock). */
 const LOCK = 7381002;
@@ -44,7 +47,10 @@ export class SpeciesCheckService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit() {
-    if (!this.enabled || process.env.JEST_WORKER_ID) return;
+    if (process.env.JEST_WORKER_ID) return;
+    // Applies renamed species and the current colour bands to checks made earlier.
+    void this.rescore().catch((e) => this.log.warn(`rescore failed: ${e.message}`));
+    if (!this.enabled) return;
     this.timer = setInterval(() => void this.run().catch((e) => this.log.warn(`run failed: ${e.message}`)), EVERY_MS);
     setTimeout(() => void this.run().catch(() => undefined), 60_000).unref();
     this.timer.unref();
@@ -122,18 +128,13 @@ export class SpeciesCheckService implements OnModuleInit, OnModuleDestroy {
       const photo = await this.storage.getObject(c.object_key);
       const { results, remaining } = await this.identify(photo, c.mime_type ?? 'image/jpeg');
       this.lastRemaining = remaining;
-      const { verdict, claimedScore, top } = compare(c.scientific_name, results);
-      // The best suggestion that is an active TMS species other than the officer's.
-      const species = await this.db.query(`SELECT id, scientific_name FROM tree_species WHERE active AND id <> $1`, [c.species_id]);
-      const byKey = new Map(species.rows.map((s: any) => [speciesKey(s.scientific_name), s.id]));
-      const suggestion = results.find((r) => byKey.has(speciesKey(r.name)));
+      const scored = await this.score(c.species_id, c.scientific_name, results);
       await this.db.query(
         `UPDATE species_checks SET status = 'DONE', verdict = $2, claimed_score = $3, top_name = $4, top_score = $5,
                 suggested_species_id = $6, suggested_score = $7, results = $8, checked_at = now(),
-                review_state = CASE WHEN $2 = 'DISAGREE' THEN 'OPEN' END
+                review_state = CASE WHEN $3 < ${MATCH_GREEN} THEN 'OPEN' END
           WHERE id = $1`,
-        [row.id, verdict, round(claimedScore), top?.name ?? null, top ? round(top.score) : null,
-          suggestion ? byKey.get(speciesKey(suggestion.name)) : null, suggestion ? round(suggestion.score) : null, JSON.stringify(results.slice(0, 5))],
+        [row.id, scored.verdict, scored.claimedScore, scored.topName, scored.topScore, scored.suggestedId, scored.suggestedScore, JSON.stringify(results.slice(0, 5))],
       );
       return 'done';
     } catch (e: any) {
@@ -145,6 +146,47 @@ export class SpeciesCheckService implements OnModuleInit, OnModuleDestroy {
       await this.db.query(`UPDATE species_checks SET status = 'FAILED', failure_reason = $2, checked_at = now() WHERE id = $1`, [row.id, String(e.message).slice(0, 300)]);
       return 'failed';
     }
+  }
+
+  /** Pl@ntNet's results against the recorded species, and the best suggestion among the other active TMS species. */
+  private async score(claimedId: string, claimedName: string, results: PlantNetResult[]) {
+    const { verdict, claimedScore, top } = compare(claimedName, results);
+    const species = await this.db.query(`SELECT id, scientific_name FROM tree_species WHERE active AND id <> $1`, [claimedId]);
+    const byKey = new Map(species.rows.map((s: any) => [speciesKey(s.scientific_name), s.id]));
+    const suggestion = results.find((r) => byKey.has(speciesKey(r.name)));
+    return {
+      verdict,
+      claimedScore: round(claimedScore),
+      topName: top?.name ?? null,
+      topScore: top ? round(top.score) : null,
+      suggestedId: suggestion ? (byKey.get(speciesKey(suggestion.name)) as string) : null,
+      suggestedScore: suggestion ? round(suggestion.score) : null,
+    };
+  }
+
+  /**
+   * Re-scores finished checks from their stored results with the current species names and colour bands: unreviewed
+   * checks below 75% join the review list, and those now at 75% or more leave it. Reviewed checks keep their review.
+   */
+  async rescore() {
+    const { rows } = await this.db.query(
+      `SELECT c.id, c.claimed_species_id, sp.scientific_name, c.results, c.review_state, c.claimed_score::float8 AS claimed_score
+         FROM species_checks c JOIN tree_species sp ON sp.id = c.claimed_species_id WHERE c.status = 'DONE'`,
+    );
+    let changed = 0;
+    for (const r of rows) {
+      const scored = await this.score(r.claimed_species_id, r.scientific_name, r.results ?? []);
+      const reviewed = r.review_state === 'KEPT' || r.review_state === 'CORRECTED';
+      const state = reviewed ? r.review_state : scored.claimedScore < MATCH_GREEN ? 'OPEN' : null;
+      if (scored.claimedScore === r.claimed_score && state === r.review_state) continue;
+      await this.db.query(
+        `UPDATE species_checks SET verdict = $2, claimed_score = $3, suggested_species_id = $4, suggested_score = $5, review_state = $6 WHERE id = $1`,
+        [r.id, scored.verdict, scored.claimedScore, scored.suggestedId, scored.suggestedScore, state],
+      );
+      changed++;
+    }
+    if (changed) this.log.log(`re-scored ${changed} species checks`);
+    return changed;
   }
 
   // ------------------------------------------------------------------ review
@@ -174,7 +216,7 @@ export class SpeciesCheckService implements OnModuleInit, OnModuleDestroy {
     const w = where.join(' AND ');
     const [{ total }] = (await this.db.query(`SELECT count(*)::int AS total FROM species_checks c WHERE ${w}`, p)).rows;
     const { rows } = await this.db.query(
-      `SELECT c.id, c.media_id, c.tree_id, t.physical_tree_id, c.project_id, pr.name AS project_name, c.verdict, c.review_state,
+      `SELECT c.id, c.media_id, c.tree_id, t.physical_tree_id, c.project_id, pr.name AS project_name, c.verdict, c.review_state, ${CHECK_COLOUR_SQL} AS colour,
               c.claimed_score::float8 AS claimed_score, c.top_name, c.top_score::float8 AS top_score, c.suggested_score::float8 AS suggested_score,
               c.results, c.created_at, c.checked_at, c.reviewed_at,
               c.claimed_species_id, cs.scientific_name AS claimed_scientific_name, cs.common_name AS claimed_common_name,
@@ -190,7 +232,7 @@ export class SpeciesCheckService implements OnModuleInit, OnModuleDestroy {
          LEFT JOIN users u ON u.id = c.recorded_by
          LEFT JOIN users rv ON rv.id = c.reviewed_by
         WHERE ${w}
-        ORDER BY c.checked_at DESC NULLS LAST
+        ORDER BY ${f.state === 'open' ? 'c.claimed_score ASC, c.checked_at DESC' : 'c.checked_at DESC NULLS LAST'}
         LIMIT $${p.length + 1} OFFSET $${p.length + 2}`,
       [...p, f.limit, f.offset],
     );
@@ -227,31 +269,30 @@ export class SpeciesCheckService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Agreement per officer and per species: checked photos, agreements, disagreements and unsure results.
-   * agreement_rate = agree / (agree + disagree); reviews refine it ("kept" means the officer was right).
+   * Results per officer and per species, by colour band: green (75%+), amber (25–74%), red (under 25%), with the
+   * review outcomes. likely_right_rate = green / checked.
    */
   async agreement(projectId?: string) {
     const p = [projectId ?? null];
+    const colour = CHECK_COLOUR_SQL;
     const counts = `count(*)::int AS checked,
-      count(*) FILTER (WHERE c.verdict = 'AGREE')::int AS agree,
-      count(*) FILTER (WHERE c.verdict = 'DISAGREE')::int AS disagree,
-      count(*) FILTER (WHERE c.verdict = 'UNSURE')::int AS unsure,
+      count(*) FILTER (WHERE ${colour} = 'green')::int AS green,
+      count(*) FILTER (WHERE ${colour} = 'amber')::int AS amber,
+      count(*) FILTER (WHERE ${colour} = 'red')::int AS red,
       count(*) FILTER (WHERE c.review_state = 'OPEN')::int AS to_review,
       count(*) FILTER (WHERE c.review_state = 'KEPT')::int AS kept,
       count(*) FILTER (WHERE c.review_state = 'CORRECTED')::int AS corrected`;
-    const base = `FROM species_checks c WHERE c.status = 'DONE' AND ($1::uuid IS NULL OR c.project_id = $1)`;
-    const rate = (r: any) => ({ ...r, agreement_rate: r.agree + r.disagree ? Math.round((r.agree / (r.agree + r.disagree)) * 1000) / 1000 : null });
-    const [totals] = (await this.db.query(`SELECT ${counts} ${base}`, p)).rows;
+    const where = `c.status = 'DONE' AND ($1::uuid IS NULL OR c.project_id = $1)`;
+    const rate = (r: any) => ({ ...r, likely_right_rate: r.checked ? Math.round((r.green / r.checked) * 1000) / 1000 : null });
+    const [totals] = (await this.db.query(`SELECT ${counts} FROM species_checks c WHERE ${where}`, p)).rows;
     const officers = (await this.db.query(
       `SELECT c.recorded_by AS user_id, COALESCE(u.full_name, 'Unknown') AS name, ${counts}
          FROM species_checks c LEFT JOIN users u ON u.id = c.recorded_by
-        WHERE c.status = 'DONE' AND ($1::uuid IS NULL OR c.project_id = $1)
-        GROUP BY c.recorded_by, u.full_name ORDER BY checked DESC`, p)).rows;
+        WHERE ${where} GROUP BY c.recorded_by, u.full_name ORDER BY checked DESC`, p)).rows;
     const species = (await this.db.query(
       `SELECT c.claimed_species_id AS species_id, sp.scientific_name, sp.common_name, ${counts}
          FROM species_checks c JOIN tree_species sp ON sp.id = c.claimed_species_id
-        WHERE c.status = 'DONE' AND ($1::uuid IS NULL OR c.project_id = $1)
-        GROUP BY c.claimed_species_id, sp.scientific_name, sp.common_name ORDER BY checked DESC`, p)).rows;
+        WHERE ${where} GROUP BY c.claimed_species_id, sp.scientific_name, sp.common_name ORDER BY checked DESC`, p)).rows;
     return { totals: rate(totals), by_officer: officers.map(rate), by_species: species.map(rate) };
   }
 }

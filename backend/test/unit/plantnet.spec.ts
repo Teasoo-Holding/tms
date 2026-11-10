@@ -1,4 +1,4 @@
-import { compare, speciesKey } from '../../src/species/plantnet';
+import { colourOf, compare, speciesKey } from '../../src/species/plantnet';
 
 const r = (name: string, score: number) => ({ name, score, genus: name.split(' ')[0], commonNames: [] });
 
@@ -21,5 +21,15 @@ describe('species check rules', () => {
     // Low confidence, or no plant found.
     expect(compare('Azadirachta indica', [r('Khaya senegalensis', 0.2)]).verdict).toBe('UNSURE');
     expect(compare('Azadirachta indica', []).verdict).toBe('UNSURE');
+  });
+
+  it('matches a genus-only name against every species of that genus', () => {
+    const g = compare('Swietenia', [r('Swietenia macrophylla', 0.52), r('Swietenia mahagoni', 0.1), r('Khaya senegalensis', 0.2)]);
+    expect(g.claimedScore).toBeCloseTo(0.62);
+    expect(g.verdict).toBe('AGREE');
+  });
+
+  it('colours scores: 75% and up green, 25% and up amber, below red', () => {
+    expect([0.75, 1, 0.74, 0.25, 0.249, 0].map(colourOf)).toEqual(['green', 'green', 'amber', 'amber', 'red', 'red']);
   });
 });
