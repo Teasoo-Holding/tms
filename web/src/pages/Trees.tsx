@@ -5,9 +5,11 @@ import { FiltersButton } from '../components/ReportFilters';
 import { api, qs } from '../api/client';
 import { sectorLabel, subSectorLabel } from '../areaLabels';
 import { Pagination, usePage } from '../components/Pagination';
+import { SPECIES_MATCH_FILTERS, SpeciesMatch } from '../components/SpeciesMatch';
+import { useIsAdmin } from '../auth';
 import { ActiveFilter, EmptyState, ErrorNotice, FilterChips, fmtDate, fmtNum, MaintenanceDue, PageHeader, RecordStatePill, SortOrder, SortTh, StatusBadge } from '../components/ui';
 
-const FILTER_KEYS = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'record_state', 'maintenance'];
+const FILTER_KEYS = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'record_state', 'maintenance', 'species_match'];
 /** What a tree's page needs to step through this list: its filters and sort (see TreePager). */
 export const TREE_LIST_KEYS = [...FILTER_KEYS, 'q', 'sort', 'order'];
 const MAINTENANCE_FILTERS: [string, string][] = [['overdue', 'Maintenance overdue'], ['due_soon', 'Maintenance due in 14 days']];
@@ -18,9 +20,10 @@ const DEPENDENTS: Record<string, string[]> = {
   sector_id: ['sub_sector_id'],
 };
 /** Sortable columns (the API's whitelist); the list is sorted on the server, across every page. */
-const SORTS = ['tree_id', 'planting_year', 'area', 'species', 'status', 'last_observed', 'maintenance'];
+const SORTS = ['tree_id', 'planting_year', 'area', 'species', 'status', 'last_observed', 'maintenance', 'species_match'];
 
 export function TreesPage() {
+  const isAdmin = useIsAdmin();
   const navigate = useNavigate();
   const location = useLocation();
   // A tree opened from here can step to the previous and next tree of this list (same filters and sort).
@@ -90,7 +93,7 @@ export function TreesPage() {
 
   // Project is chosen first when there are several: years and areas belong to one project.
   const manyProjects = (projects.data?.length ?? 0) > 1;
-  const moreKeys = manyProjects ? ['record_state'] : ['project_id', 'record_state'];
+  const moreKeys = [...(manyProjects ? ['record_state'] : ['project_id', 'record_state']), ...(isAdmin ? ['species_match'] : [])];
   const moreCount = moreKeys.filter((k) => get(k)).length;
   const clearFilters = () => {
     const next = new URLSearchParams(params);
@@ -118,6 +121,7 @@ export function TreesPage() {
     chip('status_id', 'Status', nameOf(statuses.data, get('status_id'), (s) => s.name)),
     chip('record_state', 'Record', get('record_state') === 'CONFLICT' ? 'In conflict' : 'Rejected'),
     chip('maintenance', 'Maintenance', get('maintenance') === 'overdue' ? 'Overdue' : 'Due in 14 days'),
+    chip('species_match', 'Species match', SPECIES_MATCH_FILTERS.find(([v]) => v === get('species_match'))?.[1].replace('Species match: ', '') ?? '…'),
   ].filter((c): c is ActiveFilter => !!c);
   const total: number = trees.data?.total ?? 0;
 
@@ -144,6 +148,7 @@ export function TreesPage() {
           <div className="filters" style={{ marginBottom: 0 }}>
             {!manyProjects && select('project_id', 'Project', (projects.data ?? []).map((p) => [p.id, p.name]), 'All projects')}
             {select('record_state', 'Record', [['CONFLICT', 'In conflict'], ['REJECTED', 'Rejected']], 'Registry (active)')}
+            {isAdmin && select('species_match', 'Species match (Pl@ntNet)', SPECIES_MATCH_FILTERS, 'Any')}
           </div>
           <div className="row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
             <button type="button" className="primary" onClick={() => setFiltersOpen(false)}>Done</button>
@@ -164,6 +169,7 @@ export function TreesPage() {
                 {th('planting_year', 'Planting year', 'hide-sm', 'desc')}
                 {th('last_observed', 'Last visit', 'hide-sm', 'desc')}
                 {th('maintenance', 'Next maintenance', 'hide-sm')}
+                {isAdmin && th('species_match', 'Species match', 'hide-sm')}
               </tr>
             </thead>
             <tbody>
@@ -181,6 +187,7 @@ export function TreesPage() {
                     <td className="hide-sm nowrap">{t.year_label}</td>
                     <td className="hide-sm nowrap">{t.last_observed_at ? fmtDate(t.last_observed_at) : <span className="muted">Never</span>}</td>
                     <td className="hide-sm nowrap"><MaintenanceDue m={t.maintenance} /></td>
+                    {isAdmin && <td className="hide-sm nowrap"><SpeciesMatch match={t.species_match} score={t.species_match_score} review={t.species_match_review} /></td>}
                   </tr>
                 );
               })}

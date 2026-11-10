@@ -7,6 +7,14 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-10: Species match on the Trees list
+- Administrators see a **Species match** column on the web Trees list. It shows Pl@ntNet's likelihood that the officer's species is right as a percentage, with a coloured dot:
+  - green: agrees, or an administrator confirmed or corrected the species
+  - amber: unsure
+  - red: clearly another species
+- Trees with no checked photo show a dash.
+- The column can be sorted (red first), and filtered under More filters.
+
 ## 2026-11-10: Species check with Pl@ntNet (migration 017)
 - **Species check:**
   - After sync, the server sends a random daily sample of registration photos (up to 450 a day, within Pl@ntNet's free plan) to Pl@ntNet. It compares the suggestion with the officer's species.

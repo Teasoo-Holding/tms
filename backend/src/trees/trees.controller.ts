@@ -25,11 +25,26 @@ export const TreeQuery = pagination.extend({
   record_state: z.enum(['ACTIVE', 'CONFLICT', 'REJECTED']).optional(),
   /** Trees whose maintenance is overdue, or due within the next 14 days. */
   maintenance: z.enum(['overdue', 'due_soon']).optional(),
+  /** The species check's traffic light (see SPECIES_MATCH_SQL). */
+  species_match: z.enum(['green', 'amber', 'red', 'changed', 'unchecked']).optional(),
   q: z.string().max(100).optional(),
-  sort: z.enum([...TREE_SORT_KEYS, 'maintenance']).default('tree_id'),
+  sort: z.enum([...TREE_SORT_KEYS, 'maintenance', 'species_match']).default('tree_id'),
   order: z.enum(['asc', 'desc']).default('asc'),
 });
 type TreeFilter = z.infer<typeof TreeQuery>;
+
+/**
+ * The species check's traffic light for a tree (#103): green when Pl@ntNet agrees with the officer or an
+ * administrator confirmed the species, red when it clearly disagrees, amber when unsure; "changed" when the species
+ * was edited after the check, "unchecked" when no photo was checked.
+ */
+export const SPECIES_MATCH_SQL = `(CASE
+    WHEN sc.verdict IS NULL THEN 'unchecked'
+    WHEN sc.review_state IN ('KEPT', 'CORRECTED') THEN 'green'
+    WHEN sc.claimed_species_id <> t.species_id THEN 'changed'
+    WHEN sc.verdict = 'AGREE' THEN 'green'
+    WHEN sc.verdict = 'DISAGREE' THEN 'red'
+    ELSE 'amber' END)`;
 
 /** Codes such as S2 and S10 sort by their number: the letters first, then the trailing digits as a number. */
 const natural = (col: string) => [`regexp_replace(${col}, '[0-9]+$', '')`, `NULLIF(substring(${col} from '[0-9]+$'), '')::bigint`];
@@ -42,6 +57,11 @@ export const TREE_SORTS: Record<TreeFilter['sort'], string[]> = {
   status: ['st.sort_order', 'st.name'],
   last_observed: ['t.last_observed_at'],
   maintenance: [MAINTENANCE_PROPOSED_SQL],
+  // Ascending: red, amber, changed, then green; lowest likelihood first within each. Unchecked trees come last.
+  species_match: [
+    `array_position(ARRAY['red', 'amber', 'changed', 'green'], ${SPECIES_MATCH_SQL})`,
+    `CASE WHEN sc.review_state IN ('KEPT', 'CORRECTED') THEN 1 ELSE sc.claimed_score END`,
+  ],
 };
 
 /** ORDER BY for a tree list. Empty values (trees never observed) come last either way; the tree ID then the id keep paging stable. */
@@ -84,7 +104,11 @@ const TREE_FROM = `
     LEFT JOIN vendors v ON v.id = t.vendor_id
     LEFT JOIN trees rt ON rt.id = t.replaces_tree_id
     JOIN users u ON u.id = t.created_by
-    ${MAINTENANCE_JOIN}`;
+    ${MAINTENANCE_JOIN}
+    LEFT JOIN LATERAL (SELECT c.verdict, c.claimed_score, c.review_state, c.claimed_species_id, c.checked_at FROM species_checks c
+                        WHERE c.tree_id = t.id AND c.status = 'DONE' ORDER BY c.checked_at DESC LIMIT 1) sc ON true`;
+
+
 
 export const TREE_LIST_SQL = `
   SELECT t.id, t.physical_tree_id, t.serial_number, t.id_scheme_version, t.project_id, p.name AS project_name,
@@ -95,7 +119,9 @@ export const TREE_LIST_SQL = `
          t.vendor_id, v.name AS vendor_name, t.replaces_tree_id, rt.physical_tree_id AS replaces_physical_id,
          t.planted_on, t.notes, t.custom_fields, t.record_state, t.revision, t.created_at, t.updated_at, t.synced_at,
          t.created_by, u.full_name AS created_by_name, p.maintenance_interval_days,
-         ${MAINTENANCE_COLUMNS}
+         ${MAINTENANCE_COLUMNS},
+         ${SPECIES_MATCH_SQL} AS species_match, sc.claimed_score::float8 AS species_match_score, sc.review_state AS species_match_review,
+         sc.checked_at AS species_checked_at
   ${TREE_FROM}`;
 
 @Controller('trees')
@@ -119,6 +145,7 @@ export class TreesController {
     if (f.vendor_id) add('t.vendor_id = ?', f.vendor_id);
     add('t.record_state = ?', f.record_state ?? 'ACTIVE');
     if (f.maintenance) add(`${MAINTENANCE_STATUS_SQL} = ?`, f.maintenance);
+    if (f.species_match) add(`${SPECIES_MATCH_SQL} = ?`, f.species_match);
     if (f.q) add(`t.physical_tree_id_normalized LIKE '%' || ? || '%'`, f.q.replace(/\s+/g, '').toUpperCase());
     const scope = this.access.treeFilter(await this.access.grants(user), 't', params.length + 1);
     params.push(...scope.params);
@@ -131,7 +158,7 @@ export class TreesController {
     const f = parse(TreeQuery, query);
     const { whereSql, params } = await this.listWhere(user, f);
     // The maintenance filter needs the joins; the plain count does not.
-    const countFrom = f.maintenance ? TREE_FROM : 'FROM trees t';
+    const countFrom = f.maintenance || f.species_match ? TREE_FROM : 'FROM trees t';
     const [rows, count] = await Promise.all([
       this.db.query(`${TREE_LIST_SQL} WHERE ${whereSql} ORDER BY ${treeOrderBy(f.sort, f.order)} LIMIT ${f.limit} OFFSET ${f.offset}`, params),
       this.db.query(`SELECT count(*) AS total ${countFrom} WHERE ${whereSql}`, params),
