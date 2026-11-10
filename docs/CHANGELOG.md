@@ -7,6 +7,14 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-10: Species check with Pl@ntNet (migration 017)
+- **Species check:**
+  - After sync, the server sends a random daily sample of registration photos (up to 450 a day, within Pl@ntNet's free plan) to Pl@ntNet. It compares the suggestion with the officer's species.
+  - The web **Species check** page lists clear disagreements. Administrators keep the officer's species or correct it in one click; corrections reach phones like any tree edit.
+  - It shows an agreement rate overall, per officer and per species.
+  - Off until `PLANTNET_API_KEY` is set (see operations.md).
+- **Privacy page:** now says a sample of tree photos is sent to Pl@ntNet (last updated 10 November 2026).
+
 ## 2026-11-09: Google sign-in on Android, Privacy and Terms pages, 2027 budget
 - **Android Google sign-in:** "Sign in with Google" on the phone's sign-in screen, using Android's Credential Manager and the same rules as the web. It needs internet; offline, people sign in with their password. Setup: an Android OAuth client in Google Cloud (see operations.md).
 - **Privacy and Terms:** plain-language public pages at `/privacy` and `/terms`, each with a "Last updated" date. They are linked from the landing page, the sign-in pages (web and phone) and client reports. Both are marked as drafts until a legal professional has reviewed them (`LEGAL_REVIEWED` in `web/src/pages/Legal.tsx`).

@@ -142,6 +142,22 @@ Google sign-in needs internet. Offline, people sign in with their password, whic
 
 Who can sign in: only existing, active accounts. The first Google sign-in must use the same email as the TMS account (Google must have verified it), and links that Google account to the user. Later sign-ins match the linked Google account. Google sign-in never creates accounts or changes roles. Changing a user's email unlinks Google.
 
+## Species check (Pl@ntNet)
+
+Off until the API has `PLANTNET_API_KEY`. To turn it on (repository owner, one time):
+
+1. Create a free account at https://my.plantnet.org and open **Settings → API key**.
+2. In Render, add `PLANTNET_API_KEY` to the API's environment (it is a secret: never put it in the repository or a chat) and redeploy.
+3. Optional: `SPECIES_CHECK_DAILY_LIMIT` (default 450). The free plan allows 500 identifications a day; 450 leaves room for testing in the Pl@ntNet website.
+
+What it does: every 15 minutes the server picks, at random, registration photos synced in the last 14 days that have not been checked, and sends them to Pl@ntNet. Checks are spread evenly through the day up to the daily limit. Each photo is checked once. Results are on the web under **Species check**:
+
+- **Agrees**: the officer's species is Pl@ntNet's top suggestion, or scores 30% or more.
+- **Disagrees**: Pl@ntNet is at least 40% sure it is a species of another genus, and gives the officer's species under 5%. These wait for an administrator, who keeps the officer's species or corrects it (a correction is a normal tree edit, so phones receive it).
+- **Unsure**: anything else, including suggestions of the same genus and photos with no plant found.
+
+Nothing changes without an administrator. The thresholds are in `backend/src/species/plantnet.ts`. On Render's free plan the server sleeps when idle, so checks only run while it is awake.
+
 ## Sessions
 
 Field phones often lose the network mid-request. Refresh tokens rotate, but a phone that presents its

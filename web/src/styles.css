@@ -683,3 +683,9 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 .legal li { margin: 4px 0; }
 .legal-updated { color: var(--text-secondary); margin: 0 0 16px; font-weight: 600; }
 .legal-links a { white-space: nowrap; }
+
+/* Species check: photo beside the comparison. */
+.species-check { display: grid; grid-template-columns: 120px 1fr; gap: 16px; align-items: start; }
+.species-check-photo { width: 120px; height: 120px; padding: 0; border-radius: 8px; overflow: hidden; display: grid; place-items: center; background: var(--surface-2); }
+.species-check-photo img { width: 100%; height: 100%; object-fit: cover; }
+@media (max-width: 520px) { .species-check { grid-template-columns: 1fr; } .species-check-photo { width: 100%; height: 200px; } }

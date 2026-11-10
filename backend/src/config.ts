@@ -84,6 +84,10 @@ export const config = {
   jwtAccessSecret: required('JWT_ACCESS_SECRET', 'dev-access-secret'),
   /** OAuth client id (a public value) for Sign in with Google; Google sign-in is off when unset. */
   googleClientId: process.env.GOOGLE_CLIENT_ID?.trim() || null,
+  /** Pl@ntNet API key for the species check (#101); the check is off when unset. A secret: set it in Render only. */
+  plantnetApiKey: process.env.PLANTNET_API_KEY?.trim() || null,
+  /** Photos checked per day; Pl@ntNet's free plan allows 500 identifications a day. */
+  speciesCheckDailyLimit: num('SPECIES_CHECK_DAILY_LIMIT', 450),
   accessTokenTtlSeconds: num('ACCESS_TOKEN_TTL_SECONDS', 900),
   refreshTokenTtlDays: num('REFRESH_TOKEN_TTL_DAYS', 90),
   offlineSessionDays: num('OFFLINE_SESSION_DAYS', 30),

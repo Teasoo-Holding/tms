@@ -13,6 +13,7 @@ import { MediaModule } from './media/media.module';
 import { ReportsModule } from './reports/reports.module';
 import { SyncModule } from './sync/sync.module';
 import { TreesModule } from './trees/trees.module';
+import { SpeciesModule } from './species/species.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { TreesModule } from './trees/trees.module';
     SyncModule,
     ConflictsModule,
     ReportsModule,
+    SpeciesModule,
   ],
   controllers: [HealthController],
   providers: [
