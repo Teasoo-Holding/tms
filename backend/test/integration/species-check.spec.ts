@@ -78,6 +78,17 @@ describe('species check', () => {
     });
   });
 
+  it('shows the traffic light and likelihood on the tree list, with a filter and sort', async () => {
+    const red = (await admin.get('/trees?species_match=red').expect(200)).body;
+    expect(red.total).toBe(1);
+    expect(red.items[0]).toMatchObject({ id: wrongTree, species_match: 'red', species_match_score: 0.01 });
+    expect((await admin.get('/trees?species_match=green').expect(200)).body.items[0]).toMatchObject({ species_match: 'green', species_match_score: 0.8 });
+    expect((await admin.get('/trees?species_match=amber').expect(200)).body.total).toBe(1);
+    const sorted = (await admin.get('/trees?sort=species_match').expect(200)).body.items.map((t: any) => t.species_match);
+    expect(sorted.slice(0, 3)).toEqual(['red', 'amber', 'green']);
+    expect(sorted.slice(3).every((m: string) => m === 'unchecked')).toBe(true);
+  });
+
   it('lets an administrator correct the species, which phones then receive', async () => {
     const open = (await admin.get('/species-checks').expect(200)).body.items[0];
     await admin.post(`/species-checks/${open.id}/review`, { action: 'correct' }).expect(400);
@@ -87,6 +98,8 @@ describe('species check', () => {
     const reviewed = (await admin.get('/species-checks?state=reviewed').expect(200)).body.items[0];
     expect(reviewed).toMatchObject({ review_state: 'CORRECTED', reviewed_by_name: 'Ada Administrator', current_scientific_name: 'Khaya senegalensis' });
     expect((await sql(`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'species_check.correct'`))[0].n).toBe(1);
+    // Confirmed by an administrator: green.
+    expect((await admin.get(`/trees/${wrongTree}`).expect(200)).body).toMatchObject({ species_match: 'green', species_match_review: 'CORRECTED' });
   });
 
   it('reports agreement per officer and per species', async () => {
