@@ -10,15 +10,15 @@ export const SPECIES_MATCH_FILTERS: [string, string][] = [
 ];
 
 const TITLE: Record<string, string> = {
-  green: 'Pl@ntNet agrees with the officer’s species',
-  amber: 'Pl@ntNet is unsure',
-  red: 'Pl@ntNet clearly suggests another species: review it on the Species check page',
+  green: 'Green: Pl@ntNet gives the officer’s species 60% or more',
+  amber: 'Amber: Pl@ntNet gives the officer’s species 25–59%',
+  red: 'Red: Pl@ntNet gives the officer’s species under 25%',
   changed: 'The species was changed after the photo was checked',
 };
 
 /**
- * Pl@ntNet's likelihood that the officer's species is right, as a percentage, coloured green (agrees or confirmed by
- * an administrator), amber (unsure) or red (clearly another species).
+ * Pl@ntNet's likelihood that the officer's species is right, as a percentage: green at 60% or more (or confirmed by
+ * an administrator), amber from 25%, red below. The colours are set on the server (SPECIES_MATCH_SQL).
  */
 export function SpeciesMatch({ match, score, review }: { match?: string | null; score?: number | null; review?: string | null }) {
   if (!match || match === 'unchecked') return <span className="muted" title="This tree’s photo has not been checked">—</span>;
@@ -31,7 +31,7 @@ export function SpeciesMatch({ match, score, review }: { match?: string | null; 
     );
   }
   if (match === 'changed') return <span className="muted" title={TITLE.changed}>Changed</span>;
-  const label = { green: 'likely right', amber: 'unsure', red: 'likely wrong' }[match] ?? '';
+  const label = { green: 'likely right', amber: 'possible', red: 'unlikely' }[match] ?? '';
   return (
     <span className={`species-match ${match}`} title={`${TITLE[match]}. ${SPECIES_CHECK_TERMS.check.definition}`}>
       <span className="dot" aria-hidden />
