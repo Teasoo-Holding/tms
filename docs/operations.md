@@ -162,6 +162,17 @@ The match uses each species' **scientific name** (genus and species, e.g. *Tripl
 
 Nothing changes without an administrator. The thresholds are in `backend/src/species/plantnet.ts`. On Render's free plan the server sleeps when idle, so checks only run while it is awake.
 
+## Tree height from photos (AI)
+
+Off until the API has `ANTHROPIC_API_KEY`. To turn it on (repository owner, one time):
+
+1. Create an API key at https://platform.claude.com (Settings → API keys) and add billing credit.
+2. In Render, add `ANTHROPIC_API_KEY` to the API's environment (a secret: never in the repository or a chat) and redeploy.
+
+On a tree's page (administrators), **Height from photo** → "Estimate height from the photo" sends the tree's registration photo to Claude (model `claude-opus-5-5`). Claude marks four points: the bottom and top of the reference stick, and the tree's base and top. TMS works out the height from the stick used that planting year (`REFERENCE_STICKS` in `backend/src/height/height.service.ts`): **3 ft (91.44 cm) in 2025, 1 m in 2026**. The administrator moves any point that is off, or types the height, then saves it. Photos where the stick or tree is hidden, cut off, tilted or at a different distance are flagged as unsuitable instead of getting a height.
+
+Each saved estimate is its own record with the photo, stick length, points, suggested and confirmed heights, a method note, the reviewer and the date. Heights measured in the field are never changed. Each estimate costs a few US cents; it only runs when an administrator asks.
+
 ## Sessions
 
 Field phones often lose the network mid-request. Refresh tokens rotate, but a phone that presents its

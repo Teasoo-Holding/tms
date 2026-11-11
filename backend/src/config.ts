@@ -86,6 +86,8 @@ export const config = {
   googleClientId: process.env.GOOGLE_CLIENT_ID?.trim() || null,
   /** Pl@ntNet API key for the species check (#101); the check is off when unset. A secret: set it in Render only. */
   plantnetApiKey: process.env.PLANTNET_API_KEY?.trim() || null,
+  /** Anthropic API key for tree height estimates from photos (#109); the feature is off when unset. A secret: Render only. */
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() || null,
   /** Photos checked per day; Pl@ntNet's free plan allows 500 identifications a day. */
   speciesCheckDailyLimit: num('SPECIES_CHECK_DAILY_LIMIT', 450),
   accessTokenTtlSeconds: num('ACCESS_TOKEN_TTL_SECONDS', 900),

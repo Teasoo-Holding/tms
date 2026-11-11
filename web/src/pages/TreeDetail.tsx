@@ -9,6 +9,7 @@ import { areaName, sectorLabel, subSectorLabel } from '../areaLabels';
 import { listSearchAt, neighbourQuery, Neighbours, TreePager } from '../components/TreePager';
 import { CardHeader, ErrorNotice, Field, fmtDate, fmtDateTime, fmtDay, Modal, PageHeader, RecordStatePill, RowMenu, StatusBadge, VisitTypeTag } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
+import { HeightFromPhoto } from '../components/HeightFromPhoto';
 import { currentScheme, previewId, Scheme } from '../idscheme';
 import type { CustomField } from './ProjectDetail';
 import { TREE_LIST_KEYS } from './Trees';
@@ -194,6 +195,8 @@ export function TreeDetailPage() {
         )}
       </section>
       )}
+
+      {SHOW_HEIGHT && isAdmin && <HeightFromPhoto treeId={t.id} hasPhoto={media.some((m: any) => m.upload_state === 'VERIFIED')} />}
 
       <section className="card">
         <CardHeader title="Visits" />
