@@ -23,6 +23,8 @@ export const TreeQuery = pagination.extend({
   species_id: z.string().uuid().optional(),
   status_id: z.string().uuid().optional(),
   vendor_id: z.string().uuid().optional(),
+  /** Trees registered by this user (#110). */
+  created_by: z.string().uuid().optional(),
   record_state: z.enum(['ACTIVE', 'CONFLICT', 'REJECTED']).optional(),
   /** Trees whose maintenance is overdue, or due within the next 14 days. */
   maintenance: z.enum(['overdue', 'due_soon']).optional(),
@@ -148,6 +150,7 @@ export class TreesController {
     if (f.species_id) add('t.species_id = ?', f.species_id);
     if (f.status_id) add('t.current_status_id = ?', f.status_id);
     if (f.vendor_id) add('t.vendor_id = ?', f.vendor_id);
+    if (f.created_by) add('t.created_by = ?', f.created_by);
     add('t.record_state = ?', f.record_state ?? 'ACTIVE');
     if (f.maintenance) add(`${MAINTENANCE_STATUS_SQL} = ?`, f.maintenance);
     if (f.species_match) add(`${SPECIES_MATCH_SQL} = ?`, f.species_match);

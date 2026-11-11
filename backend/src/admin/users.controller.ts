@@ -1,13 +1,16 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
 import { AuditService } from '../common/audit.service';
-import { badRequest, notFound } from '../common/errors';
+import { AppError, badRequest, notFound } from '../common/errors';
 import { parse } from '../common/validation';
 import { Db, isUniqueViolation, Queryable } from '../database/db.service';
-import { assertPasswordPolicy, hashPassword } from '../auth/passwords';
+import { assertPasswordPolicy, hashPassword, verifyPassword } from '../auth/passwords';
 import { AuthService } from '../auth/auth.service';
 import { normalizePhone, USERNAME_RE } from '../domain/login-id';
+
+const DeleteUserBody = z.object({ confirm: z.string().max(20), password: z.string().min(1).max(200) });
 
 const blankToNull = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? null : v);
 const UserFields = {
@@ -72,7 +75,7 @@ export class UsersController {
                 (SELECT count(*) FROM trees t WHERE t.created_by = users.id)::int AS trees_registered,
                 (SELECT count(*) FROM tree_observations o WHERE o.recorded_by = users.id AND NOT o.is_initial)::int AS observations_recorded,
                 (SELECT max(d.last_sync_at) FROM devices d WHERE d.user_id = users.id) AS last_sync_at
-           FROM users ORDER BY full_name`,
+           FROM users WHERE deleted_at IS NULL ORDER BY full_name`,
       )
     ).rows;
   }
@@ -136,6 +139,54 @@ export class UsersController {
         tx,
       );
       return after;
+    });
+  }
+
+  /**
+   * Permanently deletes a user (#111). Needs the admin's own password and DELETE typed. Users with no records are
+   * removed completely. For users who collected data, the trees and visits stay (shown as "Deleted user") and every
+   * personal detail is erased. Either way the person can no longer sign in, and their sessions end.
+   */
+  @Post('users/:id/delete')
+  @HttpCode(200)
+  async remove(@CurrentUser() actor: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
+    const b = parse(DeleteUserBody, body);
+    if (b.confirm.trim() !== 'DELETE') throw badRequest('CONFIRMATION_REQUIRED', 'Type DELETE to confirm.');
+    if (id === actor.id) throw badRequest('SELF_DELETE', 'You cannot delete your own account.');
+    const me = await this.db.one(this.db, 'SELECT password_hash FROM users WHERE id = $1', [actor.id]);
+    if (!me || !(await verifyPassword(me.password_hash, b.password))) throw new AppError(401, 'PASSWORD_INCORRECT', 'Your password is incorrect.');
+    return this.db.tx(async (tx) => {
+      const user = await this.db.one(tx, `SELECT id, role, deleted_at FROM users WHERE id = $1 FOR UPDATE`, [id]);
+      if (!user || user.deleted_at) throw notFound('User');
+      await this.auth.revokeAllForUser(tx, id);
+      // The person's own settings: access, serial ranges, sessions.
+      await tx.query('DELETE FROM user_project_assignments WHERE user_id = $1', [id]);
+      await tx.query('DELETE FROM serial_allocations WHERE user_id = $1', [id]);
+      await tx.query('DELETE FROM refresh_sessions WHERE user_id = $1', [id]);
+      // Audit entries about the account held its email and phone: they keep the action, not the details.
+      await tx.query(`UPDATE audit_logs SET before = NULL, after = NULL WHERE entity_type = 'user' AND entity_id = $1`, [id]);
+      let mode: 'removed' | 'erased' = 'removed';
+      await tx.query('SAVEPOINT delete_user');
+      try {
+        await tx.query('UPDATE audit_logs SET actor_id = NULL WHERE actor_id = $1', [id]);
+        await tx.query('DELETE FROM devices WHERE user_id = $1', [id]);
+        await tx.query('DELETE FROM users WHERE id = $1', [id]);
+        await tx.query('RELEASE SAVEPOINT delete_user');
+      } catch (e: any) {
+        // 23503: their trees, visits or photos still refer to them, so the row stays without personal details.
+        if (e?.code !== '23503') throw e;
+        await tx.query('ROLLBACK TO SAVEPOINT delete_user');
+        mode = 'erased';
+        await tx.query(
+          `UPDATE users SET full_name = 'Deleted user', email = NULL, phone = NULL, username = $2, google_sub = NULL,
+                  password_hash = $3, active = false, all_projects = false, deleted_at = now(), updated_at = now()
+            WHERE id = $1`,
+          [id, `deleted-${id.slice(0, 8)}`, `!deleted:${randomBytes(24).toString('hex')}`],
+        );
+        // Phones stay registered: tablets are shared, and other officers keep using them.
+      }
+      await this.audit.record({ actorId: actor.id, action: 'user.delete', entityType: 'user', entityId: id, metadata: { mode } }, tx);
+      return { id, mode };
     });
   }
 

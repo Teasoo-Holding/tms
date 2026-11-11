@@ -81,7 +81,17 @@ export function VisitsPage() {
     <div className="stack">
       <PageHeader
         title="Visits"
-        subtitle={`One row per project and day; open a day to see each field session and its trees. Days and times in West Africa Time (WAT).`}
+        subtitle={
+          <>
+            One row per project and day; open a day to see each field session and its trees. Days and times in West Africa Time (WAT).
+            {f.get('recorded_by') && (
+              <>
+                {' '}
+                <Link to={`/trees${qs({ created_by: f.get('recorded_by'), project_id: f.get('project_id') || undefined })}`}>See the trees this officer registered</Link>
+              </>
+            )}
+          </>
+        }
         actions={
           <>
             {days.data && <span className="pill">{plural(total, 'day')}</span>}

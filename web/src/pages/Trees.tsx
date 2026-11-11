@@ -9,7 +9,7 @@ import { SPECIES_MATCH_FILTERS, SpeciesMatch } from '../components/SpeciesMatch'
 import { useIsAdmin } from '../auth';
 import { ActiveFilter, EmptyState, ErrorNotice, FilterChips, fmtDate, fmtNum, MaintenanceDue, PageHeader, RecordStatePill, SortOrder, SortTh, StatusBadge } from '../components/ui';
 
-const FILTER_KEYS = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'record_state', 'maintenance', 'species_match'];
+const FILTER_KEYS = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'record_state', 'maintenance', 'species_match', 'created_by'];
 /** What a tree's page needs to step through this list: its filters and sort (see TreePager). */
 export const TREE_LIST_KEYS = [...FILTER_KEYS, 'q', 'sort', 'order'];
 const MAINTENANCE_FILTERS: [string, string][] = [['overdue', 'Maintenance overdue'], ['due_soon', 'Maintenance due in 14 days']];
@@ -113,6 +113,7 @@ export function TreesPage() {
   const chip = (key: string, label: string, value: string): ActiveFilter | null => (get(key) ? { key, label, value, onClear: () => set(key, '') } : null);
   const chips = [
     chip('q', 'Tree ID', get('q')),
+    chip('created_by', 'Registered by', trees.data?.items[0]?.created_by_name ?? '…'),
     chip('project_id', 'Project', nameOf(projects.data, get('project_id'), (p) => p.name)),
     chip('planting_year_id', 'Planting year', yearLabel.get(yearId) ?? '…'),
     chip('sector_id', 'Sector', sector ? sectorLabel(sector) : '…'),
@@ -127,7 +128,16 @@ export function TreesPage() {
 
   return (
     <div>
-      <PageHeader title="Trees" actions={trees.data && <span className="pill">{fmtNum(total)}</span>} />
+      <PageHeader
+        title={get('created_by') && trees.data?.items[0] ? `Trees registered by ${trees.data.items[0].created_by_name}` : 'Trees'}
+        actions={trees.data && <span className="pill">{fmtNum(total)}</span>}
+      />
+      {get('created_by') && (
+        <p className="muted" style={{ marginTop: 0 }}>
+          Everything this officer recorded: the trees they registered are listed here; open a tree to see its photos and visits.{' '}
+          <Link to={`/visits${qs({ recorded_by: get('created_by'), project_id: get('project_id') || undefined })}`}>See all their visits</Link>
+        </p>
+      )}
       <div className="filter-bar">
         <form className="search" role="search" onSubmit={(e) => (e.preventDefault(), set('q', q.trim()))}>
           <input type="search" aria-label="Search by tree ID" placeholder="Search tree ID" value={q} onChange={(e) => setQ(e.target.value)} onBlur={() => q.trim() !== get('q') && set('q', q.trim())} />
