@@ -7,6 +7,17 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-11: Officer data, deleting users, height from photos, Sector 4 (migrations 019–021)
+- **Field activity:** click an officer to open the trees they registered (Trees list filtered by "Registered by"), with a link to all their visits. Users → "Trees they registered" does the same.
+- **Delete a user permanently** (Users → row menu; type DELETE and your password):
+  - Users who recorded nothing are removed completely.
+  - For users who collected data, their trees and visits stay, shown as "Deleted user"; their name, sign-in details, password and Google link are erased for good.
+- **Height from photo** (tree page, administrators; needs `ANTHROPIC_API_KEY`):
+  - AI marks the measuring stick and the tree, and TMS works out the height against the year's stick (3 ft in 2025, 1 m in 2026).
+  - The administrator adjusts the points or types the height, then saves it as an estimate, separate from field measurements.
+  - Unsuitable photos are flagged instead of measured.
+- **Sector 4 (2026):** migration 019 recreates SS1–SS5 without GPS. Trees already in SS1–SS5 stay; trees in other Sector 4 sub-sectors (such as SB5) are shared across SS1–SS5 in blocks by tree number.
+
 ## 2026-11-10: Check tree species: clearer wording, new colour bands (migration 018)
 - **Colours:** green 75–100%, amber 25–74%, red under 25%, on the review page and the Trees list.
 - **Review list:** every amber and red tree, lowest score first. Earlier checks are re-scored when the server starts.

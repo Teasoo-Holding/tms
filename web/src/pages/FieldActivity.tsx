@@ -210,7 +210,10 @@ export function FieldActivityPage() {
                 head={['Officer', 'Trees', 'Visits', 'Corrections', 'Photos', 'Days active', 'Sessions']}
                 rows={[
                   ...officers.map((o) => [
-                    <>{o.user_name} <WaitingTag devices={awaitingOf(o.user_id)} /></>,
+                    <>
+                      <Link to={`/trees${qs({ created_by: o.user_id, project_id: projectId || undefined })}`} title={`See everything ${o.user_name} recorded`}>{o.user_name}</Link>{' '}
+                      <WaitingTag devices={awaitingOf(o.user_id)} />
+                    </>,
                     count(o.trees_registered, awaitingOf(o.user_id)), fmtNum(o.visits), fmtNum(o.corrections), fmtNum(o.photos), fmtNum(o.days_active), fmtNum(o.sessions),
                   ]),
                   ...silent.map(([id, name]) => [name, <AwaitingBadge devices={awaitingOf(id)} />, '—', '—', '—', '—', '—']),

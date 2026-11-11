@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
@@ -13,6 +13,7 @@ export function UsersPage() {
   const [tab, setTab] = useState<'users' | 'devices'>('users');
   const [editing, setEditing] = useState<any | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<any | null>(null);
   const navigate = useNavigate();
   const users = useQuery({ queryKey: ['users'], queryFn: () => api.get<any[]>('/users') });
   const devices = useQuery({ queryKey: ['devices'], queryFn: () => api.get<any[]>('/devices'), enabled: tab === 'devices' });
@@ -22,6 +23,7 @@ export function UsersPage() {
   const phones = usePaged(devices.data ?? [], usePage('phones', 50));
   return (
     <div>
+      {deleting && <DeleteUserModal user={deleting} onClose={() => setDeleting(null)} />}
       <PageHeader title="Users" actions={tab === 'users' && <button className="primary" onClick={() => setEditing({})}>+ User</button>} />
       <Tabs tabs={[['users', 'People'], ['devices', 'Phones']]} value={tab} onChange={setTab} />
       <ErrorNotice error={users.error ?? toggle.error ?? revoke.error} />
@@ -61,11 +63,13 @@ export function UsersPage() {
                       items={[
                         { label: 'Edit', onClick: () => setEditing(u) },
                         { label: 'View activity', onClick: () => navigate(`/audit?actor=${u.id}`) },
+                        u.role === 'FIELD_OFFICER' && { label: 'Trees they registered', onClick: () => navigate(`/trees?created_by=${u.id}`) },
                         u.id !== me.id && {
                           label: u.active ? 'Deactivate' : 'Activate',
                           danger: u.active,
                           onClick: () => (!u.active || confirm(`Deactivate ${u.full_name}? Their sessions end now.`)) && toggle.mutate(u),
                         },
+                        u.id !== me.id && { label: 'Delete permanently', danger: true, onClick: () => setDeleting(u) },
                       ]}
                     />
                   </td>
@@ -193,6 +197,49 @@ function UserForm({ user, onClose }: { user: any; onClose: () => void }) {
         <div className="form-actions">
           <button type="button" onClick={onClose}>Cancel</button>
           <button className="primary" disabled={save.isPending}>Save</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Permanently deletes a user (#111): typed DELETE and the admin's password, like Clear data. */
+function DeleteUserModal({ user, onClose }: { user: any; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [typed, setTyped] = useState('');
+  const [password, setPassword] = useState('');
+  const hasData = (user.trees_registered ?? 0) + (user.observations_recorded ?? 0) > 0;
+  const remove = useMutation({
+    mutationFn: () => api.post<{ mode: 'removed' | 'erased' }>(`/users/${user.id}/delete`, { confirm: typed.trim(), password }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      onClose();
+    },
+  });
+  return (
+    <Modal title={`Delete ${user.full_name} permanently`} onClose={onClose} small>
+      <form className="stack" onSubmit={(e) => (e.preventDefault(), remove.mutate())}>
+        {hasData ? (
+          <p style={{ margin: 0 }}>
+            {user.full_name} recorded {fmtNum(user.trees_registered)} trees and {fmtNum(user.observations_recorded)} visits. These stay in TMS, shown as
+            “Deleted user”. Their name, username, email, phone number, password and Google sign-in are deleted for good.
+          </p>
+        ) : (
+          <p style={{ margin: 0 }}>{user.full_name} has not recorded any trees or visits. Their account and personal details are deleted for good.</p>
+        )}
+        <p style={{ margin: 0 }}>They are signed out everywhere and can no longer sign in. You cannot undo this. To stop someone signing in for now, deactivate them instead.</p>
+        <ErrorNotice error={remove.error} />
+        <Field label="Type DELETE to confirm">
+          <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" autoCapitalize="characters" />
+        </Field>
+        <Field label="Your password">
+          <PasswordInput value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+        </Field>
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="submit" className="danger-solid" disabled={typed.trim() !== 'DELETE' || !password || remove.isPending}>
+            {remove.isPending ? 'Deleting…' : 'Delete permanently'}
+          </button>
         </div>
       </form>
     </Modal>

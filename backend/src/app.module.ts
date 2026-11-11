@@ -14,6 +14,7 @@ import { ReportsModule } from './reports/reports.module';
 import { SyncModule } from './sync/sync.module';
 import { TreesModule } from './trees/trees.module';
 import { SpeciesModule } from './species/species.module';
+import { HeightModule } from './height/height.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { SpeciesModule } from './species/species.module';
     ConflictsModule,
     ReportsModule,
     SpeciesModule,
+    HeightModule,
   ],
   controllers: [HealthController],
   providers: [
