@@ -162,9 +162,9 @@ The match uses each species' **scientific name** (genus and species, e.g. *Tripl
 
 Nothing changes without an administrator. The thresholds are in `backend/src/species/plantnet.ts`. On Render's free plan the server sleeps when idle, so checks only run while it is awake.
 
-## Tree height from photos (AI)
+## Tree height from photos
 
-Off until the API has `ANTHROPIC_API_KEY`. To turn it on (repository owner, one time):
+Marking the points by hand is always available and free ("Mark the points yourself" on a tree's page). The comparison of free options is in [height-estimation-options.md](height-estimation-options.md). AI suggestions are optional and off until the API has `ANTHROPIC_API_KEY`. To turn it on (repository owner, one time):
 
 1. Create an API key at https://platform.claude.com (Settings → API keys) and add billing credit.
 2. In Render, add `ANTHROPIC_API_KEY` to the API's environment (a secret: never in the repository or a chat) and redeploy.

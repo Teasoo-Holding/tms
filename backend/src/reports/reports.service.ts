@@ -130,7 +130,9 @@ export class ReportsService {
              count(*) FILTER (WHERE t.replaces_tree_id IS NULL)::int AS original_trees,
              count(*) FILTER (WHERE t.replaces_tree_id IS NOT NULL)::int AS replacement_trees`,
         'JOIN planting_years py ON py.id = t.planting_year_id', 'py.id, py.year_label', 'py.year_label'),
-      group(`s.id, s.name, s.short_code`, 'JOIN sectors s ON s.id = t.sector_id', 's.id, s.name, s.short_code', 's.short_code'),
+      // Each sector with its planting year: sectors of different years can share a code (#116).
+      group(`s.id, s.name, s.short_code, s.planting_year_id, spy.year_label`, 'JOIN sectors s ON s.id = t.sector_id LEFT JOIN planting_years spy ON spy.id = s.planting_year_id',
+        's.id, s.name, s.short_code, s.planting_year_id, spy.year_label', "spy.year_label NULLS FIRST, regexp_replace(s.short_code, '[0-9]+$', ''), NULLIF(substring(s.short_code from '[0-9]+$'), '')::bigint"),
       group(`sp.id, sp.scientific_name AS name, sp.common_name`, 'JOIN tree_species sp ON sp.id = t.species_id', 'sp.id, sp.scientific_name, sp.common_name'),
       group(`v.id, COALESCE(v.name, 'No vendor') AS name, v.short_code`, 'LEFT JOIN vendors v ON v.id = t.vendor_id', 'v.id, v.name, v.short_code'),
     ]);
@@ -184,7 +186,9 @@ export class ReportsService {
            FROM trees t ${join} LEFT JOIN tree_statuses st ON st.id = t.current_status_id
           WHERE ${where} GROUP BY ${groupBy}, st.code, st.name, st.sort_order ORDER BY ${groupBy}, st.sort_order NULLS LAST`);
     const [statusBySector, statusBySpecies] = await Promise.all([
-      statusBy(`s.short_code AS group_code, s.name AS group_name`, 'JOIN sectors s ON s.id = t.sector_id', 's.short_code, s.name'),
+      // Per sector (not per code), with its planting year (#115).
+      statusBy(`s.id AS group_code, s.short_code AS sector_code, s.name AS group_name, spy.year_label`,
+        'JOIN sectors s ON s.id = t.sector_id LEFT JOIN planting_years spy ON spy.id = s.planting_year_id', 's.id, s.short_code, s.name, spy.year_label'),
       statusBy(`sp.scientific_name AS group_code, COALESCE(sp.common_name, sp.scientific_name) AS group_name`, 'JOIN tree_species sp ON sp.id = t.species_id', 'sp.scientific_name, sp.common_name'),
     ]);
 

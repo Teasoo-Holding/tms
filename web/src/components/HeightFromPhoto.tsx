@@ -29,10 +29,10 @@ function heightOf(p: Points, w: number, h: number, stickCm: number) {
  */
 export function HeightFromPhoto({ treeId, hasPhoto }: { treeId: string; hasPhoto: boolean }) {
   const qc = useQueryClient();
-  const status = useQuery({ queryKey: ['height-status'], queryFn: () => api.get<{ enabled: boolean }>('/height-estimates/status') });
+  const status = useQuery({ queryKey: ['height-status'], queryFn: () => api.get<{ enabled: boolean; ai: boolean }>('/height-estimates/status') });
   const list = useQuery({ queryKey: ['height-estimates', treeId], queryFn: () => api.get<any[]>(`/trees/${treeId}/height-estimates`) });
   const run = useMutation({
-    mutationFn: () => api.post(`/trees/${treeId}/height-estimates`, {}),
+    mutationFn: (method: 'ai' | 'manual') => api.post(`/trees/${treeId}/height-estimates`, { method }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['height-estimates', treeId] }),
   });
   const estimates = list.data ?? [];
@@ -42,20 +42,25 @@ export function HeightFromPhoto({ treeId, hasPhoto }: { treeId: string; hasPhoto
     <section className="card">
       <CardHeader
         title="Height from photo"
-        description="AI finds the measuring stick and the tree in the photo, and TMS works out the height from the stick used that year: 3 ft in 2025, 1 m in 2026. You check it before it is saved. Saved heights are estimates, kept apart from heights measured in the field."
+        description="Mark the bottom and top of the measuring stick and the tree's base and top on the photo. TMS works out the height from the stick used that year: 3 ft in 2025, 1 m in 2026. Saved heights are estimates, kept apart from heights measured in the field."
       />
       <ErrorNotice error={run.error} />
-      {status.data && !status.data.enabled && (
-        <p className="muted" style={{ margin: 0 }}>
-          Turned off. To turn it on, add an Anthropic API key as <code>ANTHROPIC_API_KEY</code> in the API’s settings on Render.
-        </p>
+      {status.data && !pending && (
+        <div className="row">
+          <button disabled={!hasPhoto || run.isPending} onClick={() => run.mutate('manual')}>
+            {saved.length ? 'Mark the points again' : 'Mark the points yourself'}
+          </button>
+          {status.data.ai && (
+            <button disabled={!hasPhoto || run.isPending} onClick={() => run.mutate('ai')}>
+              {run.isPending && run.variables === 'ai' ? 'Reading the photo…' : 'Let AI mark the points'}
+            </button>
+          )}
+        </div>
       )}
-      {status.data?.enabled && !pending && (
-        <button disabled={!hasPhoto || run.isPending} onClick={() => run.mutate()}>
-          {run.isPending ? 'Reading the photo…' : saved.length ? 'Estimate again from the photo' : 'Estimate height from the photo'}
-        </button>
+      {status.data && !status.data.ai && (
+        <p className="muted" style={{ margin: 0 }}>Free: you mark the points. AI suggestions are off; they need an Anthropic API key (paid).</p>
       )}
-      {status.data?.enabled && !hasPhoto && <p className="muted">This tree has no uploaded photo yet.</p>}
+      {status.data && !hasPhoto && <p className="muted">This tree has no uploaded photo yet.</p>}
       {pending && <Review key={pending.id} e={pending} treeId={treeId} />}
       {saved.length > 0 && (
         <ul className="height-estimates">
@@ -101,10 +106,14 @@ function Review({ e, treeId }: { e: any; treeId: string }) {
         <div className="notice warning" role="status">
           <strong>This photo may not be suitable:</strong> {e.unsuitable_reason} You can still mark the points yourself, or discard it.
         </div>
-      ) : (
+      ) : e.model ? (
         <p style={{ margin: 0 }}>
           Suggested height: <strong>{e.suggested_height_cm} cm</strong> · AI confidence: {e.confidence} · Stick: {e.reference_label}
           {e.ai_notes && <span className="muted"> · {e.ai_notes}</span>}
+        </p>
+      ) : (
+        <p style={{ margin: 0 }}>
+          Stick: {e.reference_label}. Move each point onto the photo. Use photos where the stick stands upright beside the tree, at the same distance from the camera.
         </p>
       )}
       <fieldset className="height-points">

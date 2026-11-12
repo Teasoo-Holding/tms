@@ -2,14 +2,14 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, qs } from '../api/client';
-import { sectorLabel, subSectorLabel } from '../areaLabels';
+import { groupByYear, sectorLabel, subSectorLabel, yearHeading } from '../areaLabels';
 import { useIsAdmin } from '../auth';
 import { ChartCard, Donut, GroupedColumns, HBarChart, Legend, LineChart, LineSeries, SERIES, StackedBars, StackedColumns, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
 import { asOf, FreshnessBanner, useFreshness } from '../components/Freshness';
 import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
 import { ShareArea } from '../components/ShareMap';
-import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime, SimpleTable, todayStamp } from '../components/ui';
+import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime, SimpleTable, statusColor, todayStamp } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 import { DAY_NOTE } from '../time';
 import { metricTerms } from '../glossary';
@@ -60,10 +60,9 @@ export function DashboardPage() {
   };
   const hasRange = !!(f.get('from') || f.get('to'));
 
-  // Colour follows the status entity (its configured order), not its rank in this result.
-  const statusColor = new Map<string, string>((statuses.data ?? []).map((st, i) => [st.code, SERIES[i % SERIES.length]]));
-  statusColor.set('UNKNOWN', 'var(--border-strong)');
-  const colorOf = (code: string) => statusColor.get(code) ?? 'var(--border-strong)';
+  // Colour follows the status's meaning (#114): alive green, struggling yellow, dead red, no status grey.
+  const statusByCode = new Map<string, any>((statuses.data ?? []).map((st) => [st.code, st]));
+  const colorOf = (code: string) => statusColor(code, statusByCode.get(code)?.is_terminal, statusByCode.get(code)?.name);
   const months = [...new Set<string>((s?.observation_trend ?? []).map((r: any) => r.month))];
   const trendStatuses = (statuses.data ?? []).filter((st) => s?.observation_trend.some((r: any) => r.code === st.code));
   const trendValue = (month: string, code: string) => s?.observation_trend.find((r: any) => r.month === month && r.code === code)?.count ?? 0;
@@ -106,7 +105,12 @@ export function DashboardPage() {
     const value = (group: string, code: string) => rows.find((r) => r.group_name === group && r.code === code)?.count ?? 0;
     return { categories: groups.map(([, name]) => name), series, value };
   };
-  const bySectorMix = statusMix((s?.status_by_sector ?? []).map((r: any) => ({ ...r, group_name: sectorLabel({ short_code: r.group_code, name: r.group_name }) })));
+  // Status by sector, one block per planting year: sectors of different years can share a code (#115).
+  const sectorStatusRows = (s?.status_by_sector ?? []).map((r: any) => ({ ...r, short_code: r.sector_code, group_name: sectorLabel({ short_code: r.sector_code, name: r.group_name }) }));
+  const sectorYears = groupByYear(sectorStatusRows).map((g) => ({ year: g.year, mix: statusMix(g.rows) }));
+  const bySectorMix = statusMix(sectorStatusRows);
+  const sectorsByYear = groupByYear<any>(s?.by_sector ?? []);
+  const manyYears = sectorYears.length > 1;
   const bySpeciesMix = statusMix(s?.status_by_species);
   const mixTable = (mix: ReturnType<typeof statusMix>, label: string) => (
     <SimpleTable head={[label, ...mix.series.map((x) => x.label)]} rows={mix.categories.map((c) => [c, ...mix.series.map((x) => fmtNum(mix.value(c, x.key)))])} />
@@ -173,12 +177,22 @@ export function DashboardPage() {
               <Donut data={s.by_status.map((r: any) => ({ label: r.name, value: r.count, color: colorOf(r.code) }))} />
             </ChartCard>
             <ChartCard
-              title="Status by sector"
+              title="Status by planting year and sector"
               empty={bySectorMix.categories.length === 0 && 'No trees yet.'}
               legend={<Legend items={bySectorMix.series} />}
-              table={mixTable(bySectorMix, 'Sector')}
+              table={
+                <SimpleTable
+                  head={['Planting year', 'Sector', ...bySectorMix.series.map((x) => x.label)]}
+                  rows={sectorYears.flatMap(({ year, mix }) => mix.categories.map((c) => [year ?? '—', c, ...bySectorMix.series.map((x) => fmtNum(mix.value(c, x.key)))]))}
+                />
+              }
             >
-              <StackedBars categories={bySectorMix.categories} series={bySectorMix.series} values={bySectorMix.value} normalize />
+              {sectorYears.map(({ year, mix }) => (
+                <div key={year ?? 'none'} className="year-block">
+                  {manyYears && <h3 className="year-heading">{yearHeading(year)}</h3>}
+                  <StackedBars categories={mix.categories} series={mix.series} values={mix.value} normalize />
+                </div>
+              ))}
             </ChartCard>
           </div>
 
@@ -243,8 +257,17 @@ export function DashboardPage() {
                 >
                   <StackedBars categories={bySpeciesMix.categories} series={bySpeciesMix.series} values={bySpeciesMix.value} normalize />
                 </ChartCard>
-                <ChartCard title="Trees by sector" empty={s.by_sector.length === 0 && 'No trees yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [sectorLabel(r), fmtNum(r.count)])} />}>
-                  <HBarChart data={s.by_sector.map((r: any) => ({ label: sectorLabel(r), value: r.count }))} />
+                <ChartCard
+                  title="Trees by planting year and sector"
+                  empty={s.by_sector.length === 0 && 'No trees yet.'}
+                  table={<SimpleTable head={['Planting year', 'Sector', 'Trees']} rows={sectorsByYear.flatMap((g) => g.rows.map((r: any) => [g.year ?? '—', sectorLabel(r), fmtNum(r.count)]))} />}
+                >
+                  {sectorsByYear.map((g) => (
+                    <div key={g.year ?? 'none'} className="year-block">
+                      {sectorsByYear.length > 1 && <h3 className="year-heading">{yearHeading(g.year)}</h3>}
+                      <HBarChart data={g.rows.map((r: any) => ({ label: sectorLabel(r), value: r.count }))} />
+                    </div>
+                  ))}
                 </ChartCard>
               </div>
 

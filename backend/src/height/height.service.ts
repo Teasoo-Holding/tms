@@ -58,9 +58,12 @@ export class HeightService {
     return (await this.list(rows.rows[0].tree_id)).find((e) => e.id === id) ?? null;
   }
 
-  /** Asks Claude to read one of the tree's photos (by default its registration photo). */
-  async estimate(user: AuthUser, treeId: string, mediaId?: string) {
-    if (!this.enabled) throw new AppError(404, 'HEIGHT_ESTIMATES_OFF', 'Height estimates from photos are not turned on.');
+  /**
+   * Starts an estimate on one of the tree's photos (by default its registration photo). "manual" (free, always
+   * available, #118): the administrator marks the four points. "ai": Claude suggests them (needs ANTHROPIC_API_KEY).
+   */
+  async estimate(user: AuthUser, treeId: string, mediaId?: string, method: 'ai' | 'manual' = 'ai') {
+    if (method === 'ai' && !this.enabled) throw new AppError(404, 'HEIGHT_ESTIMATES_OFF', 'AI height estimates are not turned on. Mark the points yourself instead.');
     const tree = await this.db.one(this.db, `SELECT t.id, t.project_id, py.year_label FROM trees t JOIN planting_years py ON py.id = t.planting_year_id WHERE t.id = $1`, [treeId]);
     if (!tree) throw notFound('Tree');
     const stick = REFERENCE_STICKS[tree.year_label];
@@ -78,6 +81,18 @@ export class HeightService {
     const meta = await sharp(photo).metadata();
     const w = meta.width ?? 0;
     const h = meta.height ?? 0;
+    if (method === 'manual') {
+      // Starting points for the reviewer to move: stick on the left, tree on the right.
+      const start = { stick_bottom: { x: 0.3, y: 0.85 }, stick_top: { x: 0.3, y: 0.35 }, tree_base: { x: 0.6, y: 0.85 }, tree_top: { x: 0.6, y: 0.55 } };
+      const row = await this.db.one(
+        this.db,
+        `INSERT INTO tree_height_estimates (tree_id, media_id, project_id, status, reference_length_cm, reference_label, image_width, image_height, points, requested_by)
+         VALUES ($1, $2, $3, 'SUGGESTED', $4, $5, $6, $7, $8, $9) RETURNING id`,
+        [treeId, media.id, tree.project_id, stick.cm, stick.label, w, h, JSON.stringify(start), user.id],
+      );
+      await this.audit.record({ actorId: user.id, action: 'height_estimate.request', entityType: 'tree', entityId: treeId, projectId: tree.project_id, metadata: { estimate_id: row!.id, method } });
+      return this.one(row!.id);
+    }
     let reading: PhotoReading | null;
     try {
       reading = await this.read(photo, media.mime_type ?? 'image/jpeg', stick.label);
@@ -119,10 +134,13 @@ export class HeightService {
     const cm = heightCm ?? measured?.cm;
     if (!cm || cm <= 0) throw badRequest('HEIGHT_REQUIRED', 'Mark the stick and the tree on the photo, or type the height.');
     const reviewer = await this.db.one(this.db, 'SELECT full_name FROM users WHERE id = $1', [user.id]);
+    const who = reviewer?.full_name ?? 'an administrator';
     const note =
       heightCm != null && heightCm !== measured?.cm
-        ? `Estimated from a photo against a ${e.reference_label} reference stick; height typed by ${reviewer?.full_name ?? 'an administrator'} after review.`
-        : `Estimated from a photo against a ${e.reference_label} reference stick; points suggested by AI${points ? ' and adjusted' : ''} and checked by ${reviewer?.full_name ?? 'an administrator'}.`;
+        ? `Estimated from a photo against a ${e.reference_label} reference stick; height typed by ${who} after review.`
+        : e.model
+          ? `Estimated from a photo against a ${e.reference_label} reference stick; points suggested by AI${points ? ' and adjusted' : ''} and checked by ${who}.`
+          : `Estimated from a photo against a ${e.reference_label} reference stick; points marked by ${who}.`;
     await this.db.query(
       `UPDATE tree_height_estimates SET status = 'CONFIRMED', points = $2, stick_pixels = $3, tree_pixels = $4, confirmed_height_cm = $5,
               method_note = $6, reviewed_by = $7, reviewed_at = now() WHERE id = $1`,

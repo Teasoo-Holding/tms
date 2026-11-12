@@ -15,9 +15,10 @@ const TYPE_LABEL: Record<string, string> = {
 
 const RESOLUTIONS: Record<string, [string, string, boolean][]> = {
   DUPLICATE: [
+    ['KEEP_EXISTING_RECORD', 'Keep the existing record. The incoming submission is set aside (kept, not deleted).', false],
+    ['ACCEPT_INCOMING_RECORD', 'Accept the incoming submission. It takes the tree ID; the existing record is set aside with its visits and photos (kept, not deleted).', false],
     ['CORRECT_INCOMING_SERIAL', 'The incoming label was mis-keyed: give it the correct serial and add it to the registry', true],
     ['CORRECT_EXISTING_SERIAL', 'The existing record is wrong: correct its serial, then add the incoming tree with the disputed ID', true],
-    ['REJECT_INCOMING', 'Set the incoming submission aside (it is kept, not deleted)', false],
   ],
   DUPLICATE_REPLACEMENT: [
     ['KEEP_UNLINKED', 'Keep the incoming tree as an ordinary tree, not a replacement', false],
@@ -83,8 +84,8 @@ function ConflictReview({ id, onClose }: { id: string; onClose: () => void }) {
     <Modal title={TYPE_LABEL[d.conflict_type]} onClose={onClose} wide>
       <div className="stack">
         <div className="grid cols-2">
-          <TreeCard title="Incoming submission" tree={d.incoming} />
-          <TreeCard title={d.conflict_type === 'REVISION_MISMATCH' ? 'Current server record' : 'Existing record'} tree={d.existing} />
+          <TreeCard title="Incoming submission" tree={d.incoming} age={age(d.incoming, d.existing)} />
+          <TreeCard title={d.conflict_type === 'REVISION_MISMATCH' ? 'Current server record' : 'Existing record'} tree={d.existing} age={age(d.existing, d.incoming)} />
         </div>
         {d.conflict_type === 'REVISION_MISMATCH' && (
           <section className="card">
@@ -118,16 +119,33 @@ function ConflictReview({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
-function TreeCard({ title, tree }: { title: string; tree: any }) {
+/** When a record was recorded in the field: its first visit, else when it reached the server. */
+const recordedAt = (t: any) => (t ? Date.parse(t.recorded_at ?? t.client_recorded_at ?? t.synced_at ?? t.created_at) : NaN);
+/** "Older" or "Most recent", by recorded time, then sync time (#117). */
+function age(tree: any, other: any): 'Older' | 'Most recent' | null {
+  if (!tree || !other) return null;
+  const a = recordedAt(tree);
+  const b = recordedAt(other);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  if (a !== b) return a < b ? 'Older' : 'Most recent';
+  const sa = Date.parse(tree.synced_at);
+  const sb = Date.parse(other.synced_at);
+  return sa === sb || Number.isNaN(sa) || Number.isNaN(sb) ? null : sa < sb ? 'Older' : 'Most recent';
+}
+
+function TreeCard({ title, tree, age }: { title: string; tree: any; age?: 'Older' | 'Most recent' | null }) {
   return (
     <section className="card">
-      <h3>{title}</h3>
+      <h3>
+        {title} {age && <span className={`pill ${age === 'Older' ? '' : 'good'}`}>{age}</span>}
+      </h3>
       {tree ? (
         <dl className="kv">
           <dt>Tree ID</dt><dd><Link className="mono" to={`/trees/${tree.id}`}>{tree.physical_tree_id}</Link></dd>
           <dt>State</dt><dd>{tree.record_state.toLowerCase()}</dd>
           <dt>Registered by</dt><dd>{tree.created_by_name}</dd>
-          <dt>Recorded on device</dt><dd>{fmtDateTime(tree.client_recorded_at)}</dd>
+          <dt>Recorded in the field</dt><dd>{fmtDateTime(tree.recorded_at ?? tree.client_recorded_at)}</dd>
+          <dt>Visits after registration</dt><dd>{tree.visit_count ?? 0}</dd>
           <dt>Synced</dt><dd>{fmtDateTime(tree.synced_at)}</dd>
           <dt>Photos</dt><dd>{tree.media_count ? <TreePhotos treeId={tree.id} /> : 'None'}</dd>
           <dt>Notes</dt><dd>{tree.notes ?? '—'}</dd>

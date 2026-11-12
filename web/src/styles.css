@@ -18,6 +18,7 @@
   --critical-ink: #b42323; --warning-ink: #7a5200; --good-ink: #006300;
   --alive-ink: #0f5c1f; --alive-bg: #e2f3e4; --alive-border: #a8d5ae;
   --dead-ink: #a11d1d; --dead-bg: #fbe5e3; --dead-border: #efb1ab;
+  --stress-ink: #6b4a00; --stress-bg: #fdf3d6; --stress-border: #ecd08a;
   --map-bg: #e9ede6;
   --radius: 8px;
   --shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 16px rgb(0 0 0 / 0.04);
@@ -36,6 +37,8 @@
     --critical-ink: #f08a8a; --warning-ink: #f2c25c; --good-ink: #6fd16f; --map-bg: #1f2420;
     --alive-ink: #8fe39a; --alive-bg: #16301b; --alive-border: #2f5c37;
     --dead-ink: #ffaaa3; --dead-bg: #3a1716; --dead-border: #6e2c29;
+  --stress-ink: #f6d27a; --stress-bg: #33280e; --stress-border: #6b5520;
+    --stress-ink: #f6d27a; --stress-bg: #33280e; --stress-border: #6b5520;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.4);
   }
 }
@@ -188,6 +191,8 @@ tr.clickable:hover td { background: var(--surface-2); }
 .status-badge.alive .symbol { background: var(--alive-ink); color: var(--alive-bg); }
 .status-badge.dead { color: var(--dead-ink); background: var(--dead-bg); border-color: var(--dead-border); }
 .status-badge.dead .symbol { background: var(--dead-ink); color: var(--dead-bg); }
+.status-badge.stressed { color: var(--stress-ink); background: var(--stress-bg); border-color: var(--stress-border); }
+.status-badge.stressed .symbol { background: var(--stress-ink); color: var(--stress-bg); }
 .status-badge.neutral { color: var(--text-secondary); background: var(--surface-2); border-color: var(--border); }
 .status-badge.neutral .symbol { color: var(--text-secondary); }
 .badge { font-size: 11px; font-weight: 700; background: var(--status-critical); color: #fff; border-radius: 999px; padding: 1px 7px; }
@@ -723,3 +728,7 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 .height-points .radio { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .height-points .dot { width: 10px; height: 10px; border-radius: 50%; }
 .height-estimates { margin: 0; padding-left: 18px; display: grid; gap: 8px; }
+
+/* Charts split by planting year (#115, #116). */
+.year-block + .year-block { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.year-heading { font-size: 14px; margin: 0 0 8px; color: var(--text-secondary); }

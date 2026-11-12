@@ -205,9 +205,10 @@ private fun resolutionsFor(type: String): List<Triple<String, String, Boolean>> 
         Triple("KEEP_EXISTING", "Keep the current record and discard the incoming edit", false),
     )
     else -> listOf(
+        Triple("KEEP_EXISTING_RECORD", "Keep the existing record; set the incoming submission aside (kept, not deleted)", false),
+        Triple("ACCEPT_INCOMING_RECORD", "Accept the incoming submission; set the existing record aside (kept, not deleted)", false),
         Triple("CORRECT_INCOMING_SERIAL", "The incoming label was mis-keyed: give it the correct serial", true),
         Triple("CORRECT_EXISTING_SERIAL", "The existing record is wrong: correct its serial, then add the incoming tree", true),
-        Triple("REJECT_INCOMING", "Set the incoming submission aside (kept, not deleted)", false),
     )
 }
 

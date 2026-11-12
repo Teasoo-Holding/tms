@@ -138,20 +138,30 @@ export function PasswordInput(props: Omit<InputHTMLAttributes<HTMLInputElement>,
 const ALIVE_CODES = new Set(['ALIVE', 'HEALTHY', 'PLANTED']);
 /** Terminal statuses when the record does not say (lists that only carry the code). */
 const TERMINAL_CODES = new Set(['DEAD', 'MISSING']);
-export type StatusTone = 'alive' | 'dead' | 'neutral';
-export function statusTone(code?: string | null, terminal?: boolean | null): StatusTone {
-  if (!code) return 'neutral';
+/** Alive but struggling (for example Transplant Shock): shown in yellow (#114). */
+const STRESSED = /shock|stress|wilt|damag|sick|inspect|weak|poor/i;
+export type StatusTone = 'alive' | 'stressed' | 'dead' | 'neutral';
+export function statusTone(code?: string | null, terminal?: boolean | null, name?: string | null): StatusTone {
+  if (!code || code === 'UNKNOWN') return 'neutral';
   if (terminal || TERMINAL_CODES.has(code)) return 'dead';
+  if (STRESSED.test(code) || STRESSED.test(name ?? '')) return 'stressed';
   return ALIVE_CODES.has(code) ? 'alive' : 'neutral';
 }
-const STATUS_SYMBOL: Record<StatusTone, string> = { alive: '✓', dead: '✕', neutral: '–' };
+const STATUS_SYMBOL: Record<StatusTone, string> = { alive: '✓', stressed: '!', dead: '✕', neutral: '–' };
+/** Chart colours by meaning: alive green, struggling yellow, dead red, no status grey; other statuses blue. */
+const TONE_COLOR: Record<StatusTone, string> = { alive: 'var(--status-good)', stressed: 'var(--status-warning)', dead: 'var(--status-critical)', neutral: 'var(--border-strong)' };
+export function statusColor(code?: string | null, terminal?: boolean | null, name?: string | null) {
+  const tone = statusTone(code, terminal, name);
+  return tone === 'neutral' && code && code !== 'UNKNOWN' ? 'var(--series-1)' : TONE_COLOR[tone];
+}
 
 /**
- * A tree's status, the same everywhere: alive is green with ✓, dead (or any terminal status) red with ✕, not yet
- * observed and other statuses grey with –. The text label is always there, so colour is never the only cue.
+ * A tree's status, the same everywhere: alive is green with ✓, struggling (such as Transplant Shock) yellow with !,
+ * dead (or any terminal status) red with ✕, not yet observed and other statuses grey with –. The text label is always
+ * there, so colour is never the only cue.
  */
 export function StatusBadge({ code, name, terminal }: { code?: string | null; name?: string | null; terminal?: boolean | null }) {
-  const tone = statusTone(code, terminal);
+  const tone = statusTone(code, terminal, name);
   return (
     <span className={`status-badge ${tone}`}>
       <span className="symbol" aria-hidden>{STATUS_SYMBOL[tone]}</span>
