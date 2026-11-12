@@ -72,15 +72,16 @@ object StatusPalette {
     fun color(code: String?, fallbackIndex: Int = 0): Color {
         val scheme = MaterialTheme.colorScheme
         return when (code?.uppercase()) {
-            "HEALTHY", "GOOD", "ALIVE", "ESTABLISHED" -> Color(0xFF2E9E44)
+            "HEALTHY", "GOOD", "ALIVE", "ESTABLISHED" -> Color(0xFF0CA30C)
             "PLANTED", "NEW" -> Color(0xFF7CC47F)
             "NEEDS_INSPECTION", "STRESSED", "AT_RISK" -> Color(0xFFF2B000)
             "DAMAGED", "DISEASED", "PEST" -> Color(0xFFE5761E)
-            "DEAD" -> scheme.error
+            "DEAD" -> Color(0xFFD03B3B)
             "MISSING", "REMOVED", "STOLEN" -> lerp(scheme.error, scheme.onSurface, 0.45f)
             "REPLACED" -> Color(0xFF5B8DEF)
             null, "", "UNKNOWN", "NOT_OBSERVED" -> scheme.outline
-            else -> ChartPalette.color(fallbackIndex + 2)
+            // Transplant Shock and other "alive but struggling" statuses: yellow (#114).
+            else -> if (Regex("SHOCK|STRESS|WILT|SICK|WEAK|POOR").containsMatchIn(code.uppercase())) Color(0xFFF2B000) else ChartPalette.color(fallbackIndex + 2)
         }
     }
 }

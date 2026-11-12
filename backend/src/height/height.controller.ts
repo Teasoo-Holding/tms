@@ -5,7 +5,7 @@ import { parse } from '../common/validation';
 import { Points } from './ai';
 import { HeightService, REFERENCE_STICKS } from './height.service';
 
-const EstimateBody = z.object({ media_id: z.string().uuid().optional() });
+const EstimateBody = z.object({ media_id: z.string().uuid().optional(), method: z.enum(['ai', 'manual']).default('ai') });
 const ConfirmBody = z.object({ points: Points.optional(), height_cm: z.number().positive().max(10000).optional() });
 
 /** Tree height estimates from photos, for administrators (#109). */
@@ -16,7 +16,8 @@ export class HeightController {
 
   @Get('height-estimates/status')
   status() {
-    return { enabled: this.heights.enabled, reference_sticks: REFERENCE_STICKS };
+    // Marking the points by hand is always available and free (#118); AI suggestions need ANTHROPIC_API_KEY.
+    return { enabled: true, ai: this.heights.enabled, reference_sticks: REFERENCE_STICKS };
   }
 
   @Get('trees/:id/height-estimates')
@@ -26,7 +27,8 @@ export class HeightController {
 
   @Post('trees/:id/height-estimates')
   estimate(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.heights.estimate(user, id, parse(EstimateBody, body ?? {}).media_id);
+    const b = parse(EstimateBody, body ?? {});
+    return this.heights.estimate(user, id, b.media_id, b.method);
   }
 
   @Post('height-estimates/:id/confirm')

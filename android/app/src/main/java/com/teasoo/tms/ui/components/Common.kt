@@ -95,10 +95,12 @@ fun DateField(label: String, value: LocalDate?, onChange: (LocalDate?) -> Unit, 
 /** Status label with a coloured dot; the text always carries the meaning. */
 @Composable
 fun StatusChip(code: String?, name: String?) {
-    val color = when (code) {
-        "HEALTHY", "PLANTED" -> StatusColors.good
-        "NEEDS_INSPECTION", "DAMAGED" -> StatusColors.warning
-        "DEAD", "MISSING" -> StatusColors.critical
+    // Alive green, struggling (e.g. Transplant Shock) yellow, dead red, as on the web (#114).
+    val stressed = Regex("shock|stress|wilt|damag|sick|inspect|weak|poor", RegexOption.IGNORE_CASE)
+    val color = when {
+        code == "DEAD" || code == "MISSING" -> StatusColors.critical
+        code != null && (stressed.containsMatchIn(code) || stressed.containsMatchIn(name ?: "")) -> StatusColors.warning
+        code == "ALIVE" || code == "HEALTHY" || code == "PLANTED" -> StatusColors.good
         else -> MaterialTheme.colorScheme.outline
     }
     Row(verticalAlignment = Alignment.CenterVertically) {

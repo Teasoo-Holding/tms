@@ -2,14 +2,14 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { Navigate, NavLink, Route, Routes, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError, apiUrl, publicGet, qs } from '../api/client';
-import { sectorLabel } from '../areaLabels';
+import { groupByYear, yearHeading, sectorLabel } from '../areaLabels';
 import { ChartCard, Donut, HBarChart, Legend, LineChart, SERIES, StackedBars, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
 import { TeasooLink, TeasooLogo } from '../components/Brand';
 import { DensityReport, DensityView, hasOutlines } from '../components/DensityMap';
 import { ShareArea } from '../components/ShareMap';
 import { PhotoSource, PhotoSourceProvider } from '../components/Photos';
-import { ErrorNotice, fmtDate, fmtDateTime, fmtNum, relativeTime, SimpleTable } from '../components/ui';
+import { ErrorNotice, fmtDate, fmtDateTime, fmtNum, relativeTime, SimpleTable, statusColor } from '../components/ui';
 import { ShareAreas } from './ShareAreas';
 import { ShareTree, ShareTrees } from './ShareTrees';
 import { fmtShortDate } from '../time';
@@ -163,10 +163,7 @@ function ShareOverview({ token, base }: ShareContext) {
   const alive = statusRows.filter((r) => !r.is_terminal && r.code !== 'UNKNOWN').reduce((n, r) => n + r.count, 0);
   const terms = metricTerms();
   const unknown = statusRows.filter((r) => r.code === 'UNKNOWN').reduce((n, r) => n + r.count, 0);
-  let liveIndex = 0;
-  const statusColor = (r: any) =>
-    r.code === 'UNKNOWN' ? 'var(--border-strong)' : r.is_terminal ? 'var(--status-critical)' : liveIndex++ === 0 ? 'var(--status-good)' : SERIES[liveIndex % SERIES.length];
-  const donut = statusRows.map((r) => ({ label: r.name, value: r.count, color: statusColor(r) }));
+  const donut = statusRows.map((r) => ({ label: r.name, value: r.count, color: statusColor(r.code, r.is_terminal, r.name) }));
   const coverage: ShareArea[] = (s.area_coverage ?? []).filter((r: any) => sectorIds.has(r.sector_id));
   const sectorShare = (s.sector_share ?? []).filter((r: any) => sectorIds.has(r.id));
   const vendors: any[] = (d.vendors ?? []).filter((v: any) => !yearId || v.planting_year_id === yearId);
@@ -297,8 +294,17 @@ function ShareOverview({ token, base }: ShareContext) {
           </section>
         )}
 
-        <ChartCard title="Trees by sector" empty={(s.by_sector ?? []).length === 0 && 'No trees yet.'} table={<SimpleTable head={['Sector', 'Trees']} rows={s.by_sector.map((r: any) => [sectorLabel(r), fmtNum(r.count)])} />}>
-          <HBarChart data={s.by_sector.map((r: any) => ({ label: sectorLabel(r), value: r.count }))} />
+        <ChartCard
+          title="Trees by planting year and sector"
+          empty={(s.by_sector ?? []).length === 0 && 'No trees yet.'}
+          table={<SimpleTable head={['Planting year', 'Sector', 'Trees']} rows={groupByYear<any>(s.by_sector ?? []).flatMap((g) => g.rows.map((r: any) => [g.year ?? '—', sectorLabel(r), fmtNum(r.count)]))} />}
+        >
+          {groupByYear<any>(s.by_sector ?? []).map((g, _i, all) => (
+            <div key={g.year ?? 'none'} className="year-block">
+              {all.length > 1 && <h3 className="year-heading">{yearHeading(g.year)}</h3>}
+              <HBarChart data={g.rows.map((r: any) => ({ label: sectorLabel(r), value: r.count }))} />
+            </div>
+          ))}
         </ChartCard>
 
         <p className="muted" style={{ margin: 0 }}>

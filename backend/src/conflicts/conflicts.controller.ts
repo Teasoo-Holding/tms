@@ -11,6 +11,8 @@ import { TreesService } from '../trees/trees.service';
 const ResolveBody = z.object({
   resolution: z.enum([
     'REJECT_INCOMING', // set the incoming duplicate aside (kept, never deleted)
+    'KEEP_EXISTING_RECORD', // duplicate: the existing (older) record stays; the incoming one is set aside (#117)
+    'ACCEPT_INCOMING_RECORD', // duplicate: the incoming (most recent) record takes the ID; the existing one is set aside (#117)
     'CORRECT_INCOMING_SERIAL', // the incoming label was mis-keyed: give it the correct serial and activate it
     'CORRECT_EXISTING_SERIAL', // the existing record was wrong: correct it, then activate the incoming record
     'KEEP_UNLINKED', // duplicate replacement: keep the incoming tree as an ordinary (non-replacement) tree
@@ -29,8 +31,8 @@ const ConflictQuery = z.object({
 });
 
 const ALLOWED: Record<string, string[]> = {
-  DUPLICATE_PHYSICAL_ID: ['REJECT_INCOMING', 'CORRECT_INCOMING_SERIAL', 'CORRECT_EXISTING_SERIAL'],
-  DUPLICATE_SERIAL: ['REJECT_INCOMING', 'CORRECT_INCOMING_SERIAL', 'CORRECT_EXISTING_SERIAL'],
+  DUPLICATE_PHYSICAL_ID: ['KEEP_EXISTING_RECORD', 'ACCEPT_INCOMING_RECORD', 'REJECT_INCOMING', 'CORRECT_INCOMING_SERIAL', 'CORRECT_EXISTING_SERIAL'],
+  DUPLICATE_SERIAL: ['KEEP_EXISTING_RECORD', 'ACCEPT_INCOMING_RECORD', 'REJECT_INCOMING', 'CORRECT_INCOMING_SERIAL', 'CORRECT_EXISTING_SERIAL'],
   DUPLICATE_REPLACEMENT: ['REJECT_INCOMING', 'KEEP_UNLINKED'],
   REVISION_MISMATCH: ['APPLY_INCOMING_CHANGES', 'KEEP_EXISTING'],
 };
@@ -74,7 +76,9 @@ export class ConflictsController {
       treeId
         ? this.db.one(
             this.db,
-            `SELECT t.*, u.full_name AS created_by_name, (SELECT count(*) FROM tree_media m WHERE m.tree_id = t.id) AS media_count
+            `SELECT t.*, u.full_name AS created_by_name, (SELECT count(*) FROM tree_media m WHERE m.tree_id = t.id) AS media_count,
+                    (SELECT min(o.observed_at) FROM tree_observations o WHERE o.tree_id = t.id AND o.is_initial) AS recorded_at,
+                    (SELECT count(*)::int FROM tree_observations o WHERE o.tree_id = t.id AND NOT o.is_initial) AS visit_count
                FROM trees t JOIN users u ON u.id = t.created_by WHERE t.id = $1`,
             [treeId],
           )
@@ -96,10 +100,19 @@ export class ConflictsController {
         const needsSerial = b.resolution === 'CORRECT_INCOMING_SERIAL' || b.resolution === 'CORRECT_EXISTING_SERIAL';
         if (needsSerial && !b.serial_input) throw badRequest('SERIAL_REQUIRED', 'Enter the corrected serial number.');
         const reason = `Conflict ${id}: ${b.notes}`;
+        let outcome: Record<string, unknown> | undefined;
 
         switch (b.resolution) {
           case 'REJECT_INCOMING':
+          case 'KEEP_EXISTING_RECORD':
             await tx.query(`UPDATE trees SET record_state = 'REJECTED', updated_at = now(), updated_by = $2 WHERE id = $1`, [c.entity_id, user.id]);
+            outcome = { kept_tree_id: c.existing_entity_id, set_aside_tree_id: c.entity_id };
+            break;
+          case 'ACCEPT_INCOMING_RECORD':
+            // The existing record is set aside first (kept, with its visits and photos), so the ID is free for the incoming one.
+            await tx.query(`UPDATE trees SET record_state = 'REJECTED', revision = revision + 1, updated_at = now(), updated_by = $2 WHERE id = $1`, [c.existing_entity_id, user.id]);
+            await tx.query(`UPDATE trees SET record_state = 'ACTIVE', revision = revision + 1, updated_at = now(), updated_by = $2 WHERE id = $1`, [c.entity_id, user.id]);
+            outcome = { kept_tree_id: c.entity_id, set_aside_tree_id: c.existing_entity_id };
             break;
           case 'CORRECT_INCOMING_SERIAL':
             await this.trees.correctSerial(tx, user, c.entity_id, b.serial_input!, reason, true);
@@ -131,7 +144,7 @@ export class ConflictsController {
           [id, b.resolution, b.notes, user.id],
         );
         await this.audit.record(
-          { actorId: user.id, action: 'conflict.resolve', entityType: 'conflict', entityId: id, projectId: c.project_id, before: c, after: resolved },
+          { actorId: user.id, action: 'conflict.resolve', entityType: 'conflict', entityId: id, projectId: c.project_id, before: c, after: resolved, metadata: { resolution: b.resolution, notes: b.notes, ...outcome } },
           tx,
         );
         return resolved;

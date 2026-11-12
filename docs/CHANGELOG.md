@@ -7,6 +7,16 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-12: Status colours, planting years on sector charts, conflict choices, free height marking
+- **Status colours (#114):** Alive green, Transplant Shock (and other "alive but struggling" statuses) yellow, Dead red, everywhere: badges, charts, legends, the phone. Each status keeps its label and symbol.
+- **Planting year on sector charts (#115, #116):**
+  - "Status by planting year and sector" and "Trees by planting year and sector" show one block per planting year, sectors in number order. The tables have a planting-year column.
+  - Sectors of different years with the same code are no longer merged or shown as unexplained duplicates.
+- **Duplicate tree conflicts (#117):**
+  - The two records are labelled "Older" and "Most recent", with when each was recorded and synced.
+  - New choices: "Keep the existing record" or "Accept the incoming submission". The other record is set aside, never deleted, and the audit log records which record was kept.
+- **Height from photo, free (#118):** "Mark the points yourself" works without any key; AI suggestions stay optional. The options are compared in `docs/height-estimation-options.md`.
+
 ## 2026-11-11: Officer data, deleting users, height from photos, Sector 4 (migrations 019–021)
 - **Field activity:** click an officer to open the trees they registered (Trees list filtered by "Registered by"), with a link to all their visits. Users → "Trees they registered" does the same.
 - **Delete a user permanently** (Users → row menu; type DELETE and your password):

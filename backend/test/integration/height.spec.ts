@@ -88,6 +88,20 @@ describe('tree height from a photo', () => {
     expect((await admin.get(`/trees/${t2026}/height-estimates`).expect(200)).body).toHaveLength(1);
   });
 
+  it('lets an administrator mark the points by hand, free and without any key (#118)', async () => {
+    (config as any).anthropicApiKey = null;
+    asked = [];
+    expect((await admin.get('/height-estimates/status').expect(200)).body).toMatchObject({ enabled: true, ai: false });
+    const id = await treeWithPhoto('806', '2026');
+    const e = (await admin.post(`/trees/${id}/height-estimates`, { method: 'manual' }).expect(201)).body;
+    expect(e).toMatchObject({ status: 'SUGGESTED', model: null, suggested_height_cm: null, reference_length_cm: 100 });
+    const saved = (await admin.post(`/height-estimates/${e.id}/confirm`, { points }).expect(200)).body;
+    expect(saved).toMatchObject({ status: 'CONFIRMED', confirmed_height_cm: 50 });
+    expect(saved.method_note).toMatch(/points marked by Ada Administrator/);
+    expect(asked).toEqual([]);
+    (config as any).anthropicApiKey = 'test-key';
+  });
+
   it('flags unsuitable photos instead of giving a height, and refuses years without a stick', async () => {
     heights.read = async () => ({ suitable: false, unsuitable_reason: 'The top of the tree is cut off.', points, confidence: 'low', notes: '' });
     const id = await treeWithPhoto('804', '2026');

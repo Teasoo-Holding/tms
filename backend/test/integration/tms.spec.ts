@@ -108,6 +108,36 @@ describe('duplicate physical IDs across disconnected devices', () => {
   });
 });
 
+describe('choosing the older or the most recent record in a duplicate (#117)', () => {
+  const duplicate = async (serial: string) => {
+    const a = treePayload(f, serial);
+    const b = treePayload(f, serial, { initial_observation: { ...treePayload(f, serial).initial_observation, observed_at: '2024-06-02T09:00:00Z' } });
+    await sync(officer, [createOp(a)]);
+    const r = (await sync(officerB, [createOp(b)])).body.results[0];
+    return { older: a.id as string, newer: b.id as string, conflict: r.conflict_id as string };
+  };
+  const states = (ids: string[]) => sql(`SELECT id, record_state FROM trees WHERE id = ANY($1)`, [ids]).then((r) => Object.fromEntries(r.map((x) => [x.id, x.record_state])));
+
+  it('shows when each record was recorded and synced', async () => {
+    const d = await duplicate('60');
+    const c = (await admin.get(`/conflicts/${d.conflict}`).expect(200)).body;
+    expect(new Date(c.existing.recorded_at).toISOString()).toBe('2024-06-01T09:00:00.000Z');
+    expect(new Date(c.incoming.recorded_at).toISOString()).toBe('2024-06-02T09:00:00.000Z');
+    expect(c.incoming.synced_at).toBeTruthy();
+    // Keep the older record: the incoming one is set aside, not deleted.
+    await admin.post(`/conflicts/${d.conflict}/resolve`, { resolution: 'KEEP_EXISTING_RECORD', notes: 'The first record is right' }).expect(201);
+    expect(await states([d.older, d.newer])).toEqual({ [d.older]: 'ACTIVE', [d.newer]: 'REJECTED' });
+  });
+
+  it('accepts the most recent record and sets the older one aside, with an audited outcome', async () => {
+    const d = await duplicate('61');
+    await admin.post(`/conflicts/${d.conflict}/resolve`, { resolution: 'ACCEPT_INCOMING_RECORD', notes: 'The second visit corrected the species' }).expect(201);
+    expect(await states([d.older, d.newer])).toEqual({ [d.older]: 'REJECTED', [d.newer]: 'ACTIVE' });
+    const [log] = await sql(`SELECT metadata FROM audit_logs WHERE action = 'conflict.resolve' AND entity_id = $1`, [d.conflict]);
+    expect(log.metadata).toMatchObject({ resolution: 'ACCEPT_INCOMING_RECORD', kept_tree_id: d.newer, set_aside_tree_id: d.older, notes: 'The second visit corrected the species' });
+  });
+});
+
 describe('observations', () => {
   let treeId: string;
   it('appends repeat visits and keeps history; amendments supersede without deleting', async () => {

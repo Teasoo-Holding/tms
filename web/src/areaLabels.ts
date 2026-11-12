@@ -38,3 +38,18 @@ export function subSectorLabel(sectorCode: string | null | undefined, code: stri
   const codes = sectorCode ? `${sectorCode}/${code ?? ''}` : code ?? '';
   return withName(codes, areaName(code, name));
 }
+
+/** Planting year heading for areas: "2026 planting year", or "Areas without a planting year". */
+export const yearHeading = (year?: string | null) => (year ? `${year} planting year` : 'Areas without a planting year');
+
+/** Rows grouped by planting year (newest first), sectors in natural code order (S2 before S10) within each (#115, #116). */
+export function groupByYear<T extends { year_label?: string | null; short_code?: string | null }>(rows: T[]): { year: string | null; rows: T[] }[] {
+  const num = (c?: string | null) => Number((c ?? '').match(/(\d+)$/)?.[1] ?? Number.MAX_SAFE_INTEGER);
+  const years = [...new Set(rows.map((r) => r.year_label ?? null))].sort((a, b) => (b ?? '').localeCompare(a ?? ''));
+  return years.map((year) => ({
+    year,
+    rows: rows
+      .filter((r) => (r.year_label ?? null) === year)
+      .sort((a, b) => (a.short_code ?? '').replace(/\d+$/, '').localeCompare((b.short_code ?? '').replace(/\d+$/, '')) || num(a.short_code) - num(b.short_code)),
+  }));
+}
