@@ -20,6 +20,11 @@ const ProjectBody = z.object({
   physical_id_uniqueness: z.enum(['GLOBAL', 'PROJECT']),
   /** Days between maintenance visits: a tree's next maintenance is due this long after its last one (or its planting). */
   maintenance_interval_days: z.number().int().min(7).max(730).optional(),
+  /** Named meeting points for the field map (#128). */
+  rally_points: z
+    .array(z.object({ name: z.string().trim().min(1).max(80), latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) }))
+    .max(50)
+    .optional(),
 });
 /** 400 DATE_RANGE_INVALID when an end date is before the start date (the same day is allowed). */
 function assertDateRange(start: string | Date | null | undefined, end: string | Date | null | undefined, what: string) {
@@ -179,8 +184,8 @@ export class ProjectsController {
       const after = await this.db.one(
         tx,
         `UPDATE projects SET name = $2, description = $3, location = $4, start_date = $5, end_date = $6,
-                status = $7, maintenance_interval_days = $8, updated_at = now() WHERE id = $1 RETURNING *`,
-        [id, next.name, next.description, next.location, next.start_date, next.end_date, next.status, next.maintenance_interval_days],
+                status = $7, maintenance_interval_days = $8, rally_points = $9, updated_at = now() WHERE id = $1 RETURNING *`,
+        [id, next.name, next.description, next.location, next.start_date, next.end_date, next.status, next.maintenance_interval_days, JSON.stringify(next.rally_points ?? [])],
       );
       await this.audit.record({ actorId: user.id, action: 'project.update', entityType: 'project', entityId: id, projectId: id, before, after }, tx);
       return after;

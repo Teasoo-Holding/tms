@@ -8,7 +8,7 @@ import { readSettings } from '../domain/settings';
 
 /** Row shapes sent to devices. Bootstrap and the change feed use the same loaders. */
 const LOADERS: Record<string, string> = {
-  project: `SELECT id, name, short_code, description, location, start_date, end_date, status, physical_id_uniqueness, maintenance_interval_days, updated_at
+  project: `SELECT id, name, short_code, description, location, start_date, end_date, status, physical_id_uniqueness, maintenance_interval_days, rally_points, updated_at
               FROM projects WHERE id = ANY($1)`,
   planting_year: `SELECT id, project_id, year_label, start_date, end_date, active, updated_at FROM planting_years WHERE id = ANY($1)`,
   tree_id_scheme: `SELECT id, project_id, vendor_id, planting_year_id, version, component_definition, separator, serial_width, serial_uniqueness_scope,

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
 import { AccessService } from '../common/access.service';
@@ -7,6 +7,7 @@ import { badRequest, notFound } from '../common/errors';
 import { geoJsonPolygon, latitude, longitude, parse, shortCode } from '../common/validation';
 import { Db, isUniqueViolation, Queryable } from '../database/db.service';
 import { GEOMETRY_SQL, validatePolygon } from './geometry';
+import { readKml, ringWkt } from './kml';
 
 /** A corner measured on the ground (usually 4, walked with a GPS phone). */
 const Corner = z.object({ latitude, longitude });
@@ -302,6 +303,119 @@ export class GeographyController {
   }
 
   /**
+   * Sectors and sub-sectors of a planting year from a KML file (Google Earth, QGIS): "Sector N" polygons become sector
+   * SN and "Sector N Subsector M" polygons sub-sector SSM of SN. Areas that exist are updated in place (outline and
+   * reference point), so trees keep their areas; missing ones are created; nothing is deleted. Points named as rally
+   * points are added to the project's rally points. With apply=false, only reports what would happen.
+   */
+  @Roles('ADMIN')
+  @Post('planting-years/:yearId/areas/kml')
+  @HttpCode(200)
+  async importKml(@CurrentUser() user: AuthUser, @Param('yearId', ParseUUIDPipe) yearId: string, @Body() body: unknown) {
+    const b = parse(KmlBody, body);
+    const reading = readKml(b.kml);
+    if (!reading.areas.length && !reading.rallyPoints.length) {
+      throw badRequest('KML_EMPTY', reading.skipped.length
+        ? 'No sectors or sub-sectors were found. Name the outlines "Sector 1", "Sector 1 Subsector 1" and so on.'
+        : 'No outlines were found. In Google Earth, save the folder as KML with its places (not only map layers).');
+    }
+    return this.db.tx(async (tx) => {
+      const year = await this.db.one(tx, 'SELECT id, project_id, year_label FROM planting_years WHERE id = $1', [yearId]);
+      if (!year) throw notFound('Planting year');
+      // Each polygon checked and measured by PostGIS; invalid outlines are repaired when possible, else skipped.
+      const areas: any[] = [];
+      for (const a of reading.areas) {
+        const g = await this.db.one(
+          tx,
+          `WITH g AS (SELECT ST_SetSRID(ST_GeomFromText($1), 4326) AS raw)
+           SELECT ST_IsValid(raw) AS valid,
+                  CASE WHEN ST_IsValid(raw) THEN ST_AsText(raw) ELSE ST_AsText(ST_CollectionExtract(ST_MakeValid(raw), 3)) END AS wkt,
+                  ROUND((ST_Area(raw::geography) / 10000)::numeric, 2)::float8 AS hectares,
+                  ST_Y(ST_PointOnSurface(raw)) AS lat, ST_X(ST_PointOnSurface(raw)) AS lon FROM g`,
+          [ringWkt(a.ring)],
+        ).catch(() => null);
+        if (!g?.wkt || !/^POLYGON/.test(g.wkt)) {
+          reading.skipped.push({ name: a.name, reason: 'The outline is not a valid polygon.' });
+          continue;
+        }
+        areas.push({ ...a, wkt: g.wkt, hectares: g.hectares, lat: g.lat, lon: g.lon, repaired: !g.valid });
+      }
+      const sectors = await tx.query('SELECT id, short_code FROM sectors WHERE project_id = $1 AND planting_year_id = $2', [year.project_id, yearId]);
+      const sectorIds = new Map<string, string>(sectors.rows.map((r: any) => [r.short_code, r.id]));
+      const subs = await tx.query('SELECT ss.id, ss.short_code, s.short_code AS sector_code FROM sub_sectors ss JOIN sectors s ON s.id = ss.sector_id WHERE s.planting_year_id = $1', [yearId]);
+      const subIds = new Map<string, string>(subs.rows.map((r: any) => [`${r.sector_code}/${r.short_code}`, r.id]));
+      const report = areas.map((a) => {
+        const code = a.kind === 'sector' ? `S${a.sector}` : `S${a.sector}/SS${a.sub}`;
+        const exists = a.kind === 'sector' ? sectorIds.has(code) : subIds.has(code);
+        return { kind: a.kind, code, name: a.name, hectares: a.hectares, action: exists ? 'update' : 'create', repaired: a.repaired };
+      });
+      // Sectors that only appear through their sub-sectors are created without an outline.
+      const needed = [...new Set(areas.filter((a) => a.kind === 'sub_sector').map((a) => `S${a.sector}`))].filter((c) => !sectorIds.has(c) && !areas.some((a) => a.kind === 'sector' && `S${a.sector}` === c));
+      const summary = {
+        planting_year: year.year_label,
+        sectors_created: report.filter((r) => r.kind === 'sector' && r.action === 'create').length + needed.length,
+        sectors_updated: report.filter((r) => r.kind === 'sector' && r.action === 'update').length,
+        sub_sectors_created: report.filter((r) => r.kind === 'sub_sector' && r.action === 'create').length,
+        sub_sectors_updated: report.filter((r) => r.kind === 'sub_sector' && r.action === 'update').length,
+        rally_points: reading.rallyPoints.length,
+      };
+      if (!b.apply) return { applied: false, summary, areas: report, rally_points: reading.rallyPoints, skipped: reading.skipped };
+
+      const upsertSector = async (n: number, a?: any) => {
+        const code = `S${n}`;
+        const id = sectorIds.get(code);
+        if (id) {
+          if (a) {
+            await tx.query(
+              `UPDATE sectors SET boundary_geometry = ST_SetSRID(ST_GeomFromText($2), 4326), reference_latitude = $3, reference_longitude = $4, active = true, updated_at = now() WHERE id = $1`,
+              [id, a.wkt, a.lat, a.lon],
+            );
+          }
+          return id;
+        }
+        const row = await this.db.one(
+          tx,
+          `INSERT INTO sectors (project_id, planting_year_id, name, short_code, reference_latitude, reference_longitude, boundary_geometry)
+           VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7::text IS NULL THEN NULL ELSE ST_SetSRID(ST_GeomFromText($7), 4326) END) RETURNING id`,
+          [year.project_id, yearId, `Sector ${n}`, code, a?.lat ?? null, a?.lon ?? null, a?.wkt ?? null],
+        );
+        sectorIds.set(code, row!.id);
+        return row!.id as string;
+      };
+      for (const a of areas.filter((x) => x.kind === 'sector')) await upsertSector(a.sector, a);
+      for (const a of areas.filter((x) => x.kind === 'sub_sector')) {
+        const sectorId = await upsertSector(a.sector);
+        const code = `S${a.sector}/SS${a.sub}`;
+        const id = subIds.get(code);
+        if (id) {
+          await tx.query(
+            `UPDATE sub_sectors SET boundary_geometry = ST_SetSRID(ST_GeomFromText($2), 4326), reference_latitude = $3, reference_longitude = $4, active = true, updated_at = now() WHERE id = $1`,
+            [id, a.wkt, a.lat, a.lon],
+          );
+        } else {
+          await tx.query(
+            `INSERT INTO sub_sectors (sector_id, project_id, name, short_code, reference_latitude, reference_longitude, boundary_geometry)
+             VALUES ($1, $2, $3, $4, $5, $6, ST_SetSRID(ST_GeomFromText($7), 4326))`,
+            [sectorId, year.project_id, `Sub-sector ${a.sub}`, `SS${a.sub}`, a.lat, a.lon, a.wkt],
+          );
+        }
+      }
+      if (reading.rallyPoints.length) {
+        // Rally points with the same name are replaced; others are kept.
+        const current = (await this.db.one(tx, 'SELECT rally_points FROM projects WHERE id = $1', [year.project_id]))?.rally_points ?? [];
+        const names = new Set(reading.rallyPoints.map((p) => p.name.toLowerCase()));
+        const merged = [...current.filter((p: any) => !names.has(String(p.name).toLowerCase())), ...reading.rallyPoints];
+        await tx.query('UPDATE projects SET rally_points = $2, updated_at = now() WHERE id = $1', [year.project_id, JSON.stringify(merged)]);
+      }
+      await this.audit.record(
+        { actorId: user.id, action: 'areas.import_kml', entityType: 'planting_year', entityId: yearId, projectId: year.project_id, metadata: { ...summary, skipped: reading.skipped.length } },
+        tx,
+      );
+      return { applied: true, summary, areas: report, rally_points: reading.rallyPoints, skipped: reading.skipped };
+    });
+  }
+
+  /**
    * Creates sectors "Sector 1".."Sector n" (S1..Sn) in a planting year, each with sub-sectors "Sub-sector 1".."Sub-sector k"
    * (SS1..SSk), without locations. Codes that already exist are skipped and nothing is renamed, so it can be run again
    * to add more. Sector codes are unique within a planting year, sub-sector codes within their sector.
@@ -343,6 +457,12 @@ export class GeographyController {
     });
   }
 }
+
+const KmlBody = z.object({
+  kml: z.string().min(20).max(10_000_000),
+  /** false: only report what would change. */
+  apply: z.boolean().default(false),
+});
 
 function rethrowCode(message: string) {
   return (e: any): never => {

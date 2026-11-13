@@ -26,9 +26,11 @@ import {
 import { ProjectForm } from './Projects';
 import { ReferenceForm } from './Reference';
 import { Paged } from '../components/Pagination';
+import { KmlUpload } from '../components/KmlUpload';
+import { RallyPointsTab } from '../components/RallyPoints';
 
-type Tab = 'areas' | 'vendors' | 'schemes' | 'years' | 'fields' | 'assignments' | 'serials';
-const TABS: Tab[] = ['areas', 'vendors', 'schemes', 'years', 'fields', 'assignments', 'serials'];
+type Tab = 'areas' | 'rally' | 'vendors' | 'schemes' | 'years' | 'fields' | 'assignments' | 'serials';
+const TABS: Tab[] = ['areas', 'rally', 'vendors', 'schemes', 'years', 'fields', 'assignments', 'serials'];
 
 interface PlantingYear {
   id: string;
@@ -79,6 +81,7 @@ export function ProjectDetailPage() {
   const setYear = (yearId: string) => setParam({ year: yearId });
   const tabs: [Tab, string][] = [
     ['areas', 'Areas'],
+    ['rally', 'Rally points'],
     ['vendors', 'Vendors'],
     ['schemes', 'ID format'],
     ['years', 'Years'],
@@ -125,6 +128,7 @@ export function ProjectDetailPage() {
       <YearBar years={years} selected={year} onSelect={setYear} onAdd={isAdmin ? addYear : undefined} />
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {tab === 'areas' && <AreasTab project={p} year={year} onAddYear={addYear} />}
+      {tab === 'rally' && <RallyPointsTab project={p} isAdmin={isAdmin} />}
       {tab === 'vendors' && <VendorsTab project={p} year={year} onAddYear={addYear} />}
       {tab === 'schemes' && <SchemesTab project={p} year={year} />}
       {tab === 'years' && <YearsTab project={p} selected={year} onSelect={setYear} onAdd={addYear} />}
@@ -420,6 +424,7 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
   const [form, setForm] = useState<{ kind: 'sector' | 'sub_sector'; area?: any; sector?: any } | null>(null);
   const [importing, setImporting] = useState(false);
   const [quickSetup, setQuickSetup] = useState(false);
+  const [kmlOpen, setKmlOpen] = useState(false);
   const [highlight, setHighlight] = useState<string>();
   const toggle = useMutation({ mutationFn: ({ path, active }: { path: string; active: boolean }) => api.patch(path, { active }) });
   const del = useDelete();
@@ -517,9 +522,10 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
               <>
                 {isAdmin && <button className="primary" onClick={() => setForm({ kind: 'sector' })}>+ Sector</button>}
                 <RowMenu
-                  label="GeoJSON"
+                  label="Import and export"
                   items={[
                     isAdmin && { label: 'Quick setup (numbered sectors)', onClick: () => setQuickSetup(true) },
+                    isAdmin && { label: 'Upload KML', onClick: () => setKmlOpen(true) },
                     isAdmin && { label: 'Import GeoJSON', onClick: () => setImporting(true) },
                     { label: 'Export GeoJSON', onClick: exportGeoJson },
                   ]}
@@ -546,6 +552,7 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
                 action={isAdmin && (
                   <div className="row" style={{ justifyContent: 'center' }}>
                     <button onClick={() => setForm({ kind: 'sector' })}>+ Add sector</button>
+                    <button onClick={() => setKmlOpen(true)}>Upload KML</button>
                     <button onClick={() => setImporting(true)}>Import GeoJSON</button>
                   </div>
                 )}
@@ -564,6 +571,7 @@ function AreasTab({ project, year, onAddYear }: { project: any; year?: PlantingY
       )}
       {del.dialog}
       {form && <AreaForm projectId={projectId} year={year} {...form} onClose={() => setForm(null)} />}
+      {kmlOpen && year && <KmlUpload year={year} onClose={() => setKmlOpen(false)} />}
       {importing && year && <ImportForm projectId={projectId} year={year} onClose={() => setImporting(false)} />}
       {quickSetup && year && (
         <Modal title={`Quick setup for ${year.year_label}`} onClose={() => setQuickSetup(false)}>
