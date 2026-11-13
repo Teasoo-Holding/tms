@@ -173,6 +173,22 @@ On a tree's page (administrators), **Height from photo** → "Estimate height fr
 
 Each saved estimate is its own record with the photo, stick length, points, suggested and confirmed heights, a method note, the reviewer and the date. Heights measured in the field are never changed. Each estimate costs a few US cents; it only runs when an administrator asks.
 
+## Areas from KML files
+
+Projects → the project → choose the planting year → **Import and export → Upload KML**. Name each outline "Sector 1", "Sector 1 Subsector 1" and so on (S1, S1/SS1 also work). TMS shows what will change before anything is saved. Existing sectors and sub-sectors are updated in place (outline and reference point), so trees keep their areas; missing ones are created; nothing is deleted. Points named as rally points (for example "Rally point – camp") are added to the project's rally points.
+
+From Google Earth, save the folder of places as KML. A file that only lists map layers (cloud "earth data layers") has no coordinates and cannot be read.
+
+## Offline field map (phones)
+
+Home → **Field map**. It shows the project's sectors and sub-sectors (from their GPS outlines), the officer's position from the phone's GPS, the starting point they mark, the trail they walk (recorded every few metres, also with the screen off) and the project's rally points (Projects → Rally points, or a KML upload). It gives the straight-line distance and direction to the starting point or a rally point, with an arrow that follows the phone's compass, and says which sector and sub-sector the officer is in.
+
+- **Fully offline:** all data is on the phone. GPS needs no internet or mobile signal. There are no map tiles, so no map provider, licence, download limits or costs apply. The map library (MapLibre) is open source (BSD licence).
+- **No background map and no routing:** the map has no roads, paths or satellite view, so there is no turn-by-turn route. Officers follow the arrow, or walk back along their orange trail.
+- **Accuracy:** the screen says when GPS is weak (worse than about 25 m) or lost. Positions worse than 35 m are left out of the trail. Under dense canopy, accuracy drops; standing in a clearing for a minute helps.
+- **Battery:** the trail uses GPS continuously while it records; stop it at the end of the day ("Stop trail" or the notification).
+- **Privacy:** the trail stays on the phone; it is not sent to the server. A new starting point clears the old trail.
+
 ## Sessions
 
 Field phones often lose the network mid-request. Refresh tokens rotate, but a phone that presents its

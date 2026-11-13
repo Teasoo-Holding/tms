@@ -17,6 +17,22 @@ data class ProjectEntity(
     val location: String?,
     /** Days between maintenance visits; a tree is due this long after its last maintenance (or planting). */
     @ColumnInfo(defaultValue = "90") val maintenanceIntervalDays: Int = 90,
+    /** The project's rally points, as JSON [{name, latitude, longitude}] (#128). */
+    val rallyPointsJson: String? = null,
+)
+
+/**
+ * The field map's trail on this phone (#128): the starting point the officer marked (kind START) and the positions
+ * recorded after it (kind TRACK). Kept on the phone only; a new starting point clears the old trail.
+ */
+@Entity(tableName = "field_track_points")
+data class TrackPointEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val kind: String,
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyMeters: Float?,
+    val recordedAt: Long,
 )
 
 @Entity(tableName = "planting_years", indices = [Index("projectId")])

@@ -10,7 +10,10 @@ import kotlinx.serialization.json.JsonNull
 
 private fun JsonElement?.asText(): String? = if (this == null || this is JsonNull) null else toString()
 
-fun ProjectDto.toEntity() = ProjectEntity(id, name, shortCode, status, physicalIdUniqueness, location, maintenanceIntervalDays)
+fun ProjectDto.toEntity() = ProjectEntity(
+    id, name, shortCode, status, physicalIdUniqueness, location, maintenanceIntervalDays,
+    rallyPointsJson = rallyPoints.takeIf { it.isNotEmpty() }?.let { com.teasoo.tms.data.remote.TmsJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(com.teasoo.tms.data.remote.RallyPointDto.serializer()), it) },
+)
 fun PlantingYearDto.toEntity() = PlantingYearEntity(id, projectId, yearLabel, active)
 fun IdSchemeDto.toEntity() = IdSchemeEntity(
     id = id, projectId = projectId, version = version,

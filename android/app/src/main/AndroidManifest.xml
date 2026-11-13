@@ -5,9 +5,13 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Installing a downloaded update of this app (it is not distributed through Google Play). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <!-- Only for administrators filling an area's reference point; tree GPS is never collected. -->
+    <!-- An area's reference point, and the officer's own position on the offline field map; tree GPS is never collected. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- The field map's trail keeps recording with the screen off (#128). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
@@ -29,6 +33,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".field.TrailService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
         <!-- Hands a downloaded update APK to Android's package installer. -->
         <provider
             android:name="androidx.core.content.FileProvider"

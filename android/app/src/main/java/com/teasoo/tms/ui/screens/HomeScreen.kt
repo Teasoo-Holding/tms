@@ -162,6 +162,7 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
             }
             if (projects.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
+                Pill(Icons.Default.Map, "Field map") { nav.navigate(Routes.FIELD_MAP) }
                 Pill(Icons.Default.Search, "Find a tree") { nav.navigate(Routes.TREES) }
                 Pill(Icons.Default.History, "My visits") { nav.navigate(Routes.MY_VISITS) }
                 Pill(

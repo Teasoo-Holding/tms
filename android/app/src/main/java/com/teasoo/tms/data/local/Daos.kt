@@ -330,3 +330,13 @@ interface KeyValueDao {
     @Query("SELECT value FROM kv WHERE `key` = :key") fun observe(key: String): Flow<String?>
     @Query("DELETE FROM kv WHERE `key` = :key") suspend fun remove(key: String)
 }
+
+/** The field map's trail (#128). */
+@Dao
+interface TrackDao {
+    @Query("SELECT * FROM field_track_points ORDER BY id") fun points(): Flow<List<TrackPointEntity>>
+    @Query("SELECT * FROM field_track_points WHERE kind = 'START' ORDER BY id DESC LIMIT 1") suspend fun start(): TrackPointEntity?
+    @Query("SELECT * FROM field_track_points ORDER BY id DESC LIMIT 1") suspend fun last(): TrackPointEntity?
+    @Insert suspend fun insert(point: TrackPointEntity)
+    @Query("DELETE FROM field_track_points") suspend fun clear()
+}

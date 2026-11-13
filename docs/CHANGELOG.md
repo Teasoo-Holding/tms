@@ -7,6 +7,26 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-13: 2025 sectors, KML upload, offline field map, executive overview (migrations 022–023)
+- **2025 areas (migration 022):** 26 sectors and 239 sub-sectors from SEPLAT_EHOR_2025_Sectors_and_Subsectors_FULL.kml.
+  - Sectors 1–18 (portions A and D) are surveyed. Sectors 19–26 (portions B and C) have approximate GPS: a computed planning grid whose pegs are still to be set.
+  - Existing 2025 areas are updated in place, so trees keep their sectors and sub-sectors.
+- **KML upload:** Projects → planting year → Import and export → Upload KML. It previews, then creates or updates sectors and sub-sectors (nothing is deleted) and adds rally points.
+- **Rally points (migration 023):** Projects → Rally points; synced to phones (local database version 9).
+- **Offline field map (#128):** Home → Field map, on the phone. Works with no internet:
+  - shows the sectors, your position and GPS quality, and which sector and sub-sector you are in;
+  - "Mark starting point here" starts recording your trail, also with the screen off;
+  - shows the distance and direction back to your starting point or a rally point, with a compass arrow.
+- **Executive overview (#129):** executives see tree records by planting year, vendor and species, plus weekly field activity, without tree health. Each row opens the matching trees. Administrators find it under "Executive overview".
+- **Dashboard and client page:**
+  - Area coverage is grouped by planting year: one row per sector, opening into its sub-sectors (#120).
+  - Status charts have clearer headings, are grouped by planting year and list sectors in number order (#126, #127).
+- **Trees page:** the count says "669 trees" or "669 matching trees" (#122); there is also a vendor filter.
+- **Tree details:** a saved height estimate shows next to measured height, marked "Estimate" (#121).
+- **Conflicts:** the choices read "Keep the older existing record" and "Accept the most recent incoming submission", with what happens shown before you confirm (#124).
+- **Field activity:** corrections have their own column (#125).
+- **Phone:** signing out asks for confirmation, and warns that signing back in may need internet (#123).
+
 ## 2026-11-12: Status colours, planting years on sector charts, conflict choices, free height marking
 - **Status colours (#114):** Alive green, Transplant Shock (and other "alive but struggling" statuses) yellow, Dead red, everywhere: badges, charts, legends, the phone. Each status keeps its label and symbol.
 - **Planting year on sector charts (#115, #116):**

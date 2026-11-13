@@ -68,7 +68,12 @@ data class ProjectDto(
     val id: String, val name: String, @SerialName("short_code") val shortCode: String, val status: String,
     @SerialName("physical_id_uniqueness") val physicalIdUniqueness: String, val location: String? = null,
     @SerialName("maintenance_interval_days") val maintenanceIntervalDays: Int = 90,
+    @SerialName("rally_points") val rallyPoints: List<RallyPointDto> = emptyList(),
 )
+
+/** A project's named meeting point for the field map (#128). */
+@Serializable
+data class RallyPointDto(val name: String, val latitude: Double, val longitude: Double)
 
 @Serializable
 data class PlantingYearDto(val id: String, @SerialName("project_id") val projectId: String, @SerialName("year_label") val yearLabel: String, val active: Boolean)
