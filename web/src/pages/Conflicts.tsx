@@ -78,7 +78,21 @@ function ConflictReview({ id, onClose }: { id: string; onClose: () => void }) {
   const resolve = useMutation({ mutationFn: () => api.post(`/conflicts/${id}/resolve`, { resolution, notes, serial_input: serial || undefined }), onSuccess: onClose });
   const d = c.data;
   if (!d) return null;
-  const options = RESOLUTIONS[d.conflict_type.startsWith('DUPLICATE_') && d.conflict_type !== 'DUPLICATE_REPLACEMENT' ? 'DUPLICATE' : d.conflict_type];
+  const base = RESOLUTIONS[d.conflict_type.startsWith('DUPLICATE_') && d.conflict_type !== 'DUPLICATE_REPLACEMENT' ? 'DUPLICATE' : d.conflict_type];
+  // Name the records by age, so the choice reads "keep the older" or "accept the most recent" (#124).
+  const incomingAge = age(d.incoming, d.existing);
+  const existingAge = age(d.existing, d.incoming);
+  const named = (key: string, label: string) =>
+    key === 'KEEP_EXISTING_RECORD'
+      ? `Keep the ${existingAge ? `${existingAge.toLowerCase()} ` : ''}existing record (${d.existing?.physical_tree_id ?? '—'}). The incoming submission is set aside: kept, not deleted, and listed under Rejected records.`
+      : key === 'ACCEPT_INCOMING_RECORD'
+        ? `Accept the ${incomingAge ? `${incomingAge.toLowerCase()} ` : ''}incoming submission. It takes the tree ID; the existing record is set aside with its visits and photos: kept, not deleted, and listed under Rejected records.`
+        : label;
+  const options = base.map(([key, label, serial]) => [key, named(key, label), serial] as [string, string, boolean]);
+  const summary: Record<string, string> = {
+    KEEP_EXISTING_RECORD: `${d.existing?.physical_tree_id ?? 'The existing record'} stays as it is. The incoming submission is set aside.`,
+    ACCEPT_INCOMING_RECORD: `The incoming submission becomes ${d.existing?.physical_tree_id ?? 'the tree'}. The existing record is set aside, not deleted.`,
+  };
   const needsSerial = options.find(([k]) => k === resolution)?.[2];
   return (
     <Modal title={TYPE_LABEL[d.conflict_type]} onClose={onClose} wide>
@@ -104,11 +118,18 @@ function ConflictReview({ id, onClose }: { id: string; onClose: () => void }) {
                 </label>
               ))}
             </fieldset>
+            {summary[resolution] && (
+              <div className="notice" role="status">
+                <strong>What happens:</strong> {summary[resolution]} The decision, who made it and your notes go into the audit log.
+              </div>
+            )}
             {needsSerial && <Field label="Corrected serial"><input required inputMode="numeric" value={serial} onChange={(e) => setSerial(e.target.value)} /></Field>}
             <Field label="Notes" hint="why this resolution; kept in the audit log"><textarea required minLength={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
             <div className="form-actions">
               <button type="button" onClick={onClose}>Cancel</button>
-              <button className="primary" disabled={resolve.isPending}>Resolve</button>
+              <button className="primary" disabled={!resolution || resolve.isPending}>
+                {resolution === 'KEEP_EXISTING_RECORD' ? 'Keep the existing record' : resolution === 'ACCEPT_INCOMING_RECORD' ? 'Accept the incoming submission' : 'Resolve'}
+              </button>
             </div>
           </form>
         ) : (

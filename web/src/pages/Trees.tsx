@@ -9,7 +9,7 @@ import { SPECIES_MATCH_FILTERS, SpeciesMatch } from '../components/SpeciesMatch'
 import { useIsAdmin } from '../auth';
 import { ActiveFilter, EmptyState, ErrorNotice, FilterChips, fmtDate, fmtNum, MaintenanceDue, PageHeader, RecordStatePill, SortOrder, SortTh, StatusBadge } from '../components/ui';
 
-const FILTER_KEYS = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'record_state', 'maintenance', 'species_match', 'created_by'];
+const FILTER_KEYS = ['project_id', 'planting_year_id', 'sector_id', 'sub_sector_id', 'species_id', 'status_id', 'record_state', 'maintenance', 'species_match', 'created_by', 'vendor_id'];
 /** What a tree's page needs to step through this list: its filters and sort (see TreePager). */
 export const TREE_LIST_KEYS = [...FILTER_KEYS, 'q', 'sort', 'order'];
 const MAINTENANCE_FILTERS: [string, string][] = [['overdue', 'Maintenance overdue'], ['due_soon', 'Maintenance due in 14 days']];
@@ -113,6 +113,7 @@ export function TreesPage() {
   const chip = (key: string, label: string, value: string): ActiveFilter | null => (get(key) ? { key, label, value, onClear: () => set(key, '') } : null);
   const chips = [
     chip('q', 'Tree ID', get('q')),
+    chip('vendor_id', 'Vendor', trees.data?.items[0]?.vendor_name ?? '…'),
     chip('created_by', 'Registered by', trees.data?.items[0]?.created_by_name ?? '…'),
     chip('project_id', 'Project', nameOf(projects.data, get('project_id'), (p) => p.name)),
     chip('planting_year_id', 'Planting year', yearLabel.get(yearId) ?? '…'),
@@ -130,7 +131,13 @@ export function TreesPage() {
     <div>
       <PageHeader
         title={get('created_by') && trees.data?.items[0] ? `Trees registered by ${trees.data.items[0].created_by_name}` : 'Trees'}
-        actions={trees.data && <span className="pill">{fmtNum(total)}</span>}
+        actions={
+          trees.data && (
+            <span className="pill" role="status" aria-live="polite">
+              {fmtNum(total)} {chips.length ? (total === 1 ? 'matching tree' : 'matching trees') : total === 1 ? 'tree' : 'trees'}
+            </span>
+          )
+        }
       />
       {get('created_by') && (
         <p className="muted" style={{ marginTop: 0 }}>

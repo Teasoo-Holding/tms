@@ -49,12 +49,26 @@ fun HomeScreen(vm: AppViewModel, nav: NavController) {
 private fun AccountMenu(session: SessionState.Active, vm: AppViewModel) {
     var menu by remember { mutableStateOf(false) }
     var blocked by remember { mutableStateOf(false) }
+    var confirming by remember { mutableStateOf(false) }
     val sync by vm.sync.collectAsStateWithLifecycle()
     val unsent = sync.pendingOperations + sync.unsentPhotos
     IconButton(onClick = { menu = true }) { Icon(Icons.Default.AccountCircle, contentDescription = "Account") }
     DropdownMenu(menu, { menu = false }) {
         DropdownMenuItem(text = { Text("${session.user.fullName}\n${roleLabel(session.user.role)}") }, onClick = {}, enabled = false)
-        DropdownMenuItem(text = { Text("Sign out") }, onClick = { menu = false; if (unsent > 0) blocked = true else vm.signOut() })
+        DropdownMenuItem(text = { Text("Sign out") }, onClick = { menu = false; if (unsent > 0) blocked = true else confirming = true })
+    }
+    // An accidental sign-out in the field can leave an officer unable to sign back in without internet (#123).
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("Sign out?") },
+            text = {
+                Text("If you sign out, you may not be able to sign back in until you have internet. " +
+                    "Stay signed in if you are still working in the field.")
+            },
+            confirmButton = { TextButton(onClick = { confirming = false; vm.signOut() }) { Text("Sign out") } },
+            dismissButton = { Button(onClick = { confirming = false }) { Text("Stay signed in") } },
+        )
     }
     // Every record must reach the server under the account that entered it before anyone signs out.
     if (blocked) {
@@ -148,6 +162,7 @@ private fun FieldHome(vm: AppViewModel, nav: NavController, session: SessionStat
             }
             if (projects.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
+                Pill(Icons.Default.Map, "Field map") { nav.navigate(Routes.FIELD_MAP) }
                 Pill(Icons.Default.Search, "Find a tree") { nav.navigate(Routes.TREES) }
                 Pill(Icons.Default.History, "My visits") { nav.navigate(Routes.MY_VISITS) }
                 Pill(

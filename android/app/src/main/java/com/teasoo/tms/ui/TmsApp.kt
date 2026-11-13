@@ -33,6 +33,7 @@ object Routes {
     const val EDIT = "edit/{treeId}"
     const val SYNC = "sync"
     const val MAP = "map"
+    const val FIELD_MAP = "field-map"
     const val SESSION_SETUP = "session/setup"
     const val SESSION_REGISTER = "session/register"
     const val ADMIN_DASHBOARD = "admin/dashboard"
@@ -74,6 +75,10 @@ private fun MainNav(vm: AppViewModel) {
         composable(Routes.EDIT) { EditTreeScreen(app = vm, onDone = { nav.popBackStack() }) }
         composable(Routes.SYNC) { SyncScreen(vm, onOpenTree = { nav.navigate(Routes.tree(it)) }, onBack = { nav.popBackStack() }) }
         composable(Routes.MAP) { AreaMapScreen(vm, onBack = { nav.popBackStack() }) }
+        composable(Routes.FIELD_MAP) {
+            val selected by vm.selectedProjectId.collectAsStateWithLifecycle()
+            com.teasoo.tms.field.FieldMapScreen(selected, onBack = { nav.popBackStack() })
+        }
         composable(Routes.SESSION_SETUP) { SessionSetupScreen(onStarted = { nav.popBackStack(Routes.HOME, inclusive = false) }, onBack = { nav.popBackStack() }) }
         composable(Routes.SESSION_REGISTER) { RapidRegisterScreen(onBack = { nav.popBackStack() }, onVisitTree = { nav.navigate(Routes.observe(it)) }) }
         composable(Routes.ADMIN_DASHBOARD) { DashboardScreen(vm, onBack = { nav.popBackStack() }) }

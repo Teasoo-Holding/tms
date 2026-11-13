@@ -10,6 +10,7 @@ import { AuditPage } from './pages/Audit';
 import { ClientLinksPage } from './pages/ClientLinks';
 import { ConflictsPage } from './pages/Conflicts';
 import { DashboardPage } from './pages/Dashboard';
+import { ExecutiveDashboard } from './pages/ExecutiveDashboard';
 import { FieldActivityPage } from './pages/FieldActivity';
 import { LandingPage } from './pages/Landing';
 import { LoginPage } from './pages/Login';
@@ -63,10 +64,13 @@ function App() {
     );
   }
   const admin = user.role === 'ADMIN';
+  // Executives and sponsors get the simple overview without tree health (#129); administrators keep the full dashboard.
+  const executive = user.role === 'EXECUTIVE';
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<DashboardPage />} />
+        <Route index element={executive ? <ExecutiveDashboard /> : <DashboardPage />} />
+        <Route path="overview" element={<ExecutiveDashboard />} />
         {/* The density map now lives on client reports, once areas have GPS outlines. */}
         <Route path="density" element={<Navigate to="/" replace />} />
         <Route path="trees" element={<TreesPage />} />

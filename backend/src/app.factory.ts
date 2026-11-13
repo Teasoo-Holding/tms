@@ -15,7 +15,8 @@ export async function createApp(): Promise<INestApplication> {
   // same-site lets the web portal (another port in development) display signed photo URLs.
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'same-site' } }));
   app.set('trust proxy', 1);
-  app.useBodyParser('json', { limit: '2mb' });
+  // KML uploads of a whole planting site can be several megabytes.
+  app.useBodyParser('json', { limit: '10mb' });
   app.enableCors({ origin: config.corsOrigins, credentials: false });
   app.setGlobalPrefix('api/v1');
   app.enableShutdownHooks();

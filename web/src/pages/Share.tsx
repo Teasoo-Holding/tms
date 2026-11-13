@@ -179,7 +179,6 @@ function ShareOverview({ token, base }: ShareContext) {
     { key: 'unknown_trees', label: 'No status yet', color: 'var(--border-strong)' },
   ];
   const lifeSectors = sectorShare.filter((r: any) => r.registered_trees > 0);
-  const lifeValue = (c: string, k: string) => lifeSectors.find((r: any) => sectorLabel(r) === c)?.[k] ?? 0;
   const aliveShare = (r: any) => (r.alive_trees + r.dead_trees ? `${Math.round((r.alive_trees / (r.alive_trees + r.dead_trees)) * 100)}%` : '—');
 
   return (
@@ -269,18 +268,28 @@ function ShareOverview({ token, base }: ShareContext) {
             <HBarChart data={byVendor} />
           </ChartCard>
           <ChartCard
-            title="Alive share by sector"
-            subtitle="Latest visit of each tree"
+            title="Tree status by planting year and sector"
+            subtitle="Share of each sector’s trees that are alive, dead or missing, or have no status yet, from each tree’s latest visit"
             empty={lifeSectors.length === 0 && 'No trees yet.'}
             legend={<Legend items={lifeSeries} />}
             table={
               <SimpleTable
-                head={['Sector', 'Alive', 'Dead or missing', 'No status yet', 'Alive share']}
-                rows={lifeSectors.map((r: any) => [sectorLabel(r), fmtNum(r.alive_trees), fmtNum(r.dead_trees), fmtNum(r.unknown_trees), aliveShare(r)])}
+                head={['Planting year', 'Sector', 'Alive', 'Dead or missing', 'No status yet', 'Alive share']}
+                rows={groupByYear<any>(lifeSectors).flatMap((g) => g.rows.map((r: any) => [g.year ?? '—', sectorLabel(r), fmtNum(r.alive_trees), fmtNum(r.dead_trees), fmtNum(r.unknown_trees), aliveShare(r)]))}
               />
             }
           >
-            <StackedBars categories={lifeSectors.map(sectorLabel)} series={lifeSeries} values={lifeValue} normalize />
+            {groupByYear<any>(lifeSectors).map((g, _i, all) => (
+              <div key={g.year ?? 'none'} className="year-block">
+                {all.length > 1 && <h3 className="year-heading">{yearHeading(g.year)}</h3>}
+                <StackedBars
+                  categories={g.rows.map(sectorLabel)}
+                  series={lifeSeries}
+                  values={(c, k) => g.rows.find((r: any) => sectorLabel(r) === c)?.[k] ?? 0}
+                  normalize
+                />
+              </div>
+            ))}
           </ChartCard>
         </div>
 

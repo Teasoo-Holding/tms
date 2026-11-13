@@ -732,3 +732,8 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 /* Charts split by planting year (#115, #116). */
 .year-block + .year-block { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
 .year-heading { font-size: 14px; margin: 0 0 8px; color: var(--text-secondary); }
+
+/* Area coverage grouped by planting year (#120). */
+table.compact th, table.compact td { padding: 6px 10px; }
+tr.group-row th { background: var(--surface-1); color: var(--text-primary); font-size: 13px; text-transform: none; letter-spacing: 0; position: static; }
+tr.sub-row td { color: var(--text-secondary); font-size: 13px; }

@@ -234,7 +234,7 @@ export function FieldActivityPage() {
                   <thead>
                     <tr>
                       <th className="expander" /><th>Day</th><th>Officer</th><th className="hide-sm">Time</th>
-                      <th className="num">Trees</th><th className="num">Visits</th><th className="num hide-sm">Photos</th>
+                      <th className="num">Trees</th><th className="num">Visits</th><th className="num">Corrections</th><th className="num hide-sm">Photos</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -248,13 +248,14 @@ export function FieldActivityPage() {
                             <td>{d.user_name}</td>
                             <td className="nowrap hide-sm">{timeRange(d.first_at, d.last_at)}</td>
                             <td className="num">{fmtNum(d.trees_registered)}</td>
-                            <td className="num">{fmtNum(d.visits)}{d.corrections ? <span className="muted"> +{d.corrections}</span> : null}</td>
+                            <td className="num">{fmtNum(d.visits)}</td>
+                            <td className="num">{fmtNum(d.corrections ?? 0)}</td>
                             <td className="num hide-sm">{fmtNum(d.photos)}</td>
                           </tr>
                           {open === key && (
                             <tr className="details-row">
                               <td />
-                              <td colSpan={6}>
+                              <td colSpan={7}>
                                 <SessionList sessions={d.sessions} />
                               </td>
                             </tr>

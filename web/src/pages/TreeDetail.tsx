@@ -118,11 +118,21 @@ export function TreeDetailPage() {
               <>
                 <dt>Height</dt>
                 <dd>
-                  {latestHeight ? (
-                    <><strong>{fmtHeight(latestHeight.y)}</strong> <span className="muted">on {fmtDate(new Date(latestHeight.x).toISOString())}</span></>
-                  ) : (
-                    <span className="muted">not recorded</span>
+                  {latestHeight && (
+                    <div>
+                      <strong>{fmtHeight(latestHeight.y)}</strong> <span className="muted">measured on {fmtDate(new Date(latestHeight.x).toISOString())}</span>
+                    </div>
                   )}
+                  {t.height_estimate && (
+                    <div>
+                      <strong>{fmtHeight(t.height_estimate.height_cm)}</strong> <span className="pill">Estimate</span>{' '}
+                      <span className="muted">
+                        from a photo on {fmtDate(t.height_estimate.reviewed_at)}
+                        {isAdmin && <> · <a href="#height-from-photo">details</a></>}
+                      </span>
+                    </div>
+                  )}
+                  {!latestHeight && !t.height_estimate && <span className="muted">not recorded</span>}
                 </dd>
               </>
             )}

@@ -188,7 +188,7 @@ export class TreesController {
     const tree = await this.db.one(this.db, `${TREE_LIST_SQL} WHERE t.id = $1`, [id]);
     if (!tree) throw notFound('Tree');
     await this.access.assertArea(user, tree.project_id, tree.sector_id, tree.sub_sector_id);
-    const [observations, media, lineage, idHistory, snapshot] = await Promise.all([
+    const [observations, media, lineage, idHistory, snapshot, estimate] = await Promise.all([
       this.db.query(
         `SELECT o.*, o.height_cm::float8 AS height_cm, s.code AS status_code, s.name AS status_name, s.is_terminal AS status_terminal, u.full_name AS recorded_by_name,
                 EXISTS (SELECT 1 FROM tree_observations a WHERE a.amends_observation_id = o.id) AS superseded
@@ -208,10 +208,19 @@ export class TreesController {
         [id],
       ),
       this.db.one(this.db, 'SELECT id_components_snapshot FROM trees WHERE id = $1', [id]),
+      // The latest saved height estimate from a photo (#121), shown apart from field measurements.
+      this.db.one(
+        this.db,
+        `SELECT e.id, e.confirmed_height_cm::float8 AS height_cm, e.method_note, e.reviewed_at, e.reference_label, u.full_name AS reviewed_by_name
+           FROM tree_height_estimates e LEFT JOIN users u ON u.id = e.reviewed_by
+          WHERE e.tree_id = $1 AND e.status = 'CONFIRMED' ORDER BY e.reviewed_at DESC LIMIT 1`,
+        [id],
+      ),
     ]);
     return {
       ...withMaintenance(tree),
       id_components_snapshot: snapshot!.id_components_snapshot,
+      height_estimate: estimate,
       observations: observations.rows,
       media: media.rows,
       lineage,

@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, qs } from '../api/client';
-import { groupByYear, sectorLabel, subSectorLabel, yearHeading } from '../areaLabels';
+import { groupByYear, sectorLabel, yearHeading } from '../areaLabels';
+import { AreaCoverage } from '../components/AreaCoverage';
 import { useIsAdmin } from '../auth';
 import { ChartCard, Donut, GroupedColumns, HBarChart, Legend, LineChart, LineSeries, SERIES, StackedBars, StackedColumns, StatTile } from '../charts/charts';
 import { AreaShareView } from '../components/AreaShare';
@@ -297,17 +298,8 @@ export function DashboardPage() {
                   />
                 </section>
                 <section className="card">
-                  <CardHeader title="Area coverage" />
-                  <SimpleTable
-                    head={['Sub-sector', 'Hectares', 'Trees', 'Trees / ha']}
-                    numeric={[1, 2, 3]}
-                    rows={coverage.map((r: any) => [
-                      subSectorLabel(r.sector_code, r.short_code, r.name),
-                      r.area_hectares ?? '—',
-                      fmtNum(r.registered_trees),
-                      r.area_hectares ? (r.registered_trees / r.area_hectares).toFixed(1) : '—',
-                    ])}
-                  />
+                  <CardHeader title="Area coverage" description="By planting year and sector; open a sector for its sub-sectors." />
+                  <AreaCoverage rows={coverage} />
                 </section>
               </div>
 
