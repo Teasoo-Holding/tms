@@ -18,6 +18,7 @@ function Brand() {
 export function Layout() {
   const user = useAuth()!;
   const isAdmin = user.role === 'ADMIN';
+  const isExecutive = user.role === 'EXECUTIVE';
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
   const conflicts = useQuery({ queryKey: ['conflicts', 'OPEN'], queryFn: () => api.get<any[]>('/conflicts'), enabled: isAdmin, refetchInterval: 60_000 });
@@ -30,7 +31,8 @@ export function Layout() {
     return () => window.removeEventListener('keydown', onKey);
   }, [navOpen]);
   const links: [string, string, boolean][] = [
-    ['/', 'Dashboard', true],
+    ['/', isExecutive ? 'Overview' : 'Dashboard', true],
+    ['/overview', 'Executive overview', isAdmin],
     ['/trees', 'Trees', true],
     ['/visits', 'Visits', true],
     ['/field-activity', 'Field activity', true],
@@ -96,6 +98,7 @@ const ICONS: Record<string, string> = {
   '/projects': 'M3 7h7l2 2h9v10H3z',
   '/client-links': 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
   '/conflicts': 'M12 4 2 20h20zM12 10v4M12 17v.5',
+  '/overview': 'M4 20V10M10 20V4M16 20v-7M22 20H2',
   '/species-check': 'M5 19c0-8 6-14 14-14 0 8-6 14-14 14zM5 19l7-7M14 17l2 2 4-4',
   '/reference': 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
   '/users': 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 12 0v1M16 3.5a4 4 0 0 1 0 7M22 21v-1a6 6 0 0 0-4-5.6',

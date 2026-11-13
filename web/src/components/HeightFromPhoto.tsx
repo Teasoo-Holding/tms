@@ -39,7 +39,7 @@ export function HeightFromPhoto({ treeId, hasPhoto }: { treeId: string; hasPhoto
   const pending = estimates.find((e) => e.status === 'SUGGESTED' || e.status === 'UNSUITABLE');
   const saved = estimates.filter((e) => e.status === 'CONFIRMED');
   return (
-    <section className="card">
+    <section className="card" id="height-from-photo">
       <CardHeader
         title="Height from photo"
         description="Mark the bottom and top of the measuring stick and the tree's base and top on the photo. TMS works out the height from the stick used that year: 3 ft in 2025, 1 m in 2026. Saved heights are estimates, kept apart from heights measured in the field."
@@ -89,7 +89,10 @@ function Review({ e, treeId }: { e: any; treeId: string }) {
   const done = () => qc.invalidateQueries({ queryKey: ['height-estimates', treeId] });
   const confirm = useMutation({
     mutationFn: () => api.post(`/height-estimates/${e.id}/confirm`, typed ? { points, height_cm: Number(typed) } : { points }),
-    onSuccess: done,
+    onSuccess: () => {
+      done();
+      qc.invalidateQueries({ queryKey: ['tree', treeId] });
+    },
   });
   const discard = useMutation({ mutationFn: () => api.post(`/height-estimates/${e.id}/discard`), onSuccess: done });
   const cm = points ? heightOf(points, e.image_width, e.image_height, e.reference_length_cm) : null;

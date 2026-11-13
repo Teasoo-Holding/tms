@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { sectorLabel, subSectorLabel } from '../areaLabels';
+import { groupByYear, sectorLabel, subSectorLabel, yearHeading } from '../areaLabels';
 import { Legend, StackedBars } from '../charts/charts';
 import { deadShare, ShareArea, ShareLegend, ShareMap } from './ShareMap';
 import { fmtNum, SimpleTable } from './ui';
@@ -25,7 +25,10 @@ export function AreaShareView({ rows, sectors, boundaries }: { rows: ShareArea[]
   return (
     <section className="card chart">
       <div className="chart-head">
-        <h2>Alive and dead by area</h2>
+        <div>
+          <h2>Tree status by planting year and sector</h2>
+          <p className="muted" style={{ margin: 0 }}>Alive, dead and no status yet, from each tree’s latest visit.</p>
+        </div>
         <span className="spacer" />
         {rows.length > 0 && (
           <button className="link no-print" onClick={() => setAsTable((v) => !v)} aria-pressed={asTable}>
@@ -39,13 +42,19 @@ export function AreaShareView({ rows, sectors, boundaries }: { rows: ShareArea[]
         <div className="stack">
           <div>
             <Legend items={SHARE_SERIES} />
-            <StackedBars categories={sectors.map(sectorLabel)} series={SHARE_SERIES} values={(c, k) => sectors.find((x) => sectorLabel(x) === c)?.[k] ?? 0} />
+            {groupByYear<any>(sectors).map((g, _i, all) => (
+              <div key={g.year ?? 'none'} className="year-block">
+                {all.length > 1 && <h3 className="year-heading">{yearHeading(g.year)}</h3>}
+                <StackedBars categories={g.rows.map(sectorLabel)} series={SHARE_SERIES} values={(c, k) => g.rows.find((x: any) => sectorLabel(x) === c)?.[k] ?? 0} />
+              </div>
+            ))}
           </div>
           {asTable || mapFailed || !located ? (
             <div className="table-wrap tall" style={{ maxHeight: 360 }}>
               <SimpleTable
-                head={['Sub-sector', 'Trees', 'Alive', 'Dead', 'No status yet', '% dead']}
-                rows={rows.map((r) => [
+                head={['Planting year', 'Sub-sector', 'Trees', 'Alive', 'Dead', 'No status yet', '% dead']}
+                rows={rows.map((r: any) => [
+                  r.year_label ?? '—',
                   subSectorLabel(r.sector_code, r.short_code, r.name),
                   fmtNum(r.registered_trees),
                   fmtNum(r.alive_trees),

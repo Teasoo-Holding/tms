@@ -193,7 +193,7 @@ export class ReportsService {
     ]);
 
     const coverage = await q(
-      `SELECT ss.id, ss.name, ss.short_code, s.id AS sector_id, s.short_code AS sector_code, s.name AS sector_name,
+      `SELECT ss.id, ss.name, ss.short_code, s.id AS sector_id, s.short_code AS sector_code, s.name AS sector_name, spy.year_label,
               ss.reference_latitude::float8 AS latitude, ss.reference_longitude::float8 AS longitude,
               ROUND((ST_Area(ss.boundary_geometry::geography) / 10000)::numeric, 2) AS area_hectares,
               count(t.id)::int AS registered_trees,
@@ -201,15 +201,19 @@ export class ReportsService {
               count(t.id) FILTER (WHERE st.is_terminal)::int AS dead_trees,
               count(t.id) FILTER (WHERE st.id IS NULL)::int AS unknown_trees
          FROM sub_sectors ss JOIN sectors s ON s.id = ss.sector_id
+         LEFT JOIN planting_years spy ON spy.id = s.planting_year_id
          LEFT JOIN trees t ON t.sub_sector_id = ss.id AND ${where}
          LEFT JOIN tree_statuses st ON st.id = t.current_status_id
         WHERE ss.project_id IN (SELECT DISTINCT t.project_id FROM trees t WHERE ${where}) OR ss.project_id = $${n + 1}::uuid
-        GROUP BY ss.id, ss.name, ss.short_code, s.id, s.short_code, s.name ORDER BY s.short_code, ss.short_code`,
+        GROUP BY ss.id, ss.name, ss.short_code, s.id, s.short_code, s.name, spy.year_label
+        -- Newest planting year first; codes in number order (S2 before S10, SS2 before SS10) (#120, #127).
+        ORDER BY spy.year_label DESC NULLS LAST, regexp_replace(s.short_code, '[0-9]+$', ''), NULLIF(substring(s.short_code from '[0-9]+$'), '')::bigint,
+                 regexp_replace(ss.short_code, '[0-9]+$', ''), NULLIF(substring(ss.short_code from '[0-9]+$'), '')::bigint`,
       [f.project_id ?? null],
     );
     // Alive/dead share per sector, for the map.
     const sectorShare = [...coverage.reduce((m: Map<string, any>, r: any) => {
-      const x = m.get(r.sector_id) ?? { id: r.sector_id, short_code: r.sector_code, name: r.sector_name, registered_trees: 0, alive_trees: 0, dead_trees: 0, unknown_trees: 0 };
+      const x = m.get(r.sector_id) ?? { id: r.sector_id, short_code: r.sector_code, name: r.sector_name, year_label: r.year_label, registered_trees: 0, alive_trees: 0, dead_trees: 0, unknown_trees: 0 };
       for (const k of ['registered_trees', 'alive_trees', 'dead_trees', 'unknown_trees']) x[k] += r[k];
       return m.set(r.sector_id, x);
     }, new Map()).values()];
