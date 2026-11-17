@@ -8,6 +8,8 @@ import { AreaShareView } from '../components/AreaShare';
 import { TeasooLink, TeasooLogo } from '../components/Brand';
 import { DensityReport, DensityView, hasOutlines } from '../components/DensityMap';
 import { ShareArea } from '../components/ShareMap';
+import { SpeciesCard } from '../components/SpeciesCard';
+import { ExecutiveOverviewView } from './ExecutiveDashboard';
 import { PhotoSource, PhotoSourceProvider } from '../components/Photos';
 import { ErrorNotice, fmtDate, fmtDateTime, fmtNum, relativeTime, SimpleTable, statusColor } from '../components/ui';
 import { ShareAreas } from './ShareAreas';
@@ -102,12 +104,14 @@ export function SharePage() {
         <div className="share-body">
           <nav className="share-nav no-print" aria-label="Sections">
             <NavLink to={ctx.root} end className={navClass}>Overview</NavLink>
+            <NavLink to={`${ctx.root}/executive`} className={navClass}>Executive overview</NavLink>
             <NavLink to={`${ctx.root}/trees`} className={navClass}>Trees</NavLink>
             <NavLink to={`${ctx.root}/areas`} className={navClass}>Areas</NavLink>
           </nav>
           <main className="share-main">
             <Routes>
               <Route index element={<ShareOverview {...ctx} />} />
+              <Route path="executive" element={<ShareExecutive {...ctx} />} />
               <Route path="trees" element={<ShareTrees {...ctx} />} />
               <Route path="trees/:treeId" element={<ShareTree {...ctx} />} />
               <Route path="areas" element={<ShareAreas {...ctx} />} />
@@ -121,8 +125,8 @@ export function SharePage() {
   );
 }
 
-/** Overview: the dashboard-style summary with its filters, map and downloads (the original client report). */
-function ShareOverview({ token, base }: ShareContext) {
+/** The client link's filters, kept in the address so a filtered view can be shared or reloaded. */
+function useShareFilters() {
   const [params, setParams] = useSearchParams();
   const get = (k: string) => params.get(k) ?? '';
   const set = (k: string, v: string) => {
@@ -132,9 +136,101 @@ function ShareOverview({ token, base }: ShareContext) {
     (DEPENDENTS[k] ?? []).forEach((d) => next.delete(d));
     setParams(next, { replace: true });
   };
-  const filters = Object.fromEntries(FILTER_KEYS.map((k) => [k, get(k)]));
-  const activeCount = FILTER_KEYS.filter((k) => get(k)).length;
-  const filter = qs(filters);
+  const values = Object.fromEntries(FILTER_KEYS.map((k) => [k, get(k)]));
+  return {
+    get,
+    set,
+    values,
+    filter: qs(values),
+    activeCount: FILTER_KEYS.filter((k) => get(k)).length,
+    clear: () => setParams(new URLSearchParams(), { replace: true }),
+  };
+}
+
+type ShareFilters = ReturnType<typeof useShareFilters>;
+
+/** Planting year, vendor, sector and dates, for any client page that shows the summary. */
+function ShareFilterPanel({ d, f }: { d: any; f: ShareFilters }) {
+  const { get, set } = f;
+  const yearId = get('planting_year_id');
+  const yearAreas = (d.areas ?? []).filter((a: any) => !yearId || a.planting_year_id === yearId || a.planting_year_id == null);
+  const vendors: any[] = (d.vendors ?? []).filter((v: any) => !yearId || v.planting_year_id === yearId);
+  const vendorOptions = [...new Map(vendors.map((v) => [v.id, v.short_code ? `${v.name} (${v.short_code})` : v.name])).entries()];
+  return (
+    <section className="card filter-panel no-print" aria-label="Filters">
+      <div className="filters" style={{ marginBottom: 0 }}>
+        <label className="field">
+          Planting year
+          <select value={yearId} onChange={(e) => set('planting_year_id', e.target.value)}>
+            <option value="">All years</option>
+            {(d.planting_years ?? []).map((y: any) => <option key={y.id} value={y.id}>{y.year_label}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          Vendor
+          <select value={get('vendor_id')} onChange={(e) => set('vendor_id', e.target.value)} disabled={vendorOptions.length === 0}>
+            <option value="">All vendors</option>
+            {vendorOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          Sector
+          <select value={get('sector_id')} onChange={(e) => set('sector_id', e.target.value)} disabled={yearAreas.length === 0}>
+            <option value="">All sectors</option>
+            {yearAreas.map((a: any) => <option key={a.id} value={a.id}>{sectorLabel(a)}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          From
+          <input type="date" value={get('from')} max={get('to') || undefined} onChange={(e) => set('from', e.target.value)} />
+        </label>
+        <label className="field">
+          To
+          <input type="date" value={get('to')} min={get('from') || undefined} onChange={(e) => set('to', e.target.value)} />
+        </label>
+        {f.activeCount > 0 && <button type="button" onClick={f.clear}>Clear</button>}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Executive overview (#132): how much field work is done, without tree health, for the client. Moved here from the
+ * main app. Same filters as the Overview; rows open the matching trees on this link.
+ */
+function ShareExecutive({ token, base, root }: ShareContext) {
+  const f = useShareFilters();
+  const view = useQuery({ queryKey: ['share', token, f.filter], queryFn: () => publicGet(`${base}${f.filter}`), retry: (n, e) => !isMissing(e) && n < 1 });
+  const d = view.data;
+  if (view.error) return <ErrorNotice error={view.error} />;
+  if (!d) return <div className="empty">Loading…</div>;
+  // The link's tree list filters by year, sector and species (not vendor).
+  const trees = (params: Record<string, string | undefined>) =>
+    params.vendor_id !== undefined ? null : `${root}/trees${qs({ planting_year_id: f.get('planting_year_id') || undefined, sector_id: f.get('sector_id') || undefined, ...params })}`;
+  return (
+    <div className="stack">
+      <div className="page-header" style={{ marginBottom: 0 }}>
+        <div className="page-title">
+          <h2 style={{ margin: 0 }}>Executive overview</h2>
+          <p className="page-sub">How much field work is done. Open a row to see its trees.</p>
+        </div>
+        <span className="spacer" />
+        <div className="page-actions no-print">
+          <button onClick={() => window.print()}>Print / Save as PDF</button>
+        </div>
+      </div>
+      <ShareFilterPanel d={d} f={f} />
+      <div className={view.isFetching ? 'refetching' : undefined}>
+        <ExecutiveOverviewView s={d.summary} trees={trees} />
+      </div>
+    </div>
+  );
+}
+
+/** Overview: the dashboard-style summary with its filters, map and downloads (the original client report). */
+function ShareOverview({ token, base }: ShareContext) {
+  const sf = useShareFilters();
+  const { get, filter } = sf;
   const view = useQuery({ queryKey: ['share', token, filter], queryFn: () => publicGet(`${base}${filter}`), retry: (n, e) => !isMissing(e) && n < 1 });
   const d = view.data;
   const yearId = get('planting_year_id');
@@ -166,8 +262,6 @@ function ShareOverview({ token, base }: ShareContext) {
   const donut = statusRows.map((r) => ({ label: r.name, value: r.count, color: statusColor(r.code, r.is_terminal, r.name) }));
   const coverage: ShareArea[] = (s.area_coverage ?? []).filter((r: any) => sectorIds.has(r.sector_id));
   const sectorShare = (s.sector_share ?? []).filter((r: any) => sectorIds.has(r.id));
-  const vendors: any[] = (d.vendors ?? []).filter((v: any) => !yearId || v.planting_year_id === yearId);
-  const vendorOptions = [...new Map(vendors.map((v) => [v.id, v.short_code ? `${v.name} (${v.short_code})` : v.name])).entries()];
   const download = (file: string) => apiUrl(`${base}/${file}${filter}`);
   const weeks: { week: string; trees: number; cumulative: number }[] = s.planted_by_week ?? [];
   const fmtWeek = fmtShortDate;
@@ -195,42 +289,7 @@ function ShareOverview({ token, base }: ShareContext) {
         </div>
       </div>
 
-      <section className="card filter-panel no-print" aria-label="Filters">
-        <div className="filters" style={{ marginBottom: 0 }}>
-          <label className="field">
-            Planting year
-            <select value={yearId} onChange={(e) => set('planting_year_id', e.target.value)}>
-              <option value="">All years</option>
-              {(d.planting_years ?? []).map((y: any) => <option key={y.id} value={y.id}>{y.year_label}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            Vendor
-            <select value={get('vendor_id')} onChange={(e) => set('vendor_id', e.target.value)} disabled={vendorOptions.length === 0}>
-              <option value="">All vendors</option>
-              {vendorOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            Sector
-            <select value={get('sector_id')} onChange={(e) => set('sector_id', e.target.value)} disabled={yearAreas.length === 0}>
-              <option value="">All sectors</option>
-              {yearAreas.map((a) => <option key={a.id} value={a.id}>{sectorLabel(a)}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            From
-            <input type="date" value={get('from')} max={get('to') || undefined} onChange={(e) => set('from', e.target.value)} />
-          </label>
-          <label className="field">
-            To
-            <input type="date" value={get('to')} min={get('from') || undefined} onChange={(e) => set('to', e.target.value)} />
-          </label>
-          {activeCount > 0 && (
-            <button type="button" onClick={() => setParams(new URLSearchParams(), { replace: true })}>Clear</button>
-          )}
-        </div>
-      </section>
+      <ShareFilterPanel d={d} f={sf} />
 
       <div className={`stack ${view.isFetching ? 'refetching' : ''}`}>
         <div className="grid stats">
@@ -244,9 +303,7 @@ function ShareOverview({ token, base }: ShareContext) {
           <ChartCard title="Current status" empty={statusRows.length === 0 && 'No trees yet.'} table={<SimpleTable head={['Status', 'Trees']} rows={statusRows.map((r) => [r.name, fmtNum(r.count)])} />}>
             <Donut data={donut} />
           </ChartCard>
-          <ChartCard title="Trees by species" empty={(s.by_species ?? []).length === 0 && 'No trees yet.'} table={<SimpleTable head={['Species', 'Trees']} rows={s.by_species.map((r: any) => [r.common_name ?? r.name, fmtNum(r.count)])} />}>
-            <HBarChart data={s.by_species.map((r: any) => ({ label: r.common_name ?? r.name, value: r.count }))} />
-          </ChartCard>
+          <SpeciesCard rows={s.by_species ?? []} />
         </div>
 
         <ChartCard

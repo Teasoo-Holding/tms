@@ -10,6 +10,7 @@ import { AreaShareView } from '../components/AreaShare';
 import { asOf, FreshnessBanner, useFreshness } from '../components/Freshness';
 import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
 import { ShareArea } from '../components/ShareMap';
+import { SpeciesCard } from '../components/SpeciesCard';
 import { CardHeader, ErrorNotice, fmtDateTime, fmtNum, PageHeader, relativeTime, SimpleTable, statusColor, todayStamp } from '../components/ui';
 import { SHOW_HEIGHT } from '../features';
 import { DAY_NOTE } from '../time';
@@ -163,7 +164,15 @@ export function DashboardPage() {
             <StatTile label="Trees planted" info={terms.planted} value={fmtNum(s.totals.planting_events)} foot={s.totals.replacement_trees ? `incl. ${fmtNum(s.totals.replacement_trees)} replacements` : undefined} asOf={totalsAsOf} />
             <StatTile label="Dead or missing" info={terms.dead} value={fmtNum(s.totals.terminal_status_trees)} asOf={totalsAsOf} />
             <StatTile label="Overdue" info={terms.overdue} value={fmtNum(s.totals.overdue_unknown_trees)} foot={`No visit in ${s.overdue_days} days`} asOf={totalsAsOf} />
-            {isAdmin && <StatTile label="Open conflicts" info={terms.conflicts} value={fmtNum(s.data_completeness.open_conflicts)} asOf={totalsAsOf} />}
+            {isAdmin && (
+              <StatTile
+                label="Open conflicts"
+                info={terms.conflicts}
+                value={<Link to="/conflicts" aria-label={`Open conflicts: ${fmtNum(s.data_completeness.open_conflicts)}. Review them`}>{fmtNum(s.data_completeness.open_conflicts)}</Link>}
+                foot={<Link to="/conflicts" className="no-print">Review conflicts →</Link>}
+                asOf={totalsAsOf}
+              />
+            )}
           </div>
           <p className="muted no-print" style={{ margin: 0 }}>
             {DAY_NOTE} <Link to="/glossary">What these numbers mean</Link>
@@ -199,9 +208,7 @@ export function DashboardPage() {
 
           {projectId && <AreaShareCard projectId={projectId} rows={coverage} sectors={(s.sector_share ?? []).filter((r: any) => inYear(r.id))} />}
 
-          <ChartCard title="Trees by species" empty={s.by_species.length === 0 && 'No trees yet.'} table={<SimpleTable head={['Species', 'Trees']} rows={s.by_species.map((r: any) => [r.name, fmtNum(r.count)])} />}>
-            <HBarChart data={s.by_species.map((r: any) => ({ label: r.common_name ?? r.name, value: r.count }))} />
-          </ChartCard>
+          <SpeciesCard rows={s.by_species} />
 
           <div className="more-toggle no-print">
             <button onClick={() => setMore((v) => !v)} aria-expanded={more}>
