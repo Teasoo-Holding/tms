@@ -737,3 +737,19 @@ tr.details-row .visit-session td, tr.details-row .visit-session th { background:
 table.compact th, table.compact td { padding: 6px 10px; }
 tr.group-row th { background: var(--surface-1); color: var(--text-primary); font-size: 13px; text-transform: none; letter-spacing: 0; position: static; }
 tr.sub-row td { color: var(--text-secondary); font-size: 13px; }
+
+/* Area coverage: one collapsible section per planting year (#131). */
+.coverage-years { display: grid; gap: 8px; }
+.coverage-year { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.coverage-year-heading { margin: 0; font-size: 14px; }
+.coverage-year-heading button {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px 10px; width: 100%; min-height: 44px; padding: 8px 12px;
+  border: 0; border-radius: 0; background: var(--surface-1); color: var(--text-primary); font: inherit; font-weight: 600; text-align: left; cursor: pointer;
+}
+.coverage-year-heading button:hover { background: var(--surface-2); }
+.coverage-year-heading button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.coverage-year-sum { font-weight: 400; font-size: 13px; }
+.coverage-year .table-wrap { border: 0; border-radius: 0; border-top: 1px solid var(--border); }
+@media print { .coverage-year [hidden] { display: block !important; } }
+.coverage-year .icon-button { display: inline-grid; place-items: center; width: 28px; height: 28px; min-height: 0; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
+.coverage-year .icon-button:focus-visible { outline: 2px solid var(--focus); border-radius: 4px; }

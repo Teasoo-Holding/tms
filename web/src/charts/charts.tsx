@@ -105,7 +105,10 @@ function vbarPath(x: number, y: number, w: number, h: number, roundTop: boolean)
 }
 
 /** Horizontal bars for one measure across categories (single series → one colour, no legend). */
-export function HBarChart({ data, unit = 'trees', color = SERIES[0] }: { data: { label: string; value: number }[]; unit?: string; color?: string }) {
+/** A value's share of a total, to one decimal place (#134). Rounded per row, so rows may not add to exactly 100%. */
+export const sharePct = (value: number, total: number) => (total > 0 ? `${((value / total) * 100).toFixed(1)}%` : '–');
+
+export function HBarChart({ data, unit = 'trees', color = SERIES[0], share = false }: { data: { label: string; value: number }[]; unit?: string; color?: string; share?: boolean }) {
   const tip = useMarkTooltip();
   const { ref, width } = useWidth();
   if (data.length === 0) return <ChartEmpty>No data yet.</ChartEmpty>;
@@ -113,7 +116,10 @@ export function HBarChart({ data, unit = 'trees', color = SERIES[0] }: { data: {
   const rowH = 28;
   const barH = 18;
   const max = Math.max(...data.map((d) => d.value), 1);
-  const plotW = width - labelW - 56;
+  const total = data.reduce((n, d) => n + d.value, 0);
+  const valueText = (v: number) => (share ? `${v.toLocaleString()} · ${sharePct(v, total)}` : v.toLocaleString());
+  const valueW = share ? 104 : 56;
+  const plotW = width - labelW - valueW;
   return (
     <div ref={ref}>
     <svg width={width} height={data.length * rowH} role="img" aria-label="Bar chart">
@@ -125,10 +131,10 @@ export function HBarChart({ data, unit = 'trees', color = SERIES[0] }: { data: {
             <text className="label" x={labelW - 8} y={y + barH / 2} dy="0.35em" textAnchor="end">
               {d.label.length > 22 ? d.label.slice(0, 21) + '…' : d.label}
             </text>
-            <rect x={labelW} y={i * rowH} width={plotW + 56} height={rowH} fill="transparent" {...tip({ title: d.label, rows: [{ label: unit, value: d.value.toLocaleString(), color }] })} />
+            <rect x={labelW} y={i * rowH} width={plotW + valueW} height={rowH} fill="transparent" {...tip({ title: d.label, rows: [{ label: unit, value: d.value.toLocaleString(), color }, ...(share ? [{ label: 'of total', value: sharePct(d.value, total), color }] : [])] })} />
             <path className="mark" d={hbarPath(labelW, y, Math.max(w, d.value > 0 ? 2 : 0), barH)} fill={color} pointerEvents="none" />
             <text className="value-label" x={labelW + w + 6} y={y + barH / 2} dy="0.35em">
-              {d.value.toLocaleString()}
+              {valueText(d.value)}
             </text>
           </g>
         );

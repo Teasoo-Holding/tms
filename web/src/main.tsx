@@ -70,7 +70,8 @@ function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={executive ? <ExecutiveDashboard /> : <DashboardPage />} />
-        <Route path="overview" element={<ExecutiveDashboard />} />
+        {/* The executive overview moved to client links (#132); old bookmarks land on the home page. */}
+        <Route path="overview" element={<Navigate to="/" replace />} />
         {/* The density map now lives on client reports, once areas have GPS outlines. */}
         <Route path="density" element={<Navigate to="/" replace />} />
         <Route path="trees" element={<TreesPage />} />

@@ -43,6 +43,16 @@ function waitingText(d: FreshnessDevice) {
   const parts = [d.pending_operations && plural(d.pending_operations, 'record'), d.pending_photos && plural(d.pending_photos, 'photo')].filter(Boolean);
   return `${parts.join(', ')} waiting${d.oldest_pending_at ? ` since ${fmtWhen(d.oldest_pending_at)}` : ''}`;
 }
+/**
+ * Shown when no phone reported unsent records (#136). It only claims every device is synchronised when every listed
+ * device has reported its status; phones on older apps never report, so their state is unknown and said so.
+ */
+export function syncedText(devices: FreshnessDevice[]) {
+  const reported = devices.filter((d) => d.status_reported_at).length;
+  if (reported === devices.length) return 'All field devices reported successfully synchronised at their last connection.';
+  const unknown = devices.length - reported;
+  return `${reported} of ${devices.length} field devices reported successfully synchronised at their last connection; ${plural(unknown, 'device has not reported its', 'devices have not reported their')} sync status (older app).`;
+}
 const syncText = (d: FreshnessDevice) => (d.last_sync_at ? `last synced ${fmtWhen(d.last_sync_at)}` : 'not synced yet');
 
 /**
@@ -69,7 +79,7 @@ export function FreshnessBanner({ freshness }: { freshness?: Freshness }) {
             {f.devices_with_pending === 1 ? 'its' : 'their'} last contact
           </span>
         ) : (
-          reporting && <span>No device reported unsent records at its last contact</span>
+          reporting && <span>{syncedText(f.devices)}</span>
         )}
         {f.devices.length > 0 && (
           <button type="button" className="link" aria-expanded={open} aria-controls={listId} onClick={() => setOpen((v) => !v)}>

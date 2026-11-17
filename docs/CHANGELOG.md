@@ -7,6 +7,13 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-17: Dashboard and client-link improvements
+- **Area coverage (#131):** each planting year is a collapsible section, newest first and open, with its sectors, hectares and trees in the header. "Expand all years" opens them all. Works with the keyboard and on phones; printing shows every year.
+- **Executive overview moved to client links (#132):** it is now a tab on each client link, beside Overview, Trees and Areas, with the same filters. Rows open the matching trees on that link. The main app's "Executive overview" tab is gone, and `/overview` goes to the home page. Executive accounts still see it as their home page.
+- **Trees by species (#134):** each species shows its share of the trees in the chart, to one decimal place, on the dashboard, client links and executive overview. The table adds a Share column and a total row.
+- **Open conflicts card (#135):** the number and "Review conflicts →" open the Conflicts page.
+- **Sync status (#136):** when no phone has unsent records, the banner says "All field devices reported successfully synchronised at their last connection." It only says this when every listed device has reported its status. Otherwise it says how many devices haven't reported (older app).
+
 ## 2026-11-13: 2025 sectors, KML upload, offline field map, executive overview (migrations 022–023)
 - **2025 areas (migration 022):** 26 sectors and 239 sub-sectors from SEPLAT_EHOR_2025_Sectors_and_Subsectors_FULL.kml.
   - Sectors 1–18 (portions A and D) are surveyed. Sectors 19–26 (portions B and C) have approximate GPS: a computed planning grid whose pegs are still to be set.
