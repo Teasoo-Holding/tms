@@ -182,9 +182,10 @@ export class ReportsService {
     );
 
     const statusBy = (dim: string, join: string, groupBy: string) =>
-      q(`SELECT ${dim}, COALESCE(st.code, 'UNKNOWN') AS code, COALESCE(st.name, 'No status yet') AS status_name, count(*)::int AS count
+      q(`SELECT ${dim}, COALESCE(st.code, 'UNKNOWN') AS code, COALESCE(st.name, 'No status yet') AS status_name,
+                COALESCE(st.is_terminal, false) AS is_terminal, count(*)::int AS count
            FROM trees t ${join} LEFT JOIN tree_statuses st ON st.id = t.current_status_id
-          WHERE ${where} GROUP BY ${groupBy}, st.code, st.name, st.sort_order ORDER BY ${groupBy}, st.sort_order NULLS LAST`);
+          WHERE ${where} GROUP BY ${groupBy}, st.code, st.name, st.is_terminal, st.sort_order ORDER BY ${groupBy}, st.sort_order NULLS LAST`);
     const [statusBySector, statusBySpecies] = await Promise.all([
       // Per sector (not per code), with its planting year (#115).
       statusBy(`s.id AS group_code, s.short_code AS sector_code, s.name AS group_name, spy.year_label`,
@@ -231,6 +232,13 @@ export class ReportsService {
          FROM trees t JOIN projects p ON p.id = t.project_id LEFT JOIN tree_statuses st ON st.id = t.current_status_id ${MAINTENANCE_JOIN}
         WHERE ${where}`,
     );
+    // Follow-up visits (not the tagging visit, not corrections) to trees in scope, in the period: the executive
+    // summary's "Monitoring visits" (#140).
+    const [visits] = await q(
+      `SELECT count(*)::int AS follow_up_visits, max(o.observed_at) AS last_visit_at
+         FROM tree_observations o JOIN trees t ON t.id = o.tree_id
+        WHERE ${baseWhere} AND NOT o.is_initial AND NOT o.is_amendment AND ${inRange('o.observed_at')}`,
+    );
     const projectIds = await this.access.projectIds(user);
     const [ops] = (
       await this.db.query(
@@ -276,6 +284,7 @@ export class ReportsService {
       sector_share: sectorShare,
       filters: { ...f },
       maintenance: { ...maintenance, due_soon_days: MAINTENANCE_DUE_SOON_DAYS },
+      visits,
       data_completeness: { ...completeness, open_conflicts: ops.open_conflicts, devices_not_synced_7_days: ops.devices_not_synced_7_days },
       officer_activity: officers,
       notes: [

@@ -9,7 +9,7 @@ import { TeasooLink, TeasooLogo } from '../components/Brand';
 import { DensityReport, DensityView, hasOutlines } from '../components/DensityMap';
 import { ShareArea } from '../components/ShareMap';
 import { SpeciesCard } from '../components/SpeciesCard';
-import { ExecutiveOverviewView } from './ExecutiveDashboard';
+import { ExecutiveSummary } from '../components/ExecutiveSummary';
 import { PhotoSource, PhotoSourceProvider } from '../components/Photos';
 import { ErrorNotice, fmtDate, fmtDateTime, fmtNum, relativeTime, SimpleTable, statusColor } from '../components/ui';
 import { ShareAreas } from './ShareAreas';
@@ -103,15 +103,17 @@ export function SharePage() {
         </div>
         <div className="share-body">
           <nav className="share-nav no-print" aria-label="Sections">
-            <NavLink to={ctx.root} end className={navClass}>Overview</NavLink>
-            <NavLink to={`${ctx.root}/executive`} className={navClass}>Executive overview</NavLink>
-            <NavLink to={`${ctx.root}/trees`} className={navClass}>Trees</NavLink>
-            <NavLink to={`${ctx.root}/areas`} className={navClass}>Areas</NavLink>
+            <NavLink to={ctx.root} end className={navClass}>Summary</NavLink>
+            <NavLink to={`${ctx.root}/trees`} className={navClass}>Tree list</NavLink>
+            <NavLink to={`${ctx.root}/areas`} className={navClass}>Areas &amp; map</NavLink>
+            <NavLink to={`${ctx.root}/report`} className={navClass}>Full report</NavLink>
           </nav>
           <main className="share-main">
             <Routes>
-              <Route index element={<ShareOverview {...ctx} />} />
-              <Route path="executive" element={<ShareExecutive {...ctx} />} />
+              <Route index element={<ShareSummary {...ctx} />} />
+              <Route path="report" element={<ShareOverview {...ctx} />} />
+              {/* The executive overview became the Summary (#140). */}
+              <Route path="executive" element={<Navigate to={ctx.root} replace />} />
               <Route path="trees" element={<ShareTrees {...ctx} />} />
               <Route path="trees/:treeId" element={<ShareTree {...ctx} />} />
               <Route path="areas" element={<ShareAreas {...ctx} />} />
@@ -126,7 +128,7 @@ export function SharePage() {
 }
 
 /** The client link's filters, kept in the address so a filtered view can be shared or reloaded. */
-function useShareFilters() {
+function useShareFilters(keys: readonly string[] = FILTER_KEYS) {
   const [params, setParams] = useSearchParams();
   const get = (k: string) => params.get(k) ?? '';
   const set = (k: string, v: string) => {
@@ -136,13 +138,13 @@ function useShareFilters() {
     (DEPENDENTS[k] ?? []).forEach((d) => next.delete(d));
     setParams(next, { replace: true });
   };
-  const values = Object.fromEntries(FILTER_KEYS.map((k) => [k, get(k)]));
+  const values = Object.fromEntries(keys.map((k) => [k, get(k)]));
   return {
     get,
     set,
     values,
     filter: qs(values),
-    activeCount: FILTER_KEYS.filter((k) => get(k)).length,
+    activeCount: keys.filter((k) => get(k)).length,
     clear: () => setParams(new URLSearchParams(), { replace: true }),
   };
 }
@@ -194,34 +196,66 @@ function ShareFilterPanel({ d, f }: { d: any; f: ShareFilters }) {
   );
 }
 
+const SUMMARY_KEYS = ['planting_year_id', 'sector_id', 'species_id'] as const;
+
 /**
- * Executive overview (#132): how much field work is done, without tree health, for the client. Moved here from the
- * main app. Same filters as the Overview; rows open the matching trees on this link.
+ * Summary (#140): the executive view, and the link's landing page. Plain-language health, sectors, map, species,
+ * heights, weekly tagging and visits, filtered by planting year, sector and species.
  */
-function ShareExecutive({ token, base, root }: ShareContext) {
-  const f = useShareFilters();
+function ShareSummary({ token, base, root, view: unfiltered }: ShareContext) {
+  const f = useShareFilters(SUMMARY_KEYS);
   const view = useQuery({ queryKey: ['share', token, f.filter], queryFn: () => publicGet(`${base}${f.filter}`), retry: (n, e) => !isMissing(e) && n < 1 });
-  const d = view.data;
+  const d = view.data ?? unfiltered;
   if (view.error) return <ErrorNotice error={view.error} />;
   if (!d) return <div className="empty">Loading…</div>;
-  // The link's tree list filters by year, sector and species (not vendor).
+  const yearId = f.get('planting_year_id');
+  const years: any[] = d.planting_years ?? [];
+  const yearsWithTrees = years.filter((y) => (unfiltered?.summary?.by_planting_year ?? d.summary.by_planting_year ?? []).some((r: any) => r.id === y.id));
+  const sectors: any[] = (d.areas ?? []).filter((a: any) => !yearId || a.planting_year_id === yearId);
+  const sectorYear = (a: any) => years.find((y) => y.id === a.planting_year_id)?.year_label;
+  const species: any[] = d.species ?? [];
   const trees = (params: Record<string, string | undefined>) =>
-    params.vendor_id !== undefined ? null : `${root}/trees${qs({ planting_year_id: f.get('planting_year_id') || undefined, sector_id: f.get('sector_id') || undefined, ...params })}`;
+    params.vendor_id !== undefined ? null : `${root}/trees${qs({ planting_year_id: yearId || undefined, sector_id: f.get('sector_id') || undefined, species_id: f.get('species_id') || undefined, ...params })}`;
+  const asOfAt = d.summary?.last_server_sync_at;
   return (
     <div className="stack">
       <div className="page-header" style={{ marginBottom: 0 }}>
         <div className="page-title">
-          <h2 style={{ margin: 0 }}>Executive overview</h2>
-          <p className="page-sub">How much field work is done. Open a row to see its trees.</p>
+          <h2 style={{ margin: 0 }}>Summary</h2>
+          {asOfAt && <p className="page-sub">Field data as of {fmtDateTime(asOfAt)}</p>}
         </div>
         <span className="spacer" />
-        <div className="page-actions no-print">
-          <button onClick={() => window.print()}>Print / Save as PDF</button>
+        <div className="page-actions no-print" role="group" aria-label="Download">
+          <a className="btn primary" href={apiUrl(`${base}/report.xlsx${f.filter}`)}>Download Excel</a>
+          <button onClick={() => window.print()}>Save as PDF</button>
         </div>
       </div>
-      <ShareFilterPanel d={d} f={f} />
+      <div className="exec-filters no-print" role="group" aria-label="Filters">
+        <div className="segmented" role="radiogroup" aria-label="Planting year">
+          {[{ id: '', year_label: 'All years' }, ...yearsWithTrees].map((y) => (
+            <button key={y.id || 'all'} type="button" role="radio" aria-checked={yearId === y.id} className={yearId === y.id ? 'active' : undefined} onClick={() => f.set('planting_year_id', y.id)}>
+              {y.year_label}
+            </button>
+          ))}
+        </div>
+        <label className="exec-filter">
+          <span>Sector</span>
+          <select value={f.get('sector_id')} onChange={(e) => f.set('sector_id', e.target.value)}>
+            <option value="">All sectors</option>
+            {sectors.map((a) => <option key={a.id} value={a.id}>{sectorLabel(a)}{!yearId && sectorYear(a) ? ` (${sectorYear(a)})` : ''}</option>)}
+          </select>
+        </label>
+        <label className="exec-filter">
+          <span>Species</span>
+          <select value={f.get('species_id')} onChange={(e) => f.set('species_id', e.target.value)}>
+            <option value="">All species</option>
+            {species.map((sp) => <option key={sp.id} value={sp.id}>{sp.common_name ?? sp.scientific_name}</option>)}
+          </select>
+        </label>
+        {f.activeCount > 0 && <button type="button" className="link" onClick={f.clear}>Clear filters</button>}
+      </div>
       <div className={view.isFetching ? 'refetching' : undefined}>
-        <ExecutiveOverviewView s={d.summary} trees={trees} />
+        <ExecutiveSummary s={d.summary} areas={(d.areas ?? []).filter((a: any) => !yearId || a.planting_year_id === yearId)} years={years} trees={trees} />
       </div>
     </div>
   );
@@ -279,7 +313,7 @@ function ShareOverview({ token, base }: ShareContext) {
     <div className="stack">
       <div className="page-header" style={{ marginBottom: 0 }}>
         <div className="page-title">
-          <h2 style={{ margin: 0 }}>Overview</h2>
+          <h2 style={{ margin: 0 }}>Full report</h2>
         </div>
         <span className="spacer" />
         <div className="page-actions no-print" role="group" aria-label="Download the report">
