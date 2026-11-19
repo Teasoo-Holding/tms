@@ -7,6 +7,18 @@ For what the system does, and a step-by-step test script, see
 [TMS-Overview-and-Test-Script.pdf](TMS-Overview-and-Test-Script.pdf). The source is the HTML file next to it;
 print it to PDF again after changing it.
 
+## 2026-11-19: Executive summary (#140)
+- **Client links open on a new Summary**, written for executives and sponsors in plain language. It covers:
+  - tree health at the last visit: % living, with tagged, alive, transplant shock (or any other "alive but stressed" status) and dead, and where the dead trees are;
+  - trees by sector per planting year, and a map of the sub-sectors that hold trees;
+  - the species mix with % living, and the average height per species by month;
+  - trees tagged each week, and monitoring visits (follow-ups, overdue, due soon);
+  - "How to read these numbers".
+- It filters by planting year, sector and species, and offers Download Excel and Save as PDF.
+- The link's tabs are now Summary, Tree list, Areas & map and Full report (the previous detailed overview).
+- Executive accounts see the same Summary as their home page.
+- **Report API:** the summary adds `visits.follow_up_visits`, and the status-by-sector and status-by-species rows include `is_terminal`.
+
 ## 2026-11-17: Dashboard and client-link improvements
 - **Area coverage (#131):** each planting year is a collapsible section, newest first and open, with its sectors, hectares and trees in the header. "Expand all years" opens them all. Works with the keyboard and on phones; printing shows every year.
 - **Executive overview moved to client links (#132):** it is now a tab on each client link, beside Overview, Trees and Areas, with the same filters. Rows open the matching trees on that link. The main app's "Executive overview" tab is gone, and `/overview` goes to the home page. Executive accounts still see it as their home page.

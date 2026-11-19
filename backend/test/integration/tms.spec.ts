@@ -463,6 +463,15 @@ describe('custom fields, tree height and attribution', () => {
     expect(s.activity_by_week).toHaveLength(12);
     expect(s.status_by_sector.length).toBeGreaterThan(0);
     expect(s.status_by_species.length).toBeGreaterThan(0);
+    // The executive summary (#140): which statuses mean dead, and how many follow-up visits there were.
+    expect(s.status_by_sector.every((r: any) => typeof r.is_terminal === 'boolean')).toBe(true);
+    const [{ n }] = await sql(
+      `SELECT count(*)::int AS n FROM tree_observations o JOIN trees t ON t.id = o.tree_id
+        WHERE t.project_id = $1 AND t.record_state = 'ACTIVE' AND NOT o.is_initial AND NOT o.is_amendment`,
+      [f.projectId],
+    );
+    expect(n).toBeGreaterThan(0);
+    expect(s.visits.follow_up_visits).toBe(n);
   });
 });
 

@@ -1,78 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
 import { api, qs } from '../api/client';
-import { ChartCard, GroupedColumns, HBarChart, Legend, SERIES, StatTile } from '../charts/charts';
+import { ExecutiveSummary } from '../components/ExecutiveSummary';
 import { FreshnessBanner, useFreshness } from '../components/Freshness';
 import { FiltersButton, ReportFilters, useReportFilters } from '../components/ReportFilters';
-import { SpeciesCard } from '../components/SpeciesCard';
-import { ErrorNotice, fmtNum, PageHeader, SimpleTable } from '../components/ui';
-import { fmtShortDate } from '../time';
-import { useState } from 'react';
-
-const weekLabel = (w: string) => fmtShortDate(`${w}T12:00:00Z`);
+import { ErrorNotice, PageHeader } from '../components/ui';
 
 /**
- * The executive overview (#129): how much work is done, without tree health. Totals, trees by planting year, vendor
- * and species, and weekly field activity. Each row opens the matching trees; `trees` returns null where the viewer
- * can't filter by that field. Shown on client links (#132), and as the home page for executive accounts.
+ * The home page of executive accounts: the same plain-language summary clients see on their link (#140), across
+ * the projects the account can see. Rows open the matching tree records.
  */
-export function ExecutiveOverviewView({ s, trees }: { s: any; trees: (params: Record<string, string | undefined>) => string | null }) {
-  const years: any[] = (s.by_planting_year ?? []).map((r: any) => ({ ...r, count: r.original_trees + r.replacement_trees }));
-  const vendors: any[] = s.by_vendor ?? [];
-  const species: any[] = s.by_species ?? [];
-  const weeks: any[] = s.activity_by_week ?? [];
-  const weekSeries = [
-    { key: 'registrations', label: 'Trees registered', color: SERIES[0] },
-    { key: 'observations', label: 'Follow-up visits', color: SERIES[2] },
-  ];
-  const visitsTotal = weeks.reduce((n, w) => n + w.observations, 0);
-  const lastWeek = weeks[weeks.length - 1];
-  const all = trees({});
-  const list = (rows: any[], name: (r: any) => string, link: (r: any) => string | null, label: string) => (
-    <SimpleTable
-      head={[label, 'Trees']}
-      numeric={[1]}
-      rows={rows.map((r) => {
-        const to = link(r);
-        return [to ? <Link to={to}>{name(r)}</Link> : name(r), fmtNum(r.count)];
-      })}
-    />
-  );
-  return (
-    <div className="stack">
-      <div className="grid stats">
-        <StatTile label="Tree records" value={all ? <Link to={all}>{fmtNum(s.totals.planting_events)}</Link> : fmtNum(s.totals.planting_events)} foot="Registered and accepted" />
-        <StatTile label="Planting years" value={fmtNum(years.length)} />
-        <StatTile label="Vendors" value={fmtNum(vendors.filter((v) => v.id).length)} />
-        <StatTile
-          label="Follow-up visits"
-          value={fmtNum(visitsTotal)}
-          foot={lastWeek ? `${fmtNum(lastWeek.observations)} in the week of ${weekLabel(lastWeek.week)}` : undefined}
-        />
-      </div>
-      <div className="grid charts">
-        <ChartCard title="Trees by planting year" empty={years.length === 0 && 'No trees yet.'} table={list(years, (r) => r.name, (r) => trees({ planting_year_id: r.id }), 'Planting year')}>
-          <HBarChart data={years.map((r) => ({ label: r.name, value: r.count }))} />
-        </ChartCard>
-        <ChartCard title="Trees by vendor" empty={vendors.length === 0 && 'No trees yet.'} table={list(vendors, (r) => (r.short_code ? `${r.name} (${r.short_code})` : r.name), (r) => (r.id ? trees({ vendor_id: r.id }) : null), 'Vendor')}>
-          <HBarChart data={vendors.map((r) => ({ label: r.short_code ? `${r.name} (${r.short_code})` : r.name, value: r.count }))} />
-        </ChartCard>
-      </div>
-      <SpeciesCard rows={species} name={(r) => { const to = r.id ? trees({ species_id: r.id }) : null; const n = r.common_name ?? r.name; return to ? <Link to={to}>{n}</Link> : n; }} />
-      <ChartCard
-        title="Weekly field activity"
-        subtitle="Weeks run Monday to Sunday, West Africa Time (WAT). The last 12 weeks unless a date range is chosen."
-        empty={weeks.length === 0 && 'No activity in this period.'}
-        legend={<Legend items={weekSeries} />}
-        table={<SimpleTable head={['Week of', 'Trees registered', 'Follow-up visits']} numeric={[1, 2]} rows={weeks.map((w) => [weekLabel(w.week), fmtNum(w.registrations), fmtNum(w.observations)])} />}
-      >
-        <GroupedColumns categories={weeks.map((w) => w.week)} series={weekSeries} values={(c, k) => weeks.find((w) => w.week === c)?.[k] ?? 0} formatCategory={weekLabel} />
-      </ChartCard>
-    </div>
-  );
-}
-
-/** The executive overview inside the main app, for executive accounts (their home page). */
 export function ExecutiveDashboard() {
   const f = useReportFilters();
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -83,15 +20,15 @@ export function ExecutiveDashboard() {
   return (
     <div className="stack">
       <PageHeader
-        title="Project overview"
-        subtitle="How much field work is done. Open any row to see its tree records."
+        title="Project summary"
+        subtitle="How the planting is going, in plain numbers. Open any row to see its trees."
         actions={<FiltersButton count={f.count} open={filtersOpen} onToggle={() => setFiltersOpen((v) => !v)} />}
       />
       {filtersOpen && <ReportFilters f={f} onClose={() => setFiltersOpen(false)} />}
       <FreshnessBanner freshness={freshness.data} />
       <ErrorNotice error={summary.error} />
       {summary.isLoading && <div className="card empty">Loading…</div>}
-      {summary.data && <ExecutiveOverviewView s={summary.data} trees={trees} />}
+      {summary.data && <ExecutiveSummary s={summary.data} years={[]} trees={trees} />}
     </div>
   );
 }
